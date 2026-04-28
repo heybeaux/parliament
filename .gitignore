@@ -7,7 +7,12 @@ build/
 .venv/
 venv/
 .env
+.env.*
 *.egg
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+node_modules/
+*.js.map
+*.db
+*.sqlite

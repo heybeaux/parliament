@@ -1,0 +1,23 @@
+{
+  "name": "@parliament/cli",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@parliament/core": "workspace:*",
+    "commander": "^14.0.3",
+    "picocolors": "^1.1.1"
+  }
+}
