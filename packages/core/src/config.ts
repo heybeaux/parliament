@@ -7,6 +7,8 @@ import type { ModelAdapter } from './adapters/base.js';
 export interface NeurotypeConfig {
   model: string;
   system_prompt: string;
+  /** Provider override for this neurotype: 'ollama' | 'lm_studio' | 'omlx'. Inherits global default if omitted. */
+  provider?: string;
 }
 
 /** Engine-wide defaults loaded from the optional `[parliament]` table. */
@@ -130,6 +132,7 @@ function validateConfig(raw: unknown, configPath: string): ParliamentTomlConfig 
     neurotypes[role] = {
       model: entry['model'],
       system_prompt: entry['system_prompt'],
+      ...(typeof entry['provider'] === 'string' ? { provider: entry['provider'] } : {}),
     };
   }
 
@@ -213,7 +216,7 @@ export function resetConfigCache(): void {
  */
 export function buildAgentsFromConfig(
   roles: string[] | undefined,
-  adapterFactory: (model: string) => ModelAdapter,
+  adapterFactory: (model: string, provider?: string) => ModelAdapter,
   config?: ParliamentTomlConfig,
 ): AgentDefinition[] {
   const cfg = config ?? getConfig();
@@ -231,7 +234,7 @@ export function buildAgentsFromConfig(
       name: role,
       neurotype: role,
       model: neurotype.model,
-      adapter: adapterFactory(neurotype.model),
+      adapter: adapterFactory(neurotype.model, neurotype.provider),
       systemPrompt: neurotype.system_prompt,
     };
   });

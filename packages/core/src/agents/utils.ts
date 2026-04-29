@@ -4,7 +4,7 @@
  */
 export function enforceWordCap(
   text: string,
-  cap = 100,
+  cap = 200,
 ): { content: string; truncated: boolean } {
   const words = text.trim().split(/\s+/);
   if (words.length <= cap) return { content: text.trim(), truncated: false };

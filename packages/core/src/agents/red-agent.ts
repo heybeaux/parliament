@@ -4,13 +4,16 @@ import type { Agent, AgentResult } from './base.js';
 import { enforceWordCap } from './utils.js';
 
 const SYSTEM_PROMPT =
-  'You are a disruptor. Inject a challenging perspective that prevents premature consensus. Target the weakest assumption in the current debate. Stay within 100 words.';
+  'You are a disruptor. Inject a challenging perspective that prevents premature consensus. Target the weakest assumption in the current debate. Stay within 200 words.';
 
 export class RedAgent implements Agent {
   readonly role = 'RedAgent';
   readonly neurotype = 'disruptive';
+  readonly modelName: string;
 
-  constructor(private readonly adapter: ModelAdapter) {}
+  constructor(private readonly adapter: ModelAdapter) {
+    this.modelName = adapter.modelName;
+  }
 
   async generate(blackboard: Blackboard): Promise<AgentResult> {
     const recentTurns = blackboard.turns

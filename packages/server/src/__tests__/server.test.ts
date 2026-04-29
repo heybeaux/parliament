@@ -299,6 +299,7 @@ describe('GET /health', () => {
     // Override createAdapter to throw for one call
     const { createAdapter } = await import('@parliament/core');
     vi.mocked(createAdapter).mockReturnValueOnce({
+      modelName: 'test-model',
       generate: vi.fn().mockRejectedValue(new Error('connection refused')),
     });
 

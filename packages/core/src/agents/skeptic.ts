@@ -4,13 +4,16 @@ import type { Agent, AgentResult } from './base.js';
 import { enforceWordCap } from './utils.js';
 
 const SYSTEM_PROMPT =
-  'You are a rigorous critic. Identify logical leaps, unsupported assumptions, and errors in the previous response. Stay within 100 words.';
+  'You are a rigorous critic. Identify logical leaps, unsupported assumptions, and errors in the previous response. Stay within 200 words.';
 
 export class SkepticAgent implements Agent {
   readonly role = 'Skeptic';
   readonly neurotype = 'critical';
+  readonly modelName: string;
 
-  constructor(private readonly adapter: ModelAdapter) {}
+  constructor(private readonly adapter: ModelAdapter) {
+    this.modelName = adapter.modelName;
+  }
 
   async generate(blackboard: Blackboard): Promise<AgentResult> {
     const recentTurns = blackboard.turns
@@ -32,7 +35,7 @@ export class SkepticAgent implements Agent {
     // All Skeptic output is critique — always record a conflict.
     blackboard.conflicts.push({
       between: ['Skeptic', lastAgent],
-      description: result.content.slice(0, 100),
+      description: result.content,
       resolved: false,
     });
 

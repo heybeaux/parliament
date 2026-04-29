@@ -4,13 +4,16 @@ import type { Agent, AgentResult } from './base.js';
 import { enforceWordCap } from './utils.js';
 
 const SYSTEM_PROMPT =
-  'You are a structured reasoner. Propose a clear, well-reasoned initial response to the topic. Stay within 100 words.';
+  'You are a structured reasoner. Propose a clear, well-reasoned initial response to the topic. Stay within 200 words.';
 
 export class ProposerAgent implements Agent {
   readonly role = 'Proposer';
   readonly neurotype = 'structured';
+  readonly modelName: string;
 
-  constructor(private readonly adapter: ModelAdapter) {}
+  constructor(private readonly adapter: ModelAdapter) {
+    this.modelName = adapter.modelName;
+  }
 
   async generate(blackboard: Blackboard): Promise<AgentResult> {
     const recentTurns = blackboard.turns

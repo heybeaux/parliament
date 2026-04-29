@@ -8,5 +8,6 @@ export interface AgentResult {
 export interface Agent {
   role: string;
   neurotype: string;
+  readonly modelName: string;
   generate(blackboard: Blackboard): Promise<AgentResult>;
 }

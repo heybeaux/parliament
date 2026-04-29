@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { Database } from 'better-sqlite3';
@@ -15,7 +17,7 @@ import {
   DEFAULT_PARLIAMENT_DEFAULTS,
 } from '@parliament/core';
 import type { DeliberationConfig } from '@parliament/core';
-import { saveDeliberation, getDeliberation } from './db.js';
+import { saveDeliberation, getDeliberation, listDeliberations } from './db.js';
 
 // ---------------------------------------------------------------------------
 // Zod schemas
@@ -47,7 +49,7 @@ function buildAgents(): DeliberationConfig['agents'] {
   const config = loadConfig();
   const agentDefs = buildAgentsFromConfig(
     ['proposer', 'skeptic', 'synthesizer', 'redAgent', 'sentry'],
-    (model) => createAdapter(model),
+    (model, provider) => createAdapter(model, provider),
     config,
   );
 
@@ -76,6 +78,19 @@ export function createRouter(db: Database): Hono {
   const app = new Hono();
 
   // -------------------------------------------------------------------------
+  // CORS — permissive for local dashboard development.
+  // -------------------------------------------------------------------------
+  app.use('*', async (c, next) => {
+    c.header('Access-Control-Allow-Origin', '*');
+    c.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    c.header('Access-Control-Allow-Headers', 'Content-Type');
+    if (c.req.method === 'OPTIONS') {
+      return c.body(null, 204);
+    }
+    await next();
+  });
+
+  // -------------------------------------------------------------------------
   // GET /health
   // -------------------------------------------------------------------------
   app.get('/health', async (c) => {
@@ -83,6 +98,27 @@ export function createRouter(db: Database): Hono {
     const roles = ['proposer', 'skeptic', 'synthesizer', 'redAgent', 'sentry'] as const;
 
     const modelStatuses: Record<string, 'connected' | 'unreachable'> = {};
+
+    // Collect oMLX model lists once (keyed by base URL) to avoid N round-trips.
+    const omlxModelCache = new Map<string, Set<string>>();
+
+    async function getOmlxModels(baseUrl: string, apiKey: string): Promise<Set<string>> {
+      const cached = omlxModelCache.get(baseUrl);
+      if (cached) return cached;
+      try {
+        const res = await fetch(`${baseUrl}/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(5_000),
+        });
+        if (!res.ok) return new Set();
+        const data = (await res.json()) as { data: Array<{ id: string }> };
+        const ids = new Set(data.data.map((m) => m.id));
+        omlxModelCache.set(baseUrl, ids);
+        return ids;
+      } catch {
+        return new Set();
+      }
+    }
 
     await Promise.all(
       roles.map(async (role) => {
@@ -92,9 +128,18 @@ export function createRouter(db: Database): Hono {
           return;
         }
 
-        const adapter = createAdapter(neurotype.model);
+        // For oMLX: check model existence via the models list (instant, no load).
+        // For Ollama/LM Studio: do a live generate probe with a short timeout.
+        if (neurotype.provider === 'omlx') {
+          const baseUrl = process.env['OMLX_BASE_URL'] ?? 'http://127.0.0.1:8000/v1';
+          const apiKey = process.env['OMLX_API_KEY'] ?? '12345678';
+          const models = await getOmlxModels(baseUrl, apiKey);
+          modelStatuses[role] = models.has(neurotype.model) ? 'connected' : 'unreachable';
+          return;
+        }
+
+        const adapter = createAdapter(neurotype.model, neurotype.provider);
         try {
-          // Lightweight connectivity probe — short response expected
           await Promise.race([
             adapter.generate('ping', 'respond with ok'),
             new Promise<never>((_, reject) =>
@@ -176,6 +221,72 @@ export function createRouter(db: Database): Hono {
     }
 
     return c.json({ id, ...result }, 200);
+  });
+
+  // -------------------------------------------------------------------------
+  // GET /deliberations — list all stored deliberation summaries (newest first).
+  // -------------------------------------------------------------------------
+  app.get('/deliberations', (c) => {
+    try {
+      const rows = listDeliberations(db);
+      return c.json({ deliberations: rows }, 200);
+    } catch (err) {
+      return c.json(
+        { error: `Database error: ${err instanceof Error ? err.message : String(err)}` },
+        500,
+      );
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // GET /transcripts — list transcript JSON files on disk.
+  // -------------------------------------------------------------------------
+  app.get('/transcripts', (c) => {
+    const dir = process.env['PARLIAMENT_TRANSCRIPTS_DIR'] ?? 'transcripts';
+    let entries: string[];
+    try {
+      entries = fs.readdirSync(dir).filter((f) => f.endsWith('.json'));
+    } catch {
+      return c.json({ transcripts: [] }, 200);
+    }
+
+    const transcripts = entries
+      .map((file) => {
+        const full = path.join(dir, file);
+        let topic = file;
+        let created_at = '';
+        try {
+          const stat = fs.statSync(full);
+          created_at = stat.mtime.toISOString();
+          const raw = fs.readFileSync(full, 'utf8');
+          const parsed = JSON.parse(raw) as { topic?: string };
+          if (parsed.topic) topic = parsed.topic;
+        } catch {
+          // ignore unreadable files
+        }
+        return { file, topic, created_at };
+      })
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+    return c.json({ transcripts }, 200);
+  });
+
+  // -------------------------------------------------------------------------
+  // GET /transcripts/:file — fetch one transcript file's contents.
+  // -------------------------------------------------------------------------
+  app.get('/transcripts/:file', (c) => {
+    const { file } = c.req.param();
+    if (!/^[a-zA-Z0-9._-]+\.json$/.test(file)) {
+      return c.json({ error: 'Invalid transcript filename' }, 400);
+    }
+    const dir = process.env['PARLIAMENT_TRANSCRIPTS_DIR'] ?? 'transcripts';
+    const full = path.join(dir, file);
+    try {
+      const raw = fs.readFileSync(full, 'utf8');
+      return c.body(raw, 200, { 'Content-Type': 'application/json' });
+    } catch {
+      return c.json({ error: `Transcript "${file}" not found` }, 404);
+    }
   });
 
   // -------------------------------------------------------------------------

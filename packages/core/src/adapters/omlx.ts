@@ -3,6 +3,7 @@ import { OpenAICompatAdapter } from './openai-compat.js';
 
 export class OMLXAdapter implements ModelAdapter {
   private readonly inner: OpenAICompatAdapter;
+  readonly modelName: string;
 
   constructor(
     model: string,
@@ -10,6 +11,7 @@ export class OMLXAdapter implements ModelAdapter {
     apiKey: string = 'local',
   ) {
     this.inner = new OpenAICompatAdapter(model, baseUrl, apiKey);
+    this.modelName = model;
   }
 
   generate(prompt: string, system?: string): Promise<string> {

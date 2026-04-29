@@ -8,10 +8,14 @@ interface OllamaChatResponse {
 }
 
 export class OllamaAdapter implements ModelAdapter {
+  readonly modelName: string;
+
   constructor(
     private readonly model: string,
     private readonly baseUrl: string = 'http://localhost:11434',
-  ) {}
+  ) {
+    this.modelName = model;
+  }
 
   async generate(prompt: string, system?: string): Promise<string> {
     const messages: Array<{ role: string; content: string }> = [];

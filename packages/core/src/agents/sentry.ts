@@ -5,64 +5,54 @@ import { jaccardSimilarity } from './utils.js';
 /** Similarity threshold above which two turns are considered an echo/collapse. */
 const COLLAPSE_THRESHOLD = 0.95;
 
+/**
+ * Minimum number of turns per role before echo detection is meaningful.
+ * Each role needs at least 2 turns in history to compare for repetition,
+ * and with 3 roles that means at least 6 total turns.
+ */
+const MIN_TURNS_FOR_ECHO_CHECK = 6;
+
 export interface SentryResult {
   signal: SentrySignal;
   reason?: string;
 }
 
-/**
- * Maps a raw model string (OK, SPECIALIST_NEEDED, COLLAPSE_DETECTED) to
- * the corresponding SentrySignal. Defaults to 'ok' if unrecognised.
- */
-function parseSignal(raw: string): SentrySignal {
-  const normalised = raw.trim().toUpperCase();
-  if (normalised.includes('SPECIALIST_NEEDED')) return 'specialist_needed';
-  if (normalised.includes('COLLAPSE_DETECTED')) return 'collapse_detected';
-  return 'ok';
-}
-
-const SYSTEM_PROMPT =
-  'You are a monitor. Check if the debate shows echo (same role agreeing with itself) or uncertainty collapse. Return ONLY one of: OK, SPECIALIST_NEEDED, COLLAPSE_DETECTED.';
-
 export class SentryAgent {
   readonly role = 'Sentry';
   readonly neurotype = 'monitoring';
+  readonly modelName: string;
 
-  constructor(private readonly adapter: ModelAdapter) {}
+  constructor(private readonly adapter: ModelAdapter) {
+    this.modelName = adapter.modelName;
+  }
 
   async generate(blackboard: Blackboard): Promise<SentryResult> {
     const turns = blackboard.turns;
 
-    // Programmatic check: if last 2 turns are from the same role and their
-    // content similarity exceeds the threshold, return collapse immediately.
-    if (turns.length >= 2) {
-      const last = turns[turns.length - 1]!;
-      const prev = turns[turns.length - 2]!;
+    // Only check for echo once each role has spoken at least twice.
+    // LLM-based classification was producing false positives, so we rely
+    // solely on the programmatic Jaccard similarity check.
+    if (turns.length < MIN_TURNS_FOR_ECHO_CHECK) {
+      return { signal: 'ok' };
+    }
 
-      if (last.agent === prev.agent) {
-        const similarity = jaccardSimilarity(last.content, prev.content);
+    // Find the previous turn from the same agent as the most recent turn
+    // and check if they're nearly identical (agent repeating itself verbatim).
+    const last = turns[turns.length - 1]!;
+    for (let i = turns.length - 2; i >= 0; i--) {
+      const candidate = turns[i]!;
+      if (candidate.agent === last.agent) {
+        const similarity = jaccardSimilarity(last.content, candidate.content);
         if (similarity > COLLAPSE_THRESHOLD) {
           return {
             signal: 'collapse_detected',
             reason: `Echo loop: ${last.agent} repeated itself with similarity ${similarity.toFixed(3)}`,
           };
         }
+        break;
       }
     }
 
-    // Fall back to model-based judgement.
-    const recentTurns = turns
-      .slice(-6)
-      .map((t) => `[${t.agent}]: ${t.content}`)
-      .join('\n\n');
-
-    const userPrompt = recentTurns.length > 0
-      ? `Topic: ${blackboard.topic}\n\nDebate so far:\n\n${recentTurns}`
-      : `Topic: ${blackboard.topic}\n\nNo turns yet.`;
-
-    const raw = await this.adapter.generate(userPrompt, SYSTEM_PROMPT);
-    const signal = parseSignal(raw);
-
-    return { signal, reason: raw.trim() };
+    return { signal: 'ok' };
   }
 }

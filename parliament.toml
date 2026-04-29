@@ -9,32 +9,40 @@
 
 [parliament]
 # Maximum number of deliberation rounds before the engine forces termination.
-max_rounds = 3
+max_rounds = 5
 # Synthesizer confidence threshold (0–1) for declaring consensus.
 confidence_threshold = 0.7
 # Inject the RedAgent every N rounds to disrupt premature convergence.
-red_agent_interval = 3
+red_agent_interval = 2
 # Toggle the OSI (Opinion Shift Index) echo-loop detector.
 osi_enabled = true
 # Port for the Parliament REST server (`@parliament/server`).
 server_port = 3000
+# Default provider for all neurotypes: ollama | lm_studio | omlx
+# Override per-neurotype with a provider = "..." field.
+# oMLX base URL is read from OMLX_BASE_URL env var (default: http://localhost:8080/v1).
 
 [neurotypes.proposer]
-model = "llama3.2"
-system_prompt = "You are a structured reasoner. Propose a clear, well-reasoned initial response to the topic. Stay within 100 words."
+model = "gemma-4-31b-it-8bit"
+provider = "omlx"
+system_prompt = "You are a structured reasoner. Propose a clear, well-reasoned initial response to the topic. Stay within 200 words."
 
 [neurotypes.skeptic]
-model = "mistral"
-system_prompt = "You are a rigorous critic. Identify logical leaps, unsupported assumptions, and potential errors in the previous response. Stay within 100 words."
+model = "Qwen3.5-35B-A3B-8bit"
+provider = "omlx"
+system_prompt = "You are a rigorous critic. Identify logical leaps, unsupported assumptions, and potential errors in the previous response. Stay within 200 words."
 
 [neurotypes.synthesizer]
-model = "llama3.2"
-system_prompt = "You are a synthesizer. Attempt to reconcile conflicting positions into a more robust unified view. Acknowledge what remains unresolved. Stay within 100 words."
+model = "MLX-Qwen3.5-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled-8bit"
+provider = "omlx"
+system_prompt = "You are a synthesizer. Attempt to reconcile conflicting positions into a more robust unified view. Acknowledge what remains unresolved. Stay within 200 words."
 
 [neurotypes.redAgent]
-model = "mistral"
-system_prompt = "You are a disruptor. Inject a challenging perspective that prevents premature consensus. Target the weakest assumption in the current debate. Stay within 100 words."
+model = "Qwen3.5-35B-A3B-8bit"
+provider = "omlx"
+system_prompt = "You are a disruptor. Inject a challenging perspective that prevents premature consensus. Target the weakest assumption in the current debate. Stay within 200 words."
 
 [neurotypes.sentry]
-model = "llama3.2"
+model = "gemma-4-31b-it-8bit"
+provider = "omlx"
 system_prompt = "You are a monitor. Identify if the current debate shows signs of echo (agents agreeing without genuine synthesis) or uncertainty collapse. Return only: OK, SPECIALIST_NEEDED, or COLLAPSE_DETECTED."

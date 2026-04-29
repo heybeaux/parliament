@@ -82,7 +82,7 @@ function recordTurn(
   blackboard.turns.push({
     agent: agent.role,
     neurotype: agent.neurotype,
-    model: '',
+    model: agent.modelName,
     content,
     timestamp: new Date().toISOString(),
   });

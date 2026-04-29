@@ -10,11 +10,15 @@ interface OpenAIChatResponse {
 }
 
 export class OpenAICompatAdapter implements ModelAdapter {
+  readonly modelName: string;
+
   constructor(
     private readonly model: string,
     private readonly baseUrl: string,
     private readonly apiKey: string = 'local',
-  ) {}
+  ) {
+    this.modelName = model;
+  }
 
   async generate(prompt: string, system?: string): Promise<string> {
     const messages: Array<{ role: string; content: string }> = [];

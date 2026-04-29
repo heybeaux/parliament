@@ -14,6 +14,7 @@ function makeAgent(role: string, neurotype: string, content: string): Agent {
   return {
     role,
     neurotype,
+    modelName: 'test-model',
     generate: vi.fn().mockResolvedValue({ content, truncated: false } satisfies AgentResult),
   };
 }
@@ -239,6 +240,7 @@ describe('DeliberationEngine', () => {
     const resolvedSkepticMock: Agent = {
       role: 'Skeptic',
       neurotype: 'critical',
+      modelName: 'test-model',
       generate: vi.fn().mockImplementation(async (board: Blackboard) => {
         board.conflicts.push({
           between: ['Skeptic', 'Proposer'],
@@ -269,6 +271,7 @@ describe('DeliberationEngine', () => {
     const unresolvedSkepticMock: Agent = {
       role: 'Skeptic',
       neurotype: 'critical',
+      modelName: 'test-model',
       generate: vi.fn().mockImplementation(async (board: Blackboard) => {
         board.conflicts.push({
           between: ['Skeptic', 'Proposer'],
@@ -300,6 +303,7 @@ describe('DeliberationEngine', () => {
     const noConflictSkeptic: Agent = {
       role: 'Skeptic',
       neurotype: 'critical',
+      modelName: 'test-model',
       generate: vi.fn().mockResolvedValue({ content: 'No conflicts today', truncated: false }),
     };
 
@@ -414,6 +418,7 @@ describe('DeliberationEngine', () => {
     const unresolvedSkeptic: Agent = {
       role: 'Skeptic',
       neurotype: 'critical',
+      modelName: 'test-model',
       generate: vi.fn().mockImplementation(async (board: Blackboard) => {
         board.conflicts.push({ between: ['Skeptic', 'Proposer'], description: 'conflict', resolved: false });
         return { content: 'critique', truncated: false };
@@ -447,6 +452,7 @@ describe('DeliberationEngine', () => {
     const mixedSkeptic: Agent = {
       role: 'Skeptic',
       neurotype: 'critical',
+      modelName: 'test-model',
       generate: vi.fn().mockImplementation(async (board: Blackboard) => {
         callCount++;
         board.conflicts.push({

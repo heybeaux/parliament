@@ -13,7 +13,7 @@ import { enforceWordCap } from '../utils.js';
 // ---------------------------------------------------------------------------
 
 function makeAdapter(response: string): ModelAdapter {
-  return { generate: vi.fn().mockResolvedValue(response) };
+  return { modelName: 'test-model', generate: vi.fn().mockResolvedValue(response) };
 }
 
 function makeBlackboard(overrides?: Partial<Blackboard>): Blackboard {

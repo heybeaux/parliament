@@ -63,6 +63,7 @@ function toScheduledTurns(agents: AgentDefinition[]): ScheduledTurn[] {
     agent: {
       role: agent.name,
       neurotype: agent.neurotype,
+      modelName: agent.model,
       generate: async () => ({ content: '', truncated: false }),
     },
     // Only include deps that are actually present in this debate's agent list.

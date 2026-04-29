@@ -59,3 +59,46 @@ export function getDeliberation(
 
   return JSON.parse(row.result_json) as DeliberationResult;
 }
+
+export interface DeliberationSummary {
+  id: string;
+  topic: string;
+  created_at: string;
+  resolved: number;
+  total_rounds: number;
+  termination_reason: string;
+}
+
+/**
+ * Lists all stored deliberations, newest first.
+ * Returns lightweight summary rows for use in dashboard listings.
+ */
+export function listDeliberations(db: Database.Database): DeliberationSummary[] {
+  const stmt = db.prepare<[], { id: string; topic: string; created_at: string; result_json: string }>(
+    `SELECT id, topic, created_at, result_json
+       FROM deliberations
+   ORDER BY created_at DESC`,
+  );
+
+  return stmt.all().map((row) => {
+    let resolved = 0;
+    let total_rounds = 0;
+    let termination_reason = 'unknown';
+    try {
+      const r = JSON.parse(row.result_json) as DeliberationResult;
+      resolved = r.resolved ? 1 : 0;
+      total_rounds = r.totalRounds;
+      termination_reason = r.terminationReason;
+    } catch {
+      // ignore malformed rows
+    }
+    return {
+      id: row.id,
+      topic: row.topic,
+      created_at: row.created_at,
+      resolved,
+      total_rounds,
+      termination_reason,
+    };
+  });
+}

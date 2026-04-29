@@ -37,6 +37,7 @@ interface RoleScripts {
 function makeAdapter(role: keyof RoleScripts, scripts: RoleScripts): ModelAdapter {
   let i = 0;
   return {
+    modelName: `test-${role}`,
     generate: vi.fn(async () => {
       const list = scripts[role];
       const value = list[Math.min(i, list.length - 1)] ?? '';

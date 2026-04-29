@@ -4,7 +4,7 @@ import type { Agent, AgentResult } from './base.js';
 import { enforceWordCap } from './utils.js';
 
 const SYSTEM_PROMPT =
-  'You are a synthesizer. Attempt to reconcile conflicting positions into a more robust unified view. Acknowledge what remains unresolved. Stay within 100 words.';
+  'You are a synthesizer. Attempt to reconcile conflicting positions into a more robust unified view. Acknowledge what remains unresolved. Stay within 200 words.';
 
 export interface SynthesizerResult extends AgentResult {
   confidence: number;
@@ -25,8 +25,11 @@ function parseConfidence(text: string): number {
 export class SynthesizerAgent implements Agent {
   readonly role = 'Synthesizer';
   readonly neurotype = 'integrative';
+  readonly modelName: string;
 
-  constructor(private readonly adapter: ModelAdapter) {}
+  constructor(private readonly adapter: ModelAdapter) {
+    this.modelName = adapter.modelName;
+  }
 
   async generate(blackboard: Blackboard): Promise<SynthesizerResult> {
     const recentTurns = blackboard.turns

@@ -1,4 +1,5 @@
 export interface ModelAdapter {
+  readonly modelName: string;
   generate(prompt: string, system?: string): Promise<string>;
 }
 

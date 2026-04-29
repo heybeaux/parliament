@@ -15,6 +15,7 @@ function makeAgent(role: string, neurotype = 'generic'): Agent {
   return {
     role,
     neurotype,
+    modelName: 'test-model',
     generate: vi.fn().mockResolvedValue({ content: `response from ${role}`, truncated: false }),
   };
 }
@@ -164,8 +165,8 @@ describe('buildBatchSchedule — single model, multiple neurotypes', () => {
     const synthesizer = makeTurn('Synthesizer', 'llama3.2', ['Proposer']);
 
     // Give them distinct neurotypes to confirm model identity is the grouping key.
-    proposer.agent = { role: 'Proposer', neurotype: 'structured', generate: vi.fn() };
-    synthesizer.agent = { role: 'Synthesizer', neurotype: 'integrative', generate: vi.fn() };
+    proposer.agent = { role: 'Proposer', neurotype: 'structured', modelName: 'llama3.2', generate: vi.fn() };
+    synthesizer.agent = { role: 'Synthesizer', neurotype: 'integrative', modelName: 'llama3.2', generate: vi.fn() };
 
     const schedule = buildBatchSchedule([proposer, synthesizer]);
 
