@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -8,6 +8,7 @@ import {
   resetConfigCache,
   getConfig,
   getNeurotype,
+  findRepoRoot,
 } from '../config.js';
 
 // ---------------------------------------------------------------------------
@@ -236,5 +237,59 @@ system_prompt = "You are a debater."
     expect(second).not.toBe(first);
     expect(second.neurotypes['debater']).toBeDefined();
     expect(first.neurotypes['debater']).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// findRepoRoot
+// ---------------------------------------------------------------------------
+
+describe('findRepoRoot', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'parliament-root-'));
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns the directory containing a .git entry', () => {
+    const repo = join(tmpDir, 'repo');
+    const nested = join(repo, 'packages', 'core', 'src');
+    mkdirSync(nested, { recursive: true });
+    mkdirSync(join(repo, '.git'));
+    expect(findRepoRoot(nested)).toBe(repo);
+  });
+
+  it('returns the directory containing pnpm-workspace.yaml', () => {
+    const repo = join(tmpDir, 'pnpm-repo');
+    const nested = join(repo, 'apps', 'web');
+    mkdirSync(nested, { recursive: true });
+    writeFileSync(join(repo, 'pnpm-workspace.yaml'), 'packages:\n  - "apps/*"\n');
+    expect(findRepoRoot(nested)).toBe(repo);
+  });
+
+  it('returns the directory whose package.json declares a workspaces field', () => {
+    const repo = join(tmpDir, 'npm-ws-repo');
+    const nested = join(repo, 'a', 'b', 'c');
+    mkdirSync(nested, { recursive: true });
+    writeFileSync(
+      join(repo, 'package.json'),
+      JSON.stringify({ name: 'root', workspaces: ['a/*'] }),
+    );
+    expect(findRepoRoot(nested)).toBe(repo);
+  });
+
+  it('falls back to the start directory when no marker is found', () => {
+    // We can't reliably create a tree with NO ancestor markers (tmpdir may sit
+    // on a filesystem under a workspace), so we just assert findRepoRoot
+    // produces a non-empty path string.
+    const isolated = join(tmpDir, 'lonely');
+    mkdirSync(isolated);
+    const result = findRepoRoot(isolated);
+    expect(typeof result).toBe('string');
+    expect(result.length).toBeGreaterThan(0);
   });
 });

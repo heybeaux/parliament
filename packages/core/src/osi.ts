@@ -63,14 +63,21 @@ export function computeOSI(turns: Turn[], role: string): number[] {
  *
  * Examines the last `windowSize` turns for each agent that appears in that
  * window.  If *all* agents in the window have a mean OSI below
- * OSI_CONVERGENCE_THRESHOLD, the debate has converged without resolution —
- * every participant is essentially repeating themselves.
+ * `threshold` (default OSI_CONVERGENCE_THRESHOLD), the debate has converged
+ * without resolution — every participant is essentially repeating themselves.
  *
  * @param turns       Full ordered turn list.
  * @param windowSize  Number of recent turns to inspect (default 3).
+ * @param threshold   Jaccard-distance threshold; agents with a mean window
+ *                    OSI below this are considered echoing.
+ *                    Default `OSI_CONVERGENCE_THRESHOLD` (0.15).
  * @returns           `true` if the window shows collective low-OSI convergence.
  */
-export function detectEchoLoop(turns: Turn[], windowSize = 3): boolean {
+export function detectEchoLoop(
+  turns: Turn[],
+  windowSize = 3,
+  threshold: number = OSI_CONVERGENCE_THRESHOLD,
+): boolean {
   if (turns.length < windowSize) return false;
 
   const window = turns.slice(-windowSize);
@@ -99,7 +106,7 @@ export function detectEchoLoop(turns: Turn[], windowSize = 3): boolean {
     if (windowScores.length === 0) continue;
 
     const mean = windowScores.reduce((a, b) => a + b, 0) / windowScores.length;
-    if (mean >= OSI_CONVERGENCE_THRESHOLD) {
+    if (mean >= threshold) {
       // At least one agent is still shifting — not a collective echo loop.
       return false;
     }

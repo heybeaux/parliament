@@ -6,6 +6,36 @@ import { enforceWordCap } from './utils.js';
 const SYSTEM_PROMPT =
   'You are a rigorous critic. Identify logical leaps, unsupported assumptions, and errors in the previous response. Stay within 200 words.';
 
+/**
+ * Lightweight markers used to detect that the Skeptic's free-form output
+ * contains an explicit, on-topic disagreement. Word-boundary matching keeps
+ * this from over-firing on substrings.
+ *
+ * (Chosen over a structured `<conflict>...</conflict>` tag because parsing
+ * a natural-language critique for explicit dissent markers requires no
+ * prompt change and stays robust when the local model ignores formatting
+ * directives — which is the common case for the small open models this
+ * project is calibrated against.)
+ */
+const DISAGREEMENT_PATTERNS: RegExp[] = [
+  /\bI\s+disagree\b/i,
+  /\bI\s+object\b/i,
+  /\bdisagree(?:s|ment)?\b/i,
+  /\bobject(?:ion|ions)?\b/i,
+  /\bhowever\b/i,
+  /\bcontradict(?:s|ion|ory)?\b/i,
+  /\bunsupported\b/i,
+  /\bflaw(?:ed|s)?\b/i,
+  /\bincorrect\b/i,
+  /\bfalse\b/i,
+  /\bbut\s+(?:this|that|the\s+claim|the\s+argument)\b/i,
+];
+
+/** Returns true iff `text` contains explicit disagreement language. */
+export function containsDisagreement(text: string): boolean {
+  return DISAGREEMENT_PATTERNS.some((pattern) => pattern.test(text));
+}
+
 export class SkepticAgent implements Agent {
   readonly role = 'Skeptic';
   readonly neurotype = 'critical';
@@ -28,16 +58,20 @@ export class SkepticAgent implements Agent {
     const raw = await this.adapter.generate(userPrompt, SYSTEM_PROMPT);
     const result = enforceWordCap(raw);
 
-    // Determine the last speaking agent for the conflict record.
-    const lastTurn = blackboard.turns[blackboard.turns.length - 1];
-    const lastAgent = lastTurn?.agent ?? 'Unknown';
+    // Only record a conflict when the Skeptic actually disagreed. Prior
+    // behaviour pushed a conflict every turn unconditionally, which made
+    // residueScore a function of round count rather than substantive
+    // disagreement.
+    if (containsDisagreement(result.content)) {
+      const lastTurn = blackboard.turns[blackboard.turns.length - 1];
+      const lastAgent = lastTurn?.agent ?? 'Unknown';
 
-    // All Skeptic output is critique — always record a conflict.
-    blackboard.conflicts.push({
-      between: ['Skeptic', lastAgent],
-      description: result.content,
-      resolved: false,
-    });
+      blackboard.conflicts.push({
+        between: ['Skeptic', lastAgent],
+        description: result.content,
+        resolved: false,
+      });
+    }
 
     return result;
   }
