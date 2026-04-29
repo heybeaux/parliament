@@ -88,6 +88,7 @@ function recordTurn(
   blackboard: Blackboard,
   agent: Agent | SentryAgent | SynthesizerAgent,
   content: string,
+  round: number,
   meta?: SynthesizerMeta,
 ): void {
   const turn: Turn = {
@@ -96,6 +97,7 @@ function recordTurn(
     model: agent.modelName,
     content,
     timestamp: new Date().toISOString(),
+    round,
   };
   if (meta !== undefined) {
     turn.meta = meta;
@@ -145,6 +147,8 @@ export class DeliberationEngine {
     // Read agent references without mutating config.
     const { proposer, skeptic, synthesizer, redAgent, sentry } = config.agents;
 
+    const startedAt = new Date().toISOString();
+
     const blackboard: Blackboard = {
       topic,
       turns: [],
@@ -164,7 +168,7 @@ export class DeliberationEngine {
       // ------------------------------------------------------------------ //
       if (round === 1) {
         const proposerResult = await proposer.generate(blackboard);
-        recordTurn(blackboard, proposer, proposerResult.content);
+        recordTurn(blackboard, proposer, proposerResult.content, round);
       }
 
       // ------------------------------------------------------------------ //
@@ -173,7 +177,7 @@ export class DeliberationEngine {
       //  call generate to drive that side-effect and record the turn.)
       // ------------------------------------------------------------------ //
       const skepticResult = await skeptic.generate(blackboard);
-      recordTurn(blackboard, skeptic, skepticResult.content);
+      recordTurn(blackboard, skeptic, skepticResult.content, round);
 
       // ------------------------------------------------------------------ //
       // Step 3: Sentry check — terminate on collapse_detected
@@ -189,7 +193,7 @@ export class DeliberationEngine {
       // consensus AND its calibrated confidence clears the threshold.
       // ------------------------------------------------------------------ //
       const synthResult = await synthesizer.generate(blackboard);
-      recordTurn(blackboard, synthesizer, synthResult.content, synthResult.meta);
+      recordTurn(blackboard, synthesizer, synthResult.content, round, synthResult.meta);
 
       if (shouldTerminateOnConsensus(synthResult, confidenceThreshold)) {
         synthesis = synthResult.content;
@@ -211,7 +215,7 @@ export class DeliberationEngine {
       // ------------------------------------------------------------------ //
       if (round % redAgentInterval === 0) {
         const redResult = await redAgent.generate(blackboard);
-        recordTurn(blackboard, redAgent, redResult.content);
+        recordTurn(blackboard, redAgent, redResult.content, round);
       }
     }
 
@@ -227,6 +231,8 @@ export class DeliberationEngine {
         ? buildSplitSummary(blackboard.turns, residueScore)
         : null;
 
+    const completedAt = new Date().toISOString();
+
     return {
       topic,
       turns: blackboard.turns,
@@ -237,6 +243,8 @@ export class DeliberationEngine {
       split,
       terminationReason,
       totalRounds,
+      started_at: startedAt,
+      completed_at: completedAt,
     };
   }
 }

@@ -16,6 +16,7 @@ vi.mock('@parliament/core', async (importOriginal) => {
         model: 'mock-model',
         content: 'initial proposal',
         timestamp: '2026-01-01T00:00:00.000Z',
+        round: 1,
       },
     ],
     conflicts: [],
@@ -25,6 +26,8 @@ vi.mock('@parliament/core', async (importOriginal) => {
     split: null,
     terminationReason: 'consensus',
     totalRounds: 1,
+    started_at: '2026-01-01T00:00:00.000Z',
+    completed_at: '2026-01-01T00:00:30.000Z',
   };
 
   const MockDeliberationEngine = vi.fn().mockImplementation(() => ({
@@ -117,6 +120,7 @@ const MOCK_RESULT: DeliberationResult = {
       model: 'mock-model',
       content: 'initial proposal',
       timestamp: '2026-01-01T00:00:00.000Z',
+      round: 1,
     },
   ],
   conflicts: [],
@@ -126,6 +130,8 @@ const MOCK_RESULT: DeliberationResult = {
   split: null,
   terminationReason: 'consensus',
   totalRounds: 1,
+  started_at: '2026-01-01T00:00:00.000Z',
+  completed_at: '2026-01-01T00:00:30.000Z',
 };
 
 // ---------------------------------------------------------------------------

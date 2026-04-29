@@ -134,6 +134,7 @@ export async function runDebate(options: DebateOptions): Promise<DebateResult> {
         model: agent.model,
         content,
         timestamp: new Date().toISOString(),
+        round: round + 1,
         // osi_score is left undefined until a scoring pass is implemented.
       };
 

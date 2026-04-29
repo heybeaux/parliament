@@ -302,6 +302,7 @@ describe('REST API end-to-end (real engine + in-memory SQLite)', () => {
           model: 'mock',
           content: 'stored content',
           timestamp: '2026-01-01T00:00:00.000Z',
+          round: 1,
         },
       ],
       conflicts: [],
@@ -311,6 +312,8 @@ describe('REST API end-to-end (real engine + in-memory SQLite)', () => {
       split: null,
       terminationReason: 'consensus',
       totalRounds: 1,
+      started_at: '2026-01-01T00:00:00.000Z',
+      completed_at: '2026-01-01T00:00:30.000Z',
     });
 
     const res = await app.request(`/deliberate/${id}`);

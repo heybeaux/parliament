@@ -117,6 +117,7 @@ describe('formatTurnHeader', () => {
     model: 'llama3.2',
     content: 'content',
     timestamp: new Date().toISOString(),
+    round: 1,
     ...overrides,
   });
 
@@ -167,6 +168,7 @@ describe('printTurn', () => {
       model: 'mistral',
       content: 'I disagree.',
       timestamp: new Date().toISOString(),
+      round: 1,
     };
     printTurn(turn);
     expect(output).toContain('[Skeptic | critical | mistral]');

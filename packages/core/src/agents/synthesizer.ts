@@ -1,7 +1,7 @@
 import type { ModelAdapter } from '../adapters/base.js';
 import type { Blackboard, SynthesizerMeta } from '../types.js';
 import type { Agent, AgentResult } from './base.js';
-import { enforceWordCap } from './utils.js';
+import { buildPromptHeader, enforceWordCap } from './utils.js';
 
 const SYSTEM_PROMPT = [
   'You are a synthesizer. Attempt to reconcile conflicting positions into a more robust',
@@ -15,7 +15,7 @@ const SYSTEM_PROMPT = [
   ' "unresolved": ["<short bullet, max 10 words>", ...]}',
   '',
   'Field semantics:',
-  '- summary: a single paragraph reconciling the debate so far.',
+  '- summary: a single paragraph reconciling the debate so far. Plain prose only — no markdown.',
   '- confidence: your calibrated certainty in the synthesis, 0.0 (no confidence) to 1.0 (fully confident).',
   '- consensus: true ONLY if you judge the debate has genuinely resolved into a unified view; false otherwise.',
   '  Do not set true just because confidence is high.',
@@ -170,7 +170,7 @@ export class SynthesizerAgent implements Agent {
       .map((c) => `- ${c.between.join(' vs ')}: ${c.description}`)
       .join('\n');
 
-    let userPrompt = `Topic: ${blackboard.topic}`;
+    let userPrompt = buildPromptHeader(blackboard.topic);
     if (recentTurns.length > 0) {
       userPrompt += `\n\nDiscussion:\n\n${recentTurns}`;
     }

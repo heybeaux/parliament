@@ -6,7 +6,7 @@ import { SkepticAgent } from '../skeptic.js';
 import { SynthesizerAgent } from '../synthesizer.js';
 import { RedAgent } from '../red-agent.js';
 import { SentryAgent } from '../sentry.js';
-import { enforceWordCap } from '../utils.js';
+import { buildPromptHeader, enforceWordCap } from '../utils.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -30,6 +30,31 @@ function makeBlackboard(overrides?: Partial<Blackboard>): Blackboard {
 function nWords(n: number): string {
   return Array.from({ length: n }, (_, i) => `word${i}`).join(' ');
 }
+
+// ---------------------------------------------------------------------------
+// buildPromptHeader utility
+// ---------------------------------------------------------------------------
+
+describe('buildPromptHeader', () => {
+  it('includes today\'s date in YYYY-MM-DD form', () => {
+    const today = new Date().toISOString().slice(0, 10);
+    expect(buildPromptHeader('any topic')).toContain(`Current date: ${today}`);
+  });
+
+  it('names every non-sentry cast member so the model treats them as real participants', () => {
+    const header = buildPromptHeader('any topic');
+    expect(header).toContain('Proposer');
+    expect(header).toContain('Skeptic');
+    expect(header).toContain('Synthesizer');
+    expect(header).toContain('RedAgent');
+  });
+
+  it('embeds the topic verbatim', () => {
+    expect(buildPromptHeader('Should AI be regulated?')).toContain(
+      'Topic: Should AI be regulated?',
+    );
+  });
+});
 
 // ---------------------------------------------------------------------------
 // enforceWordCap utility
@@ -103,7 +128,7 @@ describe('ProposerAgent', () => {
   it('includes recent turns in the user prompt', async () => {
     const agent = new ProposerAgent(adapter);
     const board = makeBlackboard({
-      turns: [{ agent: 'Skeptic', neurotype: 'critical', model: 'test', content: 'I doubt this.', timestamp: '' }],
+      turns: [{ agent: 'Skeptic', neurotype: 'critical', model: 'test', content: 'I doubt this.', timestamp: '', round: 1 }],
     });
     await agent.generate(board);
 
@@ -143,7 +168,7 @@ describe('SkepticAgent', () => {
   it('happy path: returns AgentResult', async () => {
     const agent = new SkepticAgent(adapter);
     const board = makeBlackboard({
-      turns: [{ agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'Regulation is good.', timestamp: '' }],
+      turns: [{ agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'Regulation is good.', timestamp: '', round: 1 }],
     });
     const result = await agent.generate(board);
 
@@ -154,7 +179,7 @@ describe('SkepticAgent', () => {
   it('appends a Conflict to blackboard.conflicts', async () => {
     const agent = new SkepticAgent(adapter);
     const board = makeBlackboard({
-      turns: [{ agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'Regulation is good.', timestamp: '' }],
+      turns: [{ agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'Regulation is good.', timestamp: '', round: 1 }],
     });
 
     expect(board.conflicts).toHaveLength(0);
@@ -165,7 +190,7 @@ describe('SkepticAgent', () => {
   it('conflict.between includes Skeptic and the last turn agent', async () => {
     const agent = new SkepticAgent(adapter);
     const board = makeBlackboard({
-      turns: [{ agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'Regulation is good.', timestamp: '' }],
+      turns: [{ agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'Regulation is good.', timestamp: '', round: 1 }],
     });
     await agent.generate(board);
 
@@ -178,7 +203,7 @@ describe('SkepticAgent', () => {
   it('conflict.description is at most 100 chars', async () => {
     const agent = new SkepticAgent(adapter);
     const board = makeBlackboard({
-      turns: [{ agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'Regulation is good.', timestamp: '' }],
+      turns: [{ agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'Regulation is good.', timestamp: '', round: 1 }],
     });
     await agent.generate(board);
 
@@ -198,7 +223,7 @@ describe('SkepticAgent', () => {
     const longResponse = nWords(250);
     const agent = new SkepticAgent(makeAdapter(longResponse));
     const board = makeBlackboard({
-      turns: [{ agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'Regulation is good.', timestamp: '' }],
+      turns: [{ agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'Regulation is good.', timestamp: '', round: 1 }],
     });
     const result = await agent.generate(board);
 
@@ -210,7 +235,7 @@ describe('SkepticAgent', () => {
     const agreeAdapter = makeAdapter('That seems reasonable. The point about safety is well-founded.');
     const agent = new SkepticAgent(agreeAdapter);
     const board = makeBlackboard({
-      turns: [{ agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'Regulation is good.', timestamp: '' }],
+      turns: [{ agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'Regulation is good.', timestamp: '', round: 1 }],
     });
     await agent.generate(board);
 
@@ -221,7 +246,7 @@ describe('SkepticAgent', () => {
     const disagreeAdapter = makeAdapter('I disagree. The premise is unsupported and ignores counter-evidence.');
     const agent = new SkepticAgent(disagreeAdapter);
     const board = makeBlackboard({
-      turns: [{ agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'Regulation is good.', timestamp: '' }],
+      turns: [{ agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'Regulation is good.', timestamp: '', round: 1 }],
     });
     await agent.generate(board);
 
@@ -493,9 +518,9 @@ describe('SentryAgent', () => {
     const board = makeBlackboard({
       turns: [
         // Proposer turns — high mutual word overlap, gentle reordering only.
-        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'regulation safety accountability oversight transparency', timestamp: '' },
-        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'regulation safety accountability oversight transparency', timestamp: '' },
-        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'regulation safety accountability oversight transparency', timestamp: '' },
+        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'regulation safety accountability oversight transparency', timestamp: '', round: 1 },
+        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'regulation safety accountability oversight transparency', timestamp: '', round: 1 },
+        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'regulation safety accountability oversight transparency', timestamp: '', round: 1 },
       ],
     });
     const result = await agent.generate(board);
@@ -511,9 +536,9 @@ describe('SentryAgent', () => {
     });
     const board = makeBlackboard({
       turns: [
-        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'apples bananas cherries dates elderberries', timestamp: '' },
-        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'figs grapes honeydew imbe jackfruit', timestamp: '' },
-        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'kiwi lemon mango nectarine olive', timestamp: '' },
+        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'apples bananas cherries dates elderberries', timestamp: '', round: 1 },
+        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'figs grapes honeydew imbe jackfruit', timestamp: '', round: 1 },
+        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'kiwi lemon mango nectarine olive', timestamp: '', round: 1 },
       ],
     });
     const result = await agent.generate(board);
@@ -527,12 +552,12 @@ describe('SentryAgent', () => {
     const board = makeBlackboard({
       turns: [
         // 6 turns minimum required by the legacy MIN_TURNS_FOR_ECHO_CHECK.
-        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'alpha beta gamma delta', timestamp: '' },
-        { agent: 'Skeptic', neurotype: 'critical', model: 'test', content: 'one two three four', timestamp: '' },
-        { agent: 'Synthesizer', neurotype: 'integrative', model: 'test', content: 'foo bar baz qux', timestamp: '' },
-        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'alpha beta gamma epsilon', timestamp: '' },
-        { agent: 'Skeptic', neurotype: 'critical', model: 'test', content: 'one two three five', timestamp: '' },
-        { agent: 'Synthesizer', neurotype: 'integrative', model: 'test', content: 'foo bar baz quux', timestamp: '' },
+        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'alpha beta gamma delta', timestamp: '', round: 1 },
+        { agent: 'Skeptic', neurotype: 'critical', model: 'test', content: 'one two three four', timestamp: '', round: 1 },
+        { agent: 'Synthesizer', neurotype: 'integrative', model: 'test', content: 'foo bar baz qux', timestamp: '', round: 1 },
+        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'alpha beta gamma epsilon', timestamp: '', round: 1 },
+        { agent: 'Skeptic', neurotype: 'critical', model: 'test', content: 'one two three five', timestamp: '', round: 1 },
+        { agent: 'Synthesizer', neurotype: 'integrative', model: 'test', content: 'foo bar baz quux', timestamp: '', round: 1 },
       ],
     });
     const result = await agent.generate(board);
@@ -546,12 +571,12 @@ describe('SentryAgent', () => {
     const repeated = 'identical content one two three four five six seven eight';
     const board = makeBlackboard({
       turns: [
-        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: repeated, timestamp: '' },
-        { agent: 'Skeptic', neurotype: 'critical', model: 'test', content: 'a b c d', timestamp: '' },
-        { agent: 'Synthesizer', neurotype: 'integrative', model: 'test', content: 'e f g h', timestamp: '' },
-        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: repeated, timestamp: '' },
-        { agent: 'Skeptic', neurotype: 'critical', model: 'test', content: 'i j k l', timestamp: '' },
-        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: repeated, timestamp: '' },
+        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: repeated, timestamp: '', round: 1 },
+        { agent: 'Skeptic', neurotype: 'critical', model: 'test', content: 'a b c d', timestamp: '', round: 1 },
+        { agent: 'Synthesizer', neurotype: 'integrative', model: 'test', content: 'e f g h', timestamp: '', round: 1 },
+        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: repeated, timestamp: '', round: 1 },
+        { agent: 'Skeptic', neurotype: 'critical', model: 'test', content: 'i j k l', timestamp: '', round: 1 },
+        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: repeated, timestamp: '', round: 1 },
       ],
     });
     const result = await agent.generate(board);

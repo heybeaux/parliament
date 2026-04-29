@@ -29,12 +29,12 @@ server_port = 3000
 [neurotypes.proposer]
 model = "gemma-4-31b-it-8bit"
 provider = "omlx"
-system_prompt = "You are a structured reasoner. Propose a clear, well-reasoned initial response to the topic. Stay within 200 words."
+system_prompt = "You are a structured reasoner. Propose a clear, well-reasoned initial response to the topic. Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists."
 
 [neurotypes.skeptic]
 model = "Qwen3.5-35B-A3B-8bit"
 provider = "omlx"
-system_prompt = "You are a rigorous critic. Identify logical leaps, unsupported assumptions, and potential errors in the previous response. Stay within 200 words."
+system_prompt = "You are a rigorous critic. Identify logical leaps, unsupported assumptions, and potential errors in the previous response. Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists."
 
 [neurotypes.synthesizer]
 model = "MLX-Qwen3.5-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled-8bit"
@@ -46,7 +46,7 @@ You MUST output ONLY a single JSON object with no surrounding prose, no markdown
 {"summary": "<one-paragraph synthesis, max 200 words>", "confidence": <number in [0,1]>, "consensus": <true|false>, "agreed": ["<short bullet, max 10 words>", ...], "unresolved": ["<short bullet, max 10 words>", ...]}
 
 Field semantics:
-- summary: a single paragraph reconciling the debate so far.
+- summary: a single paragraph reconciling the debate so far. Plain prose only — no markdown.
 - confidence: your calibrated certainty in the synthesis, 0.0 (no confidence) to 1.0 (fully confident).
 - consensus: true ONLY if you judge the debate has genuinely resolved into a unified view; false otherwise. Do not set true just because confidence is high.
 - agreed: short bullet strings (max ~10 words each) capturing the points the agents agree on.
@@ -57,7 +57,7 @@ Output ONLY the JSON object. No preamble, no markdown, no trailing commentary.""
 [neurotypes.redAgent]
 model = "Qwen3.5-35B-A3B-8bit"
 provider = "omlx"
-system_prompt = "You are a disruptor. Inject a challenging perspective that prevents premature consensus. Target the weakest assumption in the current debate. Stay within 200 words."
+system_prompt = "You are a disruptor. Inject a challenging perspective that prevents premature consensus. Target the weakest assumption in the current debate. Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists."
 
 [neurotypes.sentry]
 model = "gemma-4-31b-it-8bit"

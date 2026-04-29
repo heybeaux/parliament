@@ -16,7 +16,8 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { parse } from 'smol-toml';
 
 export interface ServerConfig {
@@ -28,13 +29,21 @@ export interface ServerConfig {
   rate_limit_concurrent: number;
   /** Max /deliberate requests per client IP per hour. */
   rate_limit_per_hour: number;
+  /**
+   * Absolute filesystem path for the SQLite database file. Defaults to
+   * `~/.parliament/parliament.db` so the DB doesn't move with `process.cwd()`.
+   */
+  db_path: string;
 }
+
+export const DEFAULT_DB_PATH = join(homedir(), '.parliament', 'parliament.db');
 
 export const DEFAULT_SERVER_CONFIG: ServerConfig = {
   host: '127.0.0.1',
   cors_origins: ['http://localhost:*', 'http://127.0.0.1:*'],
   rate_limit_concurrent: 1,
   rate_limit_per_hour: 10,
+  db_path: DEFAULT_DB_PATH,
 };
 
 const DEFAULT_CONFIG_FILENAME = 'parliament.toml';
@@ -84,6 +93,9 @@ export function loadServerConfig(): ServerConfig {
   if (typeof t['rate_limit_per_hour'] === 'number') {
     cfg.rate_limit_per_hour = t['rate_limit_per_hour'];
   }
+  if (typeof t['db_path'] === 'string' && t['db_path'].length > 0) {
+    cfg.db_path = resolve(t['db_path']);
+  }
 
   // Env-var overrides (highest precedence).
   if (process.env['PARLIAMENT_SERVER_HOST']) {
@@ -102,6 +114,9 @@ export function loadServerConfig(): ServerConfig {
   if (process.env['PARLIAMENT_RATE_LIMIT_PER_HOUR']) {
     const n = parseInt(process.env['PARLIAMENT_RATE_LIMIT_PER_HOUR'], 10);
     if (Number.isFinite(n) && n > 0) cfg.rate_limit_per_hour = n;
+  }
+  if (process.env['PARLIAMENT_DB_PATH']) {
+    cfg.db_path = resolve(process.env['PARLIAMENT_DB_PATH']);
   }
 
   return cfg;

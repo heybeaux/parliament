@@ -24,6 +24,7 @@ vi.mock('@parliament/core', async (importOriginal) => {
   let synthIdx = 0;
 
   const adapter: ModelAdapter = {
+    modelName: 'mock-test-model',
     generate: vi.fn(async (_prompt: string, system?: string) => {
       const sys = system ?? '';
       if (/synthesiz/i.test(sys)) {
@@ -149,6 +150,7 @@ describe('parliament get (integration)', () => {
           model: 'llama3.2',
           content: 'fetched content',
           timestamp: '2026-01-01T00:00:00.000Z',
+          round: 1,
         },
       ],
       conflicts: [],
@@ -158,6 +160,8 @@ describe('parliament get (integration)', () => {
       split: null,
       terminationReason: 'consensus',
       totalRounds: 1,
+      started_at: '2026-01-01T00:00:00.000Z',
+      completed_at: '2026-01-01T00:00:30.000Z',
     };
 
     originalFetch = globalThis.fetch;
