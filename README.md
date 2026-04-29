@@ -8,7 +8,7 @@ Parliament is a multi-agent deliberation system. Five specialised AI agents — 
 pnpm install
 pnpm build
 
-# Run a deliberation locally (defaults to Ollama at http://localhost:11434)
+# Run a deliberation locally (requires oMLX running at http://localhost:8080/v1)
 node packages/cli/dist/index.js deliberate "Should we adopt a four-day work week?"
 ```
 
@@ -20,14 +20,15 @@ All configuration lives in `parliament.toml` at the repository root. The loader 
 
 ```toml
 [parliament]
-max_rounds            = 3      # forced termination round
+max_rounds            = 5      # forced termination round
 confidence_threshold  = 0.7    # synthesizer score required for consensus
-red_agent_interval    = 3      # inject the disruptor every N rounds
+red_agent_interval    = 2      # inject the disruptor every N rounds
 osi_enabled           = true   # echo-loop detection on per-role transcripts
 server_port           = 3000   # REST server port
 
 [neurotypes.proposer]
-model         = "llama3.2"
+model    = "gemma-4-31b-it-8bit"
+provider = "omlx"
 system_prompt = "You are a structured reasoner. ..."
 
 # ...skeptic, synthesizer, redAgent, sentry follow the same shape
@@ -35,7 +36,7 @@ system_prompt = "You are a structured reasoner. ..."
 
 The five neurotype roles — `proposer`, `skeptic`, `synthesizer`, `redAgent`, `sentry` — are required. Multiple roles may share a model; the scheduler groups same-model agents into batches to minimise model swaps.
 
-Switch the LLM provider via `PARLIAMENT_PROVIDER`: `ollama` (default), `lm_studio`, or `omlx`.
+Switch the LLM provider via `PARLIAMENT_PROVIDER` or per-neurotype `provider` field: `ollama`, `lm_studio`, or `omlx` (default for this config). Set `OMLX_BASE_URL` to point at your oMLX instance (default: `http://localhost:8080/v1`).
 
 ## REST API
 
@@ -87,29 +88,17 @@ The `DeliberationEngine` runs each round as: Proposer (round 1 only) → Skeptic
 
 ## Agents
 
-| Agent       | Default model        | Role                                          |
-|-------------|----------------------|-----------------------------------------------|
-| Proposer    | llama3.2             | Opens with a position                         |
-| Skeptic     | mistral              | Challenges the current position               |
-| Synthesizer | qwen2.5              | Attempts integration or marks irreconcilable splits |
-| Red Agent   | mistral-openorca     | Adversarial injection to disrupt consensus    |
-| Sentry      | tinyllama            | Echo-loop + convergence monitor               |
+| Agent       | Model                                                        | Provider | Role                                                        |
+|-------------|--------------------------------------------------------------|----------|-------------------------------------------------------------|
+| Proposer    | gemma-4-31b-it-8bit                                          | oMLX     | Opens with a clear, well-reasoned initial position          |
+| Skeptic     | Qwen3.5-35B-A3B-8bit                                         | oMLX     | Challenges assumptions and identifies logical gaps          |
+| Synthesizer | MLX-Qwen3.5-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled-8bit | oMLX     | Reconciles conflicts or marks irreconcilable splits         |
+| Red Agent   | Qwen3.5-35B-A3B-8bit                                         | oMLX     | Adversarial injection to disrupt premature consensus        |
+| Sentry      | gemma-4-31b-it-8bit                                          | oMLX     | Echo-loop + convergence monitor (`OK` / `SPECIALIST_NEEDED` / `COLLAPSE_DETECTED`) |
 
-## Local Ollama setup
+All agents run locally via [oMLX](https://github.com/openclaw/omlx). Set `OMLX_BASE_URL` if your instance isn't at the default `http://localhost:8080/v1`.
 
-```bash
-# macOS / Linux
-curl -fsSL https://ollama.com/install.sh | sh
-
-# Pull the default models
-ollama pull llama3.2
-ollama pull mistral
-
-# Ollama runs at http://localhost:11434 by default
-ollama serve   # only needed if not auto-started
-```
-
-Once both models are pulled, `parliament deliberate "<topic>"` will work without any further setup.
+Models and system prompts are configured in `parliament.toml` and can be swapped per-neurotype without touching code.
 
 ## Development
 
