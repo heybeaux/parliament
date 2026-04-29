@@ -16,6 +16,10 @@ confidence_threshold = 0.7
 red_agent_interval = 2
 # Toggle the OSI (Opinion Shift Index) echo-loop detector.
 osi_enabled = true
+# Jaccard similarity threshold above which an agent is considered to be echoing
+# itself across rounds. 0.85 ≈ the canonical OSI_CONVERGENCE_THRESHOLD (0.15
+# distance) calibrated against the AlgoDynLab corpus in src/osi.ts.
+osi_threshold = 0.85
 # Port for the Parliament REST server (`@parliament/server`).
 server_port = 3000
 # Default provider for all neurotypes: ollama | lm_studio | omlx

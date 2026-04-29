@@ -61,7 +61,10 @@ async function runDeliberate(topic: string, opts: DeliberateOptions): Promise<vo
   const skeptic = new SkepticAgent(createAdapter(skepticModel));
   const synthesizer = new SynthesizerAgent(createAdapter(synthModel));
   const redAgent = new RedAgent(createAdapter(redModel));
-  const sentry = new SentryAgent(createAdapter(sentryModel));
+  const sentry = new SentryAgent(createAdapter(sentryModel), {
+    osiEnabled: defaults.osi_enabled,
+    osiSimilarityThreshold: defaults.osi_threshold,
+  });
 
   const engine = new DeliberationEngine();
 

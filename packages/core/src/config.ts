@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import { parse } from 'smol-toml';
 import type { AgentDefinition } from './debate.js';
 import type { ModelAdapter } from './adapters/base.js';
@@ -21,6 +21,13 @@ export interface ParliamentDefaults {
   red_agent_interval: number;
   /** Enable the OSI echo-loop detector. */
   osi_enabled: boolean;
+  /**
+   * Jaccard *similarity* threshold for the OSI echo-loop detector.
+   * If an agent's recent self-similarity stays at or above this value,
+   * they are flagged as echoing themselves. Default 0.85 (≡ 0.15 distance,
+   * matching the canonical OSI_CONVERGENCE_THRESHOLD calibrated in osi.ts).
+   */
+  osi_threshold: number;
   /** Port the REST server binds to. */
   server_port: number;
 }
@@ -30,6 +37,7 @@ export const DEFAULT_PARLIAMENT_DEFAULTS: ParliamentDefaults = {
   confidence_threshold: 0.7,
   red_agent_interval: 3,
   osi_enabled: true,
+  osi_threshold: 0.85,
   server_port: 3000,
 };
 
@@ -40,11 +48,39 @@ export interface ParliamentTomlConfig {
 
 const DEFAULT_CONFIG_FILENAME = 'parliament.toml';
 
-function findRepoRoot(): string {
-  // Walk up from this file's location until we find parliament.toml or hit fs root
-  // In practice: packages/core/src/config.ts -> packages/core -> packages -> repo root
-  // We fall back to process.cwd() when running in dev/test contexts.
-  return process.cwd();
+/**
+ * Walks upward from `start` looking for the repository root. A directory is
+ * considered the root when it contains any of:
+ *   - a `.git/` entry,
+ *   - a `pnpm-workspace.yaml` file,
+ *   - a `package.json` whose top level declares a `workspaces` field.
+ * If no such ancestor is found, returns `start` unchanged so callers preserve
+ * the previous "fall back to cwd" behaviour.
+ */
+export function findRepoRoot(start: string = process.cwd()): string {
+  let dir = resolve(start);
+  // Stop when dirname() returns the same path (filesystem root reached).
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    if (existsSync(resolve(dir, '.git'))) return dir;
+    if (existsSync(resolve(dir, 'pnpm-workspace.yaml'))) return dir;
+
+    const pkgPath = resolve(dir, 'package.json');
+    if (existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as {
+          workspaces?: unknown;
+        };
+        if (pkg.workspaces !== undefined) return dir;
+      } catch {
+        // Malformed package.json — keep walking.
+      }
+    }
+
+    const parent = dirname(dir);
+    if (parent === dir) return start;
+    dir = parent;
+  }
 }
 
 /**
@@ -158,6 +194,7 @@ function mergeParliamentDefaults(raw: unknown): ParliamentDefaults {
     merged.red_agent_interval = entry['red_agent_interval'];
   }
   if (typeof entry['osi_enabled'] === 'boolean') merged.osi_enabled = entry['osi_enabled'];
+  if (typeof entry['osi_threshold'] === 'number') merged.osi_threshold = entry['osi_threshold'];
   if (typeof entry['server_port'] === 'number') merged.server_port = entry['server_port'];
 
   return merged;

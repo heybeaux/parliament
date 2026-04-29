@@ -203,6 +203,30 @@ describe('SkepticAgent', () => {
     expect(result.truncated).toBe(true);
     expect(result.content.split(/\s+/).length).toBe(100);
   });
+
+  it('does NOT record a conflict when output contains no disagreement language', async () => {
+    const agreeAdapter = makeAdapter('That seems reasonable. The point about safety is well-founded.');
+    const agent = new SkepticAgent(agreeAdapter);
+    const board = makeBlackboard({
+      turns: [{ agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'Regulation is good.', timestamp: '' }],
+    });
+    await agent.generate(board);
+
+    expect(board.conflicts).toHaveLength(0);
+  });
+
+  it('records exactly one conflict when output contains explicit disagreement', async () => {
+    const disagreeAdapter = makeAdapter('I disagree. The premise is unsupported and ignores counter-evidence.');
+    const agent = new SkepticAgent(disagreeAdapter);
+    const board = makeBlackboard({
+      turns: [{ agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'Regulation is good.', timestamp: '' }],
+    });
+    await agent.generate(board);
+
+    expect(board.conflicts).toHaveLength(1);
+    expect(board.conflicts[0]!.between).toContain('Skeptic');
+    expect(board.conflicts[0]!.between).toContain('Proposer');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -417,6 +441,89 @@ describe('SentryAgent', () => {
     const result = await agent.generate(board);
 
     expect(result.signal).toBe('ok');
+  });
+
+  // -------------------------------------------------------------------------
+  // OSI-driven detection (osi_enabled = true)
+  // -------------------------------------------------------------------------
+
+  it('OSI mode flags collapse on a per-role echoing transcript that the legacy 0.95 path would miss', async () => {
+    // Three turns per agent, each agent is paraphrasing itself but never
+    // verbatim — Jaccard similarity stays well below 0.95 (legacy threshold)
+    // but well above 0.85 (OSI default), so OSI flags this and the legacy
+    // path does not.
+    const agent = new SentryAgent(makeAdapter('OK'), {
+      osiEnabled: true,
+      osiSimilarityThreshold: 0.85,
+      osiWindow: 3,
+    });
+    const board = makeBlackboard({
+      turns: [
+        // Proposer turns — high mutual word overlap, gentle reordering only.
+        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'regulation safety accountability oversight transparency', timestamp: '' },
+        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'regulation safety accountability oversight transparency', timestamp: '' },
+        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'regulation safety accountability oversight transparency', timestamp: '' },
+      ],
+    });
+    const result = await agent.generate(board);
+    expect(result.signal).toBe('collapse_detected');
+    expect(result.reason).toMatch(/OSI/);
+  });
+
+  it('OSI mode does NOT flag collapse when an agent is genuinely shifting position', async () => {
+    const agent = new SentryAgent(makeAdapter('OK'), {
+      osiEnabled: true,
+      osiSimilarityThreshold: 0.85,
+      osiWindow: 3,
+    });
+    const board = makeBlackboard({
+      turns: [
+        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'apples bananas cherries dates elderberries', timestamp: '' },
+        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'figs grapes honeydew imbe jackfruit', timestamp: '' },
+        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'kiwi lemon mango nectarine olive', timestamp: '' },
+      ],
+    });
+    const result = await agent.generate(board);
+    expect(result.signal).toBe('ok');
+  });
+
+  it('legacy fallback still drives collapse decisions when osiEnabled=false', async () => {
+    // Same per-role transcript that triggers OSI above — but with osi_enabled
+    // disabled and similarity well below 0.95, the legacy path should NOT flag.
+    const agent = new SentryAgent(makeAdapter('OK'), { osiEnabled: false });
+    const board = makeBlackboard({
+      turns: [
+        // 6 turns minimum required by the legacy MIN_TURNS_FOR_ECHO_CHECK.
+        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'alpha beta gamma delta', timestamp: '' },
+        { agent: 'Skeptic', neurotype: 'critical', model: 'test', content: 'one two three four', timestamp: '' },
+        { agent: 'Synthesizer', neurotype: 'integrative', model: 'test', content: 'foo bar baz qux', timestamp: '' },
+        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'alpha beta gamma epsilon', timestamp: '' },
+        { agent: 'Skeptic', neurotype: 'critical', model: 'test', content: 'one two three five', timestamp: '' },
+        { agent: 'Synthesizer', neurotype: 'integrative', model: 'test', content: 'foo bar baz quux', timestamp: '' },
+      ],
+    });
+    const result = await agent.generate(board);
+    // Pairwise same-agent similarity is 0.6 (3/5) — below the 0.95 legacy
+    // threshold, so the legacy path returns ok.
+    expect(result.signal).toBe('ok');
+  });
+
+  it('legacy fallback still flags when same-agent similarity exceeds 0.95', async () => {
+    const agent = new SentryAgent(makeAdapter('OK'), { osiEnabled: false });
+    const repeated = 'identical content one two three four five six seven eight';
+    const board = makeBlackboard({
+      turns: [
+        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: repeated, timestamp: '' },
+        { agent: 'Skeptic', neurotype: 'critical', model: 'test', content: 'a b c d', timestamp: '' },
+        { agent: 'Synthesizer', neurotype: 'integrative', model: 'test', content: 'e f g h', timestamp: '' },
+        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: repeated, timestamp: '' },
+        { agent: 'Skeptic', neurotype: 'critical', model: 'test', content: 'i j k l', timestamp: '' },
+        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: repeated, timestamp: '' },
+      ],
+    });
+    const result = await agent.generate(board);
+    expect(result.signal).toBe('collapse_detected');
+    expect(result.reason).toMatch(/Echo loop/);
   });
 });
 
