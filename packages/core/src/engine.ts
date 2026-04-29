@@ -1,6 +1,13 @@
-import type { Blackboard, DeliberationResult, SplitSummary, TerminationReason, Turn } from './types.js';
+import type {
+  Blackboard,
+  DeliberationResult,
+  SplitSummary,
+  SynthesizerMeta,
+  TerminationReason,
+  Turn,
+} from './types.js';
 import type { Agent } from './agents/base.js';
-import type { SynthesizerAgent } from './agents/synthesizer.js';
+import type { SynthesizerAgent, SynthesizerResult } from './agents/synthesizer.js';
 import type { SentryAgent } from './agents/sentry.js';
 
 export interface DeliberationConfig {
@@ -73,19 +80,44 @@ function buildSplitSummary(turns: Turn[], residueScore: number): SplitSummary {
 
 /**
  * Adds a turn to the blackboard after an agent generates output.
+ *
+ * `meta` is populated only by the synthesizer; for all other agents it is
+ * omitted so the field stays undefined on the recorded Turn.
  */
 function recordTurn(
   blackboard: Blackboard,
   agent: Agent | SentryAgent | SynthesizerAgent,
   content: string,
+  meta?: SynthesizerMeta,
 ): void {
-  blackboard.turns.push({
+  const turn: Turn = {
     agent: agent.role,
     neurotype: agent.neurotype,
     model: agent.modelName,
     content,
     timestamp: new Date().toISOString(),
-  });
+  };
+  if (meta !== undefined) {
+    turn.meta = meta;
+  }
+  blackboard.turns.push(turn);
+}
+
+/**
+ * First-class consensus signal: the engine terminates only when the
+ * synthesizer (a) explicitly votes `consensus: true` AND (b) reports
+ * confidence at or above the configured threshold. We deliberately do NOT
+ * terminate on confidence alone — that's how the old regex-on-prose path
+ * silently bypassed the human signal.
+ */
+function shouldTerminateOnConsensus(
+  result: SynthesizerResult,
+  threshold: number,
+): boolean {
+  // Defensive: if `meta` is somehow missing (shouldn't happen post-rewrite),
+  // never terminate. We do NOT fall back to regex parsing of prose.
+  if (result.meta === undefined) return false;
+  return result.meta.consensus === true && result.meta.confidence >= threshold;
 }
 
 export class DeliberationEngine {
@@ -97,7 +129,8 @@ export class DeliberationEngine {
    *      output as context via the blackboard).
    *   2. Skeptic generates and appends a Conflict to the blackboard.
    *   3. Sentry checks — collapse_detected terminates with echo_loop.
-   *   4. Synthesizer generates — confidence >= threshold terminates with consensus.
+   *   4. Synthesizer generates — terminates with consensus when the
+   *      synthesizer's `meta.consensus` is true AND `meta.confidence` >= threshold.
    *   5. Sentry checks again after Synthesizer.
    *   6. If round % redAgentInterval === 0: RedAgent generates.
    *   After maxRounds with no earlier termination: terminates with max_rounds.
@@ -152,12 +185,13 @@ export class DeliberationEngine {
       }
 
       // ------------------------------------------------------------------ //
-      // Step 4: Synthesizer — terminate on sufficient confidence
+      // Step 4: Synthesizer — terminate when the synthesizer explicitly votes
+      // consensus AND its calibrated confidence clears the threshold.
       // ------------------------------------------------------------------ //
       const synthResult = await synthesizer.generate(blackboard);
-      recordTurn(blackboard, synthesizer, synthResult.content);
+      recordTurn(blackboard, synthesizer, synthResult.content, synthResult.meta);
 
-      if (synthResult.confidence >= confidenceThreshold) {
+      if (shouldTerminateOnConsensus(synthResult, confidenceThreshold)) {
         synthesis = synthResult.content;
         terminationReason = 'consensus';
         break;

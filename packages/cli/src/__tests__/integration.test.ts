@@ -28,9 +28,23 @@ vi.mock('@parliament/core', async (importOriginal) => {
       const sys = system ?? '';
       if (/synthesiz/i.test(sys)) {
         synthIdx++;
+        // Synthesizer now expects a JSON-only response; second turn emits
+        // consensus: true with confidence above the 0.7 threshold.
         return synthIdx >= 2
-          ? 'A unifying synthesis emerges. confidence: 0.9'
-          : 'Tentative synthesis. confidence: 0.4';
+          ? JSON.stringify({
+              summary: 'A unifying synthesis emerges.',
+              confidence: 0.9,
+              consensus: true,
+              agreed: ['shared baseline'],
+              unresolved: [],
+            })
+          : JSON.stringify({
+              summary: 'Tentative synthesis.',
+              confidence: 0.4,
+              consensus: false,
+              agreed: [],
+              unresolved: ['major disagreement'],
+            });
       }
       if (/critic/i.test(sys)) return 'A targeted critique.';
       if (/disruptor/i.test(sys)) return 'A disruption.';

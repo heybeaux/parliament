@@ -6,6 +6,26 @@ export type TerminationReason =
 
 export type SentrySignal = 'ok' | 'specialist_needed' | 'collapse_detected';
 
+/**
+ * Structured signal emitted by the SynthesizerAgent alongside its prose summary.
+ * Carries the model's calibrated certainty (`confidence`), its own self-reported
+ * judgement on whether the debate has resolved (`consensus`), and short
+ * bullet-string lists of the points that have / have not been resolved.
+ *
+ * Only the synthesizer populates `Turn.meta`; for all other agents it is
+ * absent.
+ */
+export interface SynthesizerMeta {
+  /** Calibrated certainty in the synthesis, in [0, 1]. */
+  confidence: number;
+  /** Synthesizer's own judgement on whether the debate has resolved. */
+  consensus: boolean;
+  /** Short bullet strings (~10 words each) the agents agree on. */
+  agreed: string[];
+  /** Short bullet strings (~10 words each) that remain unresolved. */
+  unresolved: string[];
+}
+
 export interface Turn {
   agent: string;
   neurotype: string;
@@ -13,6 +33,8 @@ export interface Turn {
   content: string;
   timestamp: string;
   osi_score?: number;
+  /** Populated by SynthesizerAgent only — structured signals next to the prose. */
+  meta?: SynthesizerMeta;
 }
 
 export interface Conflict {

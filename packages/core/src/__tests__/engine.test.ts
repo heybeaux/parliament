@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { Blackboard } from '../types.js';
+import type { Blackboard, SynthesizerMeta } from '../types.js';
 import type { Agent, AgentResult } from '../agents/base.js';
 import type { SynthesizerResult } from '../agents/synthesizer.js';
 import type { SentryResult } from '../agents/sentry.js';
@@ -31,18 +31,39 @@ function makeSentryAgent(signal: SentryResult['signal'] = 'ok'): {
   };
 }
 
-function makeSynthesizerAgent(confidence: number, content = 'Synthesis content'): {
+/**
+ * Mock synthesizer factory.
+ *
+ * Defaults to `consensus = (confidence >= 0.7)` so legacy tests that only
+ * thought about confidence still get the consensus signal they expect. Pass
+ * `metaOverrides` to decouple consensus from confidence — that's how the
+ * "high confidence but no consensus" and "fail-closed" cases below are
+ * expressed.
+ */
+function makeSynthesizerAgent(
+  confidence: number,
+  content = 'Synthesis content',
+  metaOverrides: Partial<SynthesizerMeta> = {},
+): {
   role: string;
   neurotype: string;
   generate: ReturnType<typeof vi.fn>;
 } {
+  const meta: SynthesizerMeta = {
+    confidence,
+    consensus: confidence >= 0.7,
+    agreed: [],
+    unresolved: [],
+    ...metaOverrides,
+  };
   return {
     role: 'Synthesizer',
     neurotype: 'integrative',
     generate: vi.fn().mockResolvedValue({
       content,
       truncated: false,
-      confidence,
+      confidence: meta.confidence,
+      meta,
     } satisfies SynthesizerResult),
   };
 }
@@ -119,6 +140,71 @@ describe('DeliberationEngine', () => {
     expect(result.terminationReason).toBe('consensus');
     expect(result.synthesis).toBe('High-confidence synthesis');
     expect(result.split).toBeNull();
+  });
+
+  it('terminates with consensus when synthesizer meta has consensus=true and confidence>=threshold', async () => {
+    const config = makeConfig({
+      confidenceThreshold: 0.7,
+      agents: {
+        ...makeConfig().agents,
+        synthesizer: makeSynthesizerAgent(0.9, 'Resolved synthesis', {
+          consensus: true,
+        }) as unknown as import('../agents/synthesizer.js').SynthesizerAgent,
+      },
+    });
+
+    const result = await engine.run('explicit consensus topic', config);
+
+    expect(result.terminationReason).toBe('consensus');
+    expect(result.synthesis).toBe('Resolved synthesis');
+  });
+
+  it('does NOT terminate with consensus when meta.consensus=false even at high confidence', async () => {
+    // High confidence (0.9) but the synthesizer itself says the debate is
+    // unresolved. Engine must continue rather than termination on confidence
+    // alone — that's the entire point of removing the regex-on-prose path.
+    const config = makeConfig({
+      maxRounds: 2,
+      redAgentInterval: 99,
+      confidenceThreshold: 0.7,
+      agents: {
+        ...makeConfig().agents,
+        synthesizer: makeSynthesizerAgent(0.9, 'Confident but contested', {
+          consensus: false,
+        }) as unknown as import('../agents/synthesizer.js').SynthesizerAgent,
+      },
+    });
+
+    const result = await engine.run('no-consensus topic', config);
+
+    expect(result.terminationReason).toBe('max_rounds');
+    expect(result.totalRounds).toBe(2);
+    expect(result.synthesis).toBeNull();
+  });
+
+  it('does NOT terminate when synthesizer fail-closed (confidence=0, consensus=false); runs to max_rounds', async () => {
+    const failClosedSynth = makeSynthesizerAgent(0, 'truncated raw text', {
+      consensus: false,
+      agreed: [],
+      unresolved: [],
+    });
+
+    const config = makeConfig({
+      maxRounds: 3,
+      redAgentInterval: 99,
+      confidenceThreshold: 0.7,
+      agents: {
+        ...makeConfig().agents,
+        synthesizer: failClosedSynth as unknown as import('../agents/synthesizer.js').SynthesizerAgent,
+      },
+    });
+
+    const result = await engine.run('failsafe topic', config);
+
+    expect(result.terminationReason).toBe('max_rounds');
+    expect(result.totalRounds).toBe(3);
+    // Engine kept running — synthesizer was called once per round.
+    expect(failClosedSynth.generate).toHaveBeenCalledTimes(3);
   });
 
   it('consensus terminates on exactly the threshold value', async () => {

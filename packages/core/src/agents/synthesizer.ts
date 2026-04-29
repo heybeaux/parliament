@@ -1,25 +1,153 @@
 import type { ModelAdapter } from '../adapters/base.js';
-import type { Blackboard } from '../types.js';
+import type { Blackboard, SynthesizerMeta } from '../types.js';
 import type { Agent, AgentResult } from './base.js';
 import { enforceWordCap } from './utils.js';
 
-const SYSTEM_PROMPT =
-  'You are a synthesizer. Attempt to reconcile conflicting positions into a more robust unified view. Acknowledge what remains unresolved. Stay within 200 words.';
+const SYSTEM_PROMPT = [
+  'You are a synthesizer. Attempt to reconcile conflicting positions into a more robust',
+  'unified view, acknowledging what remains unresolved.',
+  '',
+  'You MUST output ONLY a single JSON object with no surrounding prose, no markdown fences,',
+  'and no commentary. The JSON object MUST conform to this exact schema:',
+  '',
+  '{"summary": "<one-paragraph synthesis, max 200 words>", "confidence": <number in [0,1]>,',
+  ' "consensus": <true|false>, "agreed": ["<short bullet, max 10 words>", ...],',
+  ' "unresolved": ["<short bullet, max 10 words>", ...]}',
+  '',
+  'Field semantics:',
+  '- summary: a single paragraph reconciling the debate so far.',
+  '- confidence: your calibrated certainty in the synthesis, 0.0 (no confidence) to 1.0 (fully confident).',
+  '- consensus: true ONLY if you judge the debate has genuinely resolved into a unified view; false otherwise.',
+  '  Do not set true just because confidence is high.',
+  '- agreed: short bullet strings (max ~10 words each) capturing the points the agents agree on.',
+  '- unresolved: short bullet strings (max ~10 words each) capturing what remains unresolved.',
+  '',
+  'Output ONLY the JSON object. No preamble, no markdown, no trailing commentary.',
+].join('\n');
+
+const REINFORCEMENT = '\n\nOutput only the JSON object, no other text.';
+
+/** Corrective re-prompt used after one parse failure. */
+const RETRY_INSTRUCTION =
+  "Your previous response wasn't valid JSON. Output ONLY the JSON object, nothing else.";
+
+/** Cap on raw text included in the fail-closed summary so transcripts stay sane. */
+const FAILSAFE_SUMMARY_WORDCAP = 60;
 
 export interface SynthesizerResult extends AgentResult {
+  /** Convenience field — mirrors `meta.confidence`. */
   confidence: number;
+  /** Structured signals; identical to what is attached to the recorded turn. */
+  meta: SynthesizerMeta;
+}
+
+interface ParsedSynthesizerJson {
+  summary: string;
+  confidence: number;
+  consensus: boolean;
+  agreed: string[];
+  unresolved: string[];
 }
 
 /**
- * Parses a confidence value from text matching the pattern "confidence: 0.X".
- * Defaults to 0.5 if not found.
+ * Three-layer JSON extraction strategy. Why three: small open-weight models
+ * routinely add a "Sure, here is the JSON:" preamble or wrap output in
+ * ```json fences``` despite explicit instructions, so we (1) try a strict
+ * parse, then (2) peel a fenced block, then (3) fall back to the first
+ * balanced `{...}` substring.
  */
-function parseConfidence(text: string): number {
-  const match = /confidence:\s*(0?\.\d+|1(?:\.0+)?|\d+(?:\.\d+)?)/i.exec(text);
-  if (!match) return 0.5;
-  const value = parseFloat(match[1]!);
+function extractJsonObject(raw: string): ParsedSynthesizerJson | null {
+  // Layer 1: strict parse — works when the model obeys instructions exactly.
+  const direct = tryParse(raw.trim());
+  if (direct !== null) return direct;
+
+  // Layer 2: fenced extraction — handles ```json {...} ``` wrappers.
+  const fenceMatch = /```(?:json)?\s*(\{[\s\S]*?\})\s*```/i.exec(raw);
+  if (fenceMatch !== null) {
+    const fenced = tryParse(fenceMatch[1]!);
+    if (fenced !== null) return fenced;
+  }
+
+  // Layer 3: greedy brace match — handles "Sure, here is: { ... }" preambles.
+  // Pick the first '{' and the *last* '}' so multi-line JSON survives.
+  const firstBrace = raw.indexOf('{');
+  const lastBrace = raw.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    const slice = raw.slice(firstBrace, lastBrace + 1);
+    const greedy = tryParse(slice);
+    if (greedy !== null) return greedy;
+  }
+
+  return null;
+}
+
+function tryParse(text: string): ParsedSynthesizerJson | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  return validateShape(parsed);
+}
+
+/**
+ * Coerces a parsed JSON value into the canonical synthesizer shape. Tolerates
+ * minor model-side drift (e.g. confidence as a string, missing arrays) by
+ * normalising rather than rejecting — but anything fundamentally wrong (not
+ * an object, no summary) returns null and triggers the retry path.
+ */
+function validateShape(value: unknown): ParsedSynthesizerJson | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const obj = value as Record<string, unknown>;
+
+  const summary = typeof obj['summary'] === 'string' ? obj['summary'] : null;
+  if (summary === null || summary.length === 0) return null;
+
+  const rawConf = obj['confidence'];
+  let confidence: number;
+  if (typeof rawConf === 'number' && Number.isFinite(rawConf)) {
+    confidence = rawConf;
+  } else if (typeof rawConf === 'string' && Number.isFinite(parseFloat(rawConf))) {
+    confidence = parseFloat(rawConf);
+  } else {
+    return null;
+  }
   // Clamp to [0, 1].
-  return Math.min(1, Math.max(0, value));
+  confidence = Math.min(1, Math.max(0, confidence));
+
+  const rawConsensus = obj['consensus'];
+  if (typeof rawConsensus !== 'boolean') return null;
+
+  const agreed = coerceStringArray(obj['agreed']);
+  const unresolved = coerceStringArray(obj['unresolved']);
+
+  return { summary, confidence, consensus: rawConsensus, agreed, unresolved };
+}
+
+function coerceStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+/**
+ * Builds a fail-closed result when both the initial generation and the retry
+ * fail to parse. confidence=0 (NOT 0.5) and consensus=false ensure the engine
+ * never terminates on a malformed synthesis; the raw text is truncated so the
+ * transcript still shows what the model actually said.
+ */
+function failClosed(raw: string): ParsedSynthesizerJson {
+  const { content } = enforceWordCap(raw, FAILSAFE_SUMMARY_WORDCAP);
+  return {
+    summary: content,
+    confidence: 0,
+    consensus: false,
+    agreed: [],
+    unresolved: [],
+  };
 }
 
 export class SynthesizerAgent implements Agent {
@@ -49,11 +177,54 @@ export class SynthesizerAgent implements Agent {
     if (unresolvedConflicts.length > 0) {
       userPrompt += `\n\nUnresolved conflicts:\n${unresolvedConflicts}`;
     }
+    userPrompt += REINFORCEMENT;
 
+    // First attempt.
     const raw = await this.adapter.generate(userPrompt, SYSTEM_PROMPT);
-    const { content, truncated } = enforceWordCap(raw);
-    const confidence = parseConfidence(raw);
+    const parsed = extractJsonObject(raw);
+    if (parsed !== null) {
+      return this.buildResult(parsed);
+    }
 
-    return { content, truncated, confidence };
+    // One retry — embed the prior exchange into the user prompt so the model
+    // has its own broken output to learn from. (ModelAdapter exposes a
+    // single-prompt interface, so we splice the dialogue manually.)
+    const retryPrompt = [
+      userPrompt,
+      '',
+      '--- Your previous response ---',
+      raw,
+      '--- End previous response ---',
+      '',
+      RETRY_INSTRUCTION,
+    ].join('\n');
+
+    const retryRaw = await this.adapter.generate(retryPrompt, SYSTEM_PROMPT);
+    const retryParsed = extractJsonObject(retryRaw);
+    if (retryParsed !== null) {
+      return this.buildResult(retryParsed);
+    }
+
+    // Both attempts failed — fail closed and warn. Match the existing
+    // console-based logging used elsewhere in the package.
+    // eslint-disable-next-line no-console
+    console.warn(
+      '[SynthesizerAgent] failed to parse JSON after 1 retry; falling back to fail-closed result',
+      { firstAttemptLength: raw.length, retryLength: retryRaw.length },
+    );
+    return this.buildResult(failClosed(retryRaw));
+  }
+
+  private buildResult(parsed: ParsedSynthesizerJson): SynthesizerResult {
+    // The blackboard stays human-readable: `content` is the prose summary,
+    // and the structured signals live on `meta`.
+    const { content, truncated } = enforceWordCap(parsed.summary);
+    const meta: SynthesizerMeta = {
+      confidence: parsed.confidence,
+      consensus: parsed.consensus,
+      agreed: parsed.agreed,
+      unresolved: parsed.unresolved,
+    };
+    return { content, truncated, confidence: parsed.confidence, meta };
   }
 }
