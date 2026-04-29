@@ -18,6 +18,10 @@ import {
 } from '@parliament/core';
 import type { DeliberationConfig } from '@parliament/core';
 import { saveDeliberation, getDeliberation, listDeliberations } from './db.js';
+import { loadServerConfig, type ServerConfig } from './config.js';
+import { corsMiddleware } from './middleware/cors.js';
+import { bearerAuth, API_KEY_ENV_VAR } from './middleware/auth.js';
+import { rateLimit } from './middleware/rateLimit.js';
 
 // ---------------------------------------------------------------------------
 // Zod schemas
@@ -61,12 +65,17 @@ function buildAgents(): DeliberationConfig['agents'] {
     return def;
   };
 
+  const defaults = config.parliament ?? DEFAULT_PARLIAMENT_DEFAULTS;
+
   return {
     proposer: new ProposerAgent(get('proposer').adapter),
     skeptic: new SkepticAgent(get('skeptic').adapter),
     synthesizer: new SynthesizerAgent(get('synthesizer').adapter),
     redAgent: new RedAgent(get('redAgent').adapter),
-    sentry: new SentryAgent(get('sentry').adapter),
+    sentry: new SentryAgent(get('sentry').adapter, {
+      osiEnabled: defaults.osi_enabled,
+      osiSimilarityThreshold: defaults.osi_threshold,
+    }),
   };
 }
 
@@ -74,20 +83,39 @@ function buildAgents(): DeliberationConfig['agents'] {
 // Route factory
 // ---------------------------------------------------------------------------
 
-export function createRouter(db: Database): Hono {
+export interface CreateRouterOptions {
+  /** Server config; defaults to loadServerConfig() at construction time. */
+  serverConfig?: ServerConfig;
+  /** API key; defaults to process.env[PARLIAMENT_API_KEY] at construction time. */
+  apiKey?: string | undefined;
+}
+
+export function createRouter(db: Database, options: CreateRouterOptions = {}): Hono {
   const app = new Hono();
+  const serverConfig = options.serverConfig ?? loadServerConfig();
+  const apiKey =
+    options.apiKey !== undefined ? options.apiKey : process.env[API_KEY_ENV_VAR];
 
   // -------------------------------------------------------------------------
-  // CORS — permissive for local dashboard development.
+  // CORS — origin allowlist (defaults to localhost variants only).
   // -------------------------------------------------------------------------
-  app.use('*', async (c, next) => {
-    c.header('Access-Control-Allow-Origin', '*');
-    c.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-    c.header('Access-Control-Allow-Headers', 'Content-Type');
-    if (c.req.method === 'OPTIONS') {
-      return c.body(null, 204);
-    }
-    await next();
+  app.use('*', corsMiddleware(serverConfig.cors_origins));
+
+  // -------------------------------------------------------------------------
+  // Bearer auth — only enforced when PARLIAMENT_API_KEY is set.
+  // -------------------------------------------------------------------------
+  app.use('*', bearerAuth(apiKey));
+
+  // -------------------------------------------------------------------------
+  // Per-IP rate limit on the expensive /deliberate POST path.
+  // -------------------------------------------------------------------------
+  const deliberateLimiter = rateLimit({
+    concurrent: serverConfig.rate_limit_concurrent,
+    perHour: serverConfig.rate_limit_per_hour,
+  });
+  app.use('/deliberate', async (c, next) => {
+    if (c.req.method !== 'POST') return next();
+    return deliberateLimiter(c, next);
   });
 
   // -------------------------------------------------------------------------

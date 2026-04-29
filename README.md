@@ -44,13 +44,29 @@ Switch the LLM provider via `PARLIAMENT_PROVIDER` or per-neurotype `provider` fi
 node packages/server/dist/index.js
 ```
 
-The server binds to `parliament.server_port` (3000 by default) or the `PORT` env var if set.
+The server binds to `parliament.server_port` (3000 by default) or the `PORT` env var if set, on the host configured under `[server].host` (default `127.0.0.1` — loopback only).
 
 | Endpoint                | Description                                            |
 | ----------------------- | ------------------------------------------------------ |
 | `POST /deliberate`      | Run a new deliberation. Body: `{ topic, config? }`.    |
 | `GET  /deliberate/:id`  | Fetch a stored deliberation by UUID.                   |
 | `GET  /health`          | Probe each model's adapter for connectivity.           |
+
+### Hardening
+
+The server is locked down to a localhost-only profile by default. Override via `[server]` in `parliament.toml` or the matching env vars:
+
+```toml
+[server]
+host                 = "127.0.0.1"                                  # PARLIAMENT_SERVER_HOST
+cors_origins         = ["http://localhost:*", "http://127.0.0.1:*"] # PARLIAMENT_CORS_ORIGINS (comma-separated)
+rate_limit_concurrent = 1                                           # PARLIAMENT_RATE_LIMIT_CONCURRENT
+rate_limit_per_hour   = 10                                          # PARLIAMENT_RATE_LIMIT_PER_HOUR
+```
+
+To expose the API beyond loopback set `host = "0.0.0.0"` **and** explicitly set `cors_origins` to your real allowlist; the localhost defaults are not auto-expanded.
+
+Set `PARLIAMENT_API_KEY=<secret>` to require `Authorization: Bearer <secret>` on every route (timing-safe compare). When unset, the server logs a warning at startup and accepts unauthenticated requests so localhost dev works out of the box. `POST /deliberate` is rate-limited per client IP using the values above.
 
 `config` accepts `maxRounds`, `redAgentInterval`, and `confidenceThreshold` overrides; anything omitted falls back to the values in `parliament.toml`. Results are persisted to a SQLite file (`parliament.db`) in the working directory.
 
