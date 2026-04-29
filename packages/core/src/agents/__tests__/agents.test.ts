@@ -236,67 +236,159 @@ describe('SkepticAgent', () => {
 // ---------------------------------------------------------------------------
 
 describe('SynthesizerAgent', () => {
+  /** Helper: build a JSON synthesizer payload string. */
+  function jsonPayload(overrides: Partial<{
+    summary: string;
+    confidence: number;
+    consensus: boolean;
+    agreed: string[];
+    unresolved: string[];
+  }> = {}): string {
+    return JSON.stringify({
+      summary: 'Both sides have merit; the strongest unified view is X.',
+      confidence: 0.7,
+      consensus: false,
+      agreed: ['safety matters'],
+      unresolved: ['who enforces it'],
+      ...overrides,
+    });
+  }
+
+  /** Multi-call adapter: returns scripted responses in order. */
+  function makeScriptedAdapter(...responses: string[]): ModelAdapter {
+    let i = 0;
+    return {
+      modelName: 'test-model',
+      generate: vi.fn(async () => responses[Math.min(i++, responses.length - 1)] ?? ''),
+    };
+  }
+
   it('has correct role and neurotype', () => {
-    const agent = new SynthesizerAgent(makeAdapter('Both sides have merit. confidence: 0.7'));
+    const agent = new SynthesizerAgent(makeAdapter(jsonPayload()));
     expect(agent.role).toBe('Synthesizer');
     expect(agent.neurotype).toBe('integrative');
   });
 
-  it('happy path: returns content and confidence', async () => {
-    const agent = new SynthesizerAgent(makeAdapter('Both sides have merit. confidence: 0.7'));
+  it('happy path: parses valid JSON, populates content from summary and meta from fields', async () => {
+    const adapter = makeAdapter(jsonPayload({
+      summary: 'A unified synthesis paragraph.',
+      confidence: 0.7,
+      consensus: false,
+      agreed: ['safety matters', 'transparency required'],
+      unresolved: ['enforcement mechanism'],
+    }));
+    const agent = new SynthesizerAgent(adapter);
     const board = makeBlackboard();
     const result = await agent.generate(board);
 
-    expect(result.content).toBeTruthy();
-    expect(typeof result.truncated).toBe('boolean');
+    expect(result.content).toBe('A unified synthesis paragraph.');
     expect(result.confidence).toBeCloseTo(0.7);
+    expect(result.meta).toEqual({
+      confidence: 0.7,
+      consensus: false,
+      agreed: ['safety matters', 'transparency required'],
+      unresolved: ['enforcement mechanism'],
+    });
+    // Single call — no retry on the happy path.
+    expect(adapter.generate).toHaveBeenCalledTimes(1);
   });
 
-  it('defaults confidence to 0.5 when not present in response', async () => {
-    const agent = new SynthesizerAgent(makeAdapter('A balanced view without any confidence marker.'));
-    const board = makeBlackboard();
-    const result = await agent.generate(board);
+  it('parses markdown-fenced JSON (```json {...} ```)', async () => {
+    const fenced = '```json\n' + jsonPayload({ summary: 'Fenced synthesis.', confidence: 0.6 }) + '\n```';
+    const adapter = makeAdapter(fenced);
+    const agent = new SynthesizerAgent(adapter);
+    const result = await agent.generate(makeBlackboard());
 
-    expect(result.confidence).toBe(0.5);
+    expect(result.content).toBe('Fenced synthesis.');
+    expect(result.meta.confidence).toBeCloseTo(0.6);
+    expect(adapter.generate).toHaveBeenCalledTimes(1);
   });
 
-  it('parses confidence: 0.X pattern', async () => {
-    const agent = new SynthesizerAgent(makeAdapter('My synthesis. confidence: 0.85'));
-    const board = makeBlackboard();
-    const result = await agent.generate(board);
+  it('parses preamble + JSON ("Sure, here is the JSON: {...}")', async () => {
+    const withPreamble =
+      'Sure, here is the JSON:\n' + jsonPayload({ summary: 'Preamble synthesis.', consensus: true, confidence: 0.95 });
+    const adapter = makeAdapter(withPreamble);
+    const agent = new SynthesizerAgent(adapter);
+    const result = await agent.generate(makeBlackboard());
 
-    expect(result.confidence).toBeCloseTo(0.85);
+    expect(result.content).toBe('Preamble synthesis.');
+    expect(result.meta.consensus).toBe(true);
+    expect(result.meta.confidence).toBeCloseTo(0.95);
+    expect(adapter.generate).toHaveBeenCalledTimes(1);
   });
 
-  it('parses confidence: 1.0 correctly', async () => {
-    const agent = new SynthesizerAgent(makeAdapter('High certainty. confidence: 1.0'));
-    const board = makeBlackboard();
-    const result = await agent.generate(board);
+  it('retry path: invalid first response, valid JSON on retry → succeeds', async () => {
+    const adapter = makeScriptedAdapter(
+      'I am sorry, I cannot produce JSON.',
+      jsonPayload({ summary: 'Recovered on retry.', confidence: 0.8, consensus: true }),
+    );
+    const agent = new SynthesizerAgent(adapter);
+    const result = await agent.generate(makeBlackboard());
 
-    expect(result.confidence).toBeCloseTo(1.0);
+    expect(result.content).toBe('Recovered on retry.');
+    expect(result.meta.consensus).toBe(true);
+    expect(result.meta.confidence).toBeCloseTo(0.8);
+    expect(adapter.generate).toHaveBeenCalledTimes(2);
+
+    // Retry prompt must include the previous broken response and the
+    // corrective instruction.
+    const [retryPrompt] = (adapter.generate as ReturnType<typeof vi.fn>).mock.calls[1]!;
+    expect(retryPrompt).toContain('I am sorry, I cannot produce JSON.');
+    expect(retryPrompt).toContain("Your previous response wasn't valid JSON");
   });
 
-  it('enforces 200-word cap on output', async () => {
-    // Cap was doubled from 100 to 200; agents call enforceWordCap() with the default.
-    const longResponse = nWords(250) + ' confidence: 0.6';
-    const agent = new SynthesizerAgent(makeAdapter(longResponse));
-    const board = makeBlackboard();
-    const result = await agent.generate(board);
+  it('fail-closed: two failures → confidence=0, consensus=false, warning logged, no crash', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const adapter = makeScriptedAdapter(
+      'still not json',
+      'really not json either',
+    );
+    const agent = new SynthesizerAgent(adapter);
+    const result = await agent.generate(makeBlackboard());
+
+    expect(result.confidence).toBe(0);
+    expect(result.meta.confidence).toBe(0);
+    expect(result.meta.consensus).toBe(false);
+    expect(result.meta.agreed).toEqual([]);
+    expect(result.meta.unresolved).toEqual([]);
+    // Summary still populated (truncated raw text) so transcripts stay readable.
+    expect(result.content.length).toBeGreaterThan(0);
+    expect(adapter.generate).toHaveBeenCalledTimes(2);
+    expect(warnSpy).toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+  });
+
+  it('clamps confidence to [0, 1]', async () => {
+    const adapter = makeAdapter(jsonPayload({ confidence: 1.7 }));
+    const agent = new SynthesizerAgent(adapter);
+    const result = await agent.generate(makeBlackboard());
+    expect(result.meta.confidence).toBe(1);
+  });
+
+  it('enforces 200-word cap on the summary', async () => {
+    const longSummary = nWords(250);
+    const adapter = makeAdapter(jsonPayload({ summary: longSummary, confidence: 0.6 }));
+    const agent = new SynthesizerAgent(adapter);
+    const result = await agent.generate(makeBlackboard());
 
     expect(result.truncated).toBe(true);
     expect(result.content.split(/\s+/).length).toBe(200);
   });
 
   it('includes unresolved conflicts in user prompt', async () => {
-    const adapter = makeAdapter('Synthesis. confidence: 0.5');
+    const adapter = makeAdapter(jsonPayload({ confidence: 0.5 }));
     const agent = new SynthesizerAgent(adapter);
     const board = makeBlackboard({
       conflicts: [{ between: ['Skeptic', 'Proposer'], description: 'Core disagreement', resolved: false }],
     });
     await agent.generate(board);
 
-    const [userPrompt] = (adapter.generate as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [userPrompt] = (adapter.generate as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(userPrompt).toContain('Core disagreement');
+    // Reinforcement appended at the end of the user prompt.
+    expect(userPrompt).toMatch(/Output only the JSON object, no other text\.\s*$/);
   });
 });
 

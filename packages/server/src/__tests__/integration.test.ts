@@ -70,8 +70,20 @@ describe('end-to-end deliberation', () => {
         'Demand response struggles in industrial loads — scope is overstated.',
       ],
       synthesizer: [
-        'Grid storage and demand response are complementary; confidence: 0.4',
-        'Storage costs are falling; demand response covers residential. confidence: 0.85',
+        JSON.stringify({
+          summary: 'Grid storage and demand response are complementary.',
+          confidence: 0.4,
+          consensus: false,
+          agreed: ['both reduce peak load'],
+          unresolved: ['cost trajectory'],
+        }),
+        JSON.stringify({
+          summary: 'Storage costs are falling; demand response covers residential.',
+          confidence: 0.85,
+          consensus: true,
+          agreed: ['storage scales', 'DR covers residential'],
+          unresolved: [],
+        }),
       ],
       redAgent: ['What if base-load nuclear is the cheaper path entirely?'],
       sentry: ['OK', 'OK', 'OK'],
@@ -101,7 +113,15 @@ describe('end-to-end deliberation', () => {
     const scripts: RoleScripts = {
       proposer: ['Initial position.'],
       skeptic: ['Critique of initial position.'],
-      synthesizer: ['Tentative synthesis. confidence: 0.3'],
+      synthesizer: [
+        JSON.stringify({
+          summary: 'Tentative synthesis.',
+          confidence: 0.3,
+          consensus: false,
+          agreed: [],
+          unresolved: ['core disagreement'],
+        }),
+      ],
       redAgent: ['n/a'],
       sentry: ['COLLAPSE_DETECTED'],
     };
@@ -126,9 +146,9 @@ describe('end-to-end deliberation', () => {
       proposer: ['Opening statement on the topic.'],
       skeptic: ['First critique', 'Second critique', 'Third critique'],
       synthesizer: [
-        `${repeated} confidence: 0.3`,
-        `${repeated} confidence: 0.3`,
-        `${repeated} confidence: 0.3`,
+        JSON.stringify({ summary: repeated, confidence: 0.3, consensus: false, agreed: [], unresolved: [] }),
+        JSON.stringify({ summary: repeated, confidence: 0.3, consensus: false, agreed: [], unresolved: [] }),
+        JSON.stringify({ summary: repeated, confidence: 0.3, consensus: false, agreed: [], unresolved: [] }),
       ],
       redAgent: ['Disruption.'],
       sentry: ['OK', 'OK', 'OK', 'OK', 'OK', 'OK'],
@@ -168,7 +188,15 @@ vi.mock('@parliament/core', async (importOriginal) => {
   const mockScripts: RoleScripts = {
     proposer: ['A reasoned proposal.'],
     skeptic: ['A targeted critique of the proposal.'],
-    synthesizer: ['A unifying synthesis. confidence: 0.9'],
+    synthesizer: [
+      JSON.stringify({
+        summary: 'A unifying synthesis.',
+        confidence: 0.9,
+        consensus: true,
+        agreed: ['unified position'],
+        unresolved: [],
+      }),
+    ],
     redAgent: ['A disruption.'],
     sentry: ['OK', 'OK', 'OK'],
   };

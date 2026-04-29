@@ -65,4 +65,5 @@ export {
   computeOSI,
   detectEchoLoop,
   OSI_CONVERGENCE_THRESHOLD,
+  MIN_TURNS_PER_ROLE_FOR_ECHO_CHECK,
 } from './osi.js';
