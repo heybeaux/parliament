@@ -4,6 +4,7 @@ import {
   computeOSI,
   detectEchoLoop,
   OSI_CONVERGENCE_THRESHOLD,
+  MIN_TURNS_PER_ROLE_FOR_ECHO_CHECK,
 } from '../osi.js';
 
 // ---------------------------------------------------------------------------
@@ -153,20 +154,92 @@ describe('detectEchoLoop', () => {
     expect(detectEchoLoop(turns)).toBe(true);
   });
 
-  it('returns false when the window contains only one turn (no OSI to compare)', () => {
-    // Single turn in window → no consecutive pair → no agent exceeds threshold
-    // but also no agent clears it — should return true only if ALL agents stay low.
-    // With one turn each and windowSize=1, scores = [0] → below threshold → echo
+  it('returns false when every role in the window has only one turn (insufficient data)', () => {
+    // Single turn per agent → no inter-turn similarities to average. The
+    // placeholder OSI=0 for the first turn means "no prior turn", NOT
+    // "perfectly echoing" — treating it as the latter caused round-1 false
+    // positives. Should return false (insufficient data), not true.
     const turns = [
       makeTurn('Proposer', 'single turn'),
       makeTurn('Skeptic', 'another single turn'),
       makeTurn('Synthesizer', 'yet another'),
     ];
-    // Each agent appears once; OSI=0 for each → collective echo loop detected
+    expect(detectEchoLoop(turns, 3)).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // Minimum-turns guard — fixes the round-1 false-positive bug.
+  // -------------------------------------------------------------------------
+
+  it('returns false for a 0-turn transcript (no data)', () => {
+    expect(detectEchoLoop([], 3)).toBe(false);
+  });
+
+  it('returns false for a 1-turn transcript (no data)', () => {
+    const turns = [makeTurn('Proposer', 'opening salvo')];
+    expect(detectEchoLoop(turns, 3)).toBe(false);
+  });
+
+  it('returns false for a 2-turn transcript even when both turns are identical', () => {
+    // Critical guard: two identical turns is NOT yet an echo loop — that's a
+    // single coincidence with no opportunity to demonstrate persistence.
+    const repeated = 'identical sentence repeated verbatim again';
+    const turns = [
+      makeTurn('Proposer', repeated),
+      makeTurn('Proposer', repeated),
+    ];
+    // windowSize=2 fills the window; per-role data is still insufficient
+    // (only 2 turns → 1 inter-turn comparison, below MIN_TURNS_PER_ROLE).
+    expect(detectEchoLoop(turns, 2)).toBe(false);
+  });
+
+  it('returns true for a 3-turn same-role transcript with identical content (sufficient data, low convergence)', () => {
+    const repeated = 'identical sentence repeated verbatim again';
+    const turns = [
+      makeTurn('Proposer', repeated),
+      makeTurn('Proposer', repeated),
+      makeTurn('Proposer', repeated),
+    ];
     expect(detectEchoLoop(turns, 3)).toBe(true);
+  });
+
+  it('returns false for a 3-turn same-role transcript with diverging content (sufficient data, high OSI)', () => {
+    const turns = [
+      makeTurn('Proposer', 'apples bananas cherries dates elderberries'),
+      makeTurn('Proposer', 'figs grapes honeydew imbe jackfruit'),
+      makeTurn('Proposer', 'kiwi lemon mango nectarine olive'),
+    ];
+    expect(detectEchoLoop(turns, 3)).toBe(false);
+  });
+
+  it('does not falsely declare echo on round-1 transcripts (1 turn per role across 3 roles)', () => {
+    // This is the exact shape of the bug: round 1 produces one Proposer +
+    // one Skeptic + one Synthesizer turn, the Sentry call fires
+    // detectEchoLoop with windowSize=3, and prior to the fix every role's
+    // mean was 0 (the no-prior-turn placeholder) → false positive collapse.
+    const turns = [
+      makeTurn('Proposer', 'a reasoned proposal'),
+      makeTurn('Skeptic', 'a targeted critique'),
+      makeTurn('Synthesizer', 'tentative synthesis'),
+    ];
+    expect(detectEchoLoop(turns, 3)).toBe(false);
+  });
+
+  it('respects a custom minTurnsPerRole', () => {
+    // With minTurnsPerRole=2, two identical turns IS enough to trip echo.
+    const repeated = 'identical sentence repeated verbatim again';
+    const turns = [
+      makeTurn('Proposer', repeated),
+      makeTurn('Proposer', repeated),
+    ];
+    expect(detectEchoLoop(turns, 2, OSI_CONVERGENCE_THRESHOLD, 2)).toBe(true);
   });
 
   it('threshold constant is accessible and equals 0.15', () => {
     expect(OSI_CONVERGENCE_THRESHOLD).toBe(0.15);
+  });
+
+  it('MIN_TURNS_PER_ROLE_FOR_ECHO_CHECK constant is accessible and equals 3', () => {
+    expect(MIN_TURNS_PER_ROLE_FOR_ECHO_CHECK).toBe(3);
   });
 });
