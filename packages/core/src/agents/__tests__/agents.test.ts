@@ -111,14 +111,15 @@ describe('ProposerAgent', () => {
     expect(userPrompt).toContain('I doubt this.');
   });
 
-  it('enforces 100-word cap: truncated=true when response > 100 words', async () => {
-    const longResponse = nWords(150);
+  it('enforces 200-word cap: truncated=true when response > 200 words', async () => {
+    // Cap was doubled from 100 to 200; agents call enforceWordCap() with the default.
+    const longResponse = nWords(250);
     const agent = new ProposerAgent(makeAdapter(longResponse));
     const board = makeBlackboard();
     const result = await agent.generate(board);
 
     expect(result.truncated).toBe(true);
-    expect(result.content.split(/\s+/).length).toBe(100);
+    expect(result.content.split(/\s+/).length).toBe(200);
   });
 });
 
@@ -192,8 +193,9 @@ describe('SkepticAgent', () => {
     expect(board.conflicts[0]!.between).toContain('Unknown');
   });
 
-  it('enforces 100-word cap on output', async () => {
-    const longResponse = nWords(150);
+  it('enforces 200-word cap on output', async () => {
+    // Cap was doubled from 100 to 200; agents call enforceWordCap() with the default.
+    const longResponse = nWords(250);
     const agent = new SkepticAgent(makeAdapter(longResponse));
     const board = makeBlackboard({
       turns: [{ agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'Regulation is good.', timestamp: '' }],
@@ -201,7 +203,7 @@ describe('SkepticAgent', () => {
     const result = await agent.generate(board);
 
     expect(result.truncated).toBe(true);
-    expect(result.content.split(/\s+/).length).toBe(100);
+    expect(result.content.split(/\s+/).length).toBe(200);
   });
 
   it('does NOT record a conflict when output contains no disagreement language', async () => {
@@ -274,14 +276,15 @@ describe('SynthesizerAgent', () => {
     expect(result.confidence).toBeCloseTo(1.0);
   });
 
-  it('enforces 100-word cap on output', async () => {
-    const longResponse = nWords(150) + ' confidence: 0.6';
+  it('enforces 200-word cap on output', async () => {
+    // Cap was doubled from 100 to 200; agents call enforceWordCap() with the default.
+    const longResponse = nWords(250) + ' confidence: 0.6';
     const agent = new SynthesizerAgent(makeAdapter(longResponse));
     const board = makeBlackboard();
     const result = await agent.generate(board);
 
     expect(result.truncated).toBe(true);
-    expect(result.content.split(/\s+/).length).toBe(100);
+    expect(result.content.split(/\s+/).length).toBe(200);
   });
 
   it('includes unresolved conflicts in user prompt', async () => {
@@ -335,14 +338,15 @@ describe('RedAgent', () => {
     expect(board.conflicts).toHaveLength(0);
   });
 
-  it('enforces 100-word cap on output', async () => {
-    const longResponse = nWords(120);
+  it('enforces 200-word cap on output', async () => {
+    // Cap was doubled from 100 to 200; agents call enforceWordCap() with the default.
+    const longResponse = nWords(250);
     const agent = new RedAgent(makeAdapter(longResponse));
     const board = makeBlackboard();
     const result = await agent.generate(board);
 
     expect(result.truncated).toBe(true);
-    expect(result.content.split(/\s+/).length).toBe(100);
+    expect(result.content.split(/\s+/).length).toBe(200);
   });
 });
 
@@ -365,75 +369,12 @@ describe('SentryAgent', () => {
     expect(result.signal).toBe('ok');
   });
 
-  it('returns specialist_needed when model says SPECIALIST_NEEDED', async () => {
-    const agent = new SentryAgent(makeAdapter('SPECIALIST_NEEDED'));
-    const board = makeBlackboard();
-    const result = await agent.generate(board);
-
-    expect(result.signal).toBe('specialist_needed');
-  });
-
-  it('returns collapse_detected when model says COLLAPSE_DETECTED', async () => {
-    // Need turns that don't trigger programmatic check so model is reached.
-    const agent = new SentryAgent(makeAdapter('COLLAPSE_DETECTED'));
-    const board = makeBlackboard({
-      turns: [
-        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'Regulation is good.', timestamp: '' },
-        { agent: 'Skeptic', neurotype: 'critical', model: 'test', content: 'Regulation is bad.', timestamp: '' },
-      ],
-    });
-    const result = await agent.generate(board);
-
-    expect(result.signal).toBe('collapse_detected');
-  });
-
-  it('programmatically detects collapse when last 2 turns are same role with high similarity', async () => {
-    const collapseAdapter = makeAdapter('OK');
-    const agent = new SentryAgent(collapseAdapter);
-    const repeatedContent = 'Regulation is absolutely essential for safety and accountability in AI systems.';
-    const board = makeBlackboard({
-      turns: [
-        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: repeatedContent, timestamp: '' },
-        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: repeatedContent, timestamp: '' },
-      ],
-    });
-    const result = await agent.generate(board);
-
-    expect(result.signal).toBe('collapse_detected');
-    // Model should NOT have been called since the check short-circuits.
-    expect(collapseAdapter.generate).not.toHaveBeenCalled();
-  });
-
-  it('does not trigger programmatic collapse when last 2 turns are different roles', async () => {
-    const adapter = makeAdapter('OK');
-    const agent = new SentryAgent(adapter);
-    const board = makeBlackboard({
-      turns: [
-        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'Same content here exactly.', timestamp: '' },
-        { agent: 'Skeptic', neurotype: 'critical', model: 'test', content: 'Same content here exactly.', timestamp: '' },
-      ],
-    });
-    const result = await agent.generate(board);
-
-    // Different agents — no programmatic collapse, model is consulted.
-    expect(adapter.generate).toHaveBeenCalledOnce();
-    expect(result.signal).toBe('ok');
-  });
-
-  it('does not trigger programmatic collapse when same role but low similarity', async () => {
-    const adapter = makeAdapter('OK');
-    const agent = new SentryAgent(adapter);
-    const board = makeBlackboard({
-      turns: [
-        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'Completely different first statement about regulation.', timestamp: '' },
-        { agent: 'Proposer', neurotype: 'structured', model: 'test', content: 'Totally unrelated second point concerning freedom and markets.', timestamp: '' },
-      ],
-    });
-    await agent.generate(board);
-
-    // Low similarity — model should be consulted.
-    expect(adapter.generate).toHaveBeenCalledOnce();
-  });
+  // Removed: 5 tests that exercised a removed LLM-classification path
+  // (SPECIALIST_NEEDED / COLLAPSE_DETECTED model output, 2-turn same-role
+  // short-circuit, and model-consulted assertions). SentryAgent no longer
+  // calls the model adapter — collapse is detected programmatically via OSI
+  // (when osi_enabled) or the legacy 6-turn Jaccard check. Equivalent
+  // coverage lives in the OSI/legacy tests below.
 
   it('falls back to ok signal for unrecognised model output', async () => {
     const agent = new SentryAgent(makeAdapter('Everything looks fine.'));
