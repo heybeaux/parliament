@@ -1,10 +1,10 @@
 import type { ModelAdapter } from '../adapters/base.js';
 import type { Blackboard } from '../types.js';
 import type { Agent, AgentResult } from './base.js';
-import { enforceWordCap } from './utils.js';
+import { buildPromptHeader, enforceWordCap } from './utils.js';
 
 const SYSTEM_PROMPT =
-  'You are a rigorous critic. Identify logical leaps, unsupported assumptions, and errors in the previous response. Stay within 200 words.';
+  'You are a rigorous critic. Identify logical leaps, unsupported assumptions, and errors in the previous response. Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists.';
 
 /**
  * Lightweight markers used to detect that the Skeptic's free-form output
@@ -51,9 +51,10 @@ export class SkepticAgent implements Agent {
       .map((t) => `[${t.agent}]: ${t.content}`)
       .join('\n\n');
 
+    const header = buildPromptHeader(blackboard.topic);
     const userPrompt = recentTurns.length > 0
-      ? `Topic: ${blackboard.topic}\n\nDiscussion to critique:\n\n${recentTurns}`
-      : `Topic: ${blackboard.topic}`;
+      ? `${header}\n\nDiscussion to critique:\n\n${recentTurns}`
+      : header;
 
     const raw = await this.adapter.generate(userPrompt, SYSTEM_PROMPT);
     const result = enforceWordCap(raw);

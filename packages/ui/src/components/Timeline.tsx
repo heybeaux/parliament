@@ -9,22 +9,24 @@ interface Props {
   topic: string | null;
 }
 
-function groupIntoRounds(turns: Turn[]): Turn[][] {
-  const rounds: Turn[][] = [];
-  let current: Turn[] = [];
-  const seen = new Set<string>();
+interface RoundGroup {
+  round: number;
+  turns: Turn[];
+}
 
+function groupIntoRounds(turns: Turn[]): RoundGroup[] {
+  const byRound = new Map<number, Turn[]>();
   for (const t of turns) {
-    if (seen.has(t.agent)) {
-      rounds.push(current);
-      current = [];
-      seen.clear();
+    const list = byRound.get(t.round);
+    if (list) {
+      list.push(t);
+    } else {
+      byRound.set(t.round, [t]);
     }
-    current.push(t);
-    seen.add(t.agent);
   }
-  if (current.length > 0) rounds.push(current);
-  return rounds;
+  return Array.from(byRound.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([round, ts]) => ({ round, turns: ts }));
 }
 
 function formatElapsed(sec: number): string {
@@ -33,8 +35,17 @@ function formatElapsed(sec: number): string {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
+function durationSeconds(startedAt: string, completedAt: string): number | null {
+  const s = Date.parse(startedAt);
+  const c = Date.parse(completedAt);
+  if (Number.isNaN(s) || Number.isNaN(c)) return null;
+  const diff = Math.max(0, Math.round((c - s) / 1000));
+  return diff;
+}
+
 function ResultBanner({ result }: { result: DeliberationResult }) {
   const isConsensus = result.resolved;
+  const durationSec = durationSeconds(result.started_at, result.completed_at);
 
   return (
     <motion.div
@@ -82,6 +93,12 @@ function ResultBanner({ result }: { result: DeliberationResult }) {
           <span>{result.terminationReason.replace(/_/g, ' ')}</span>
           <span className="h-3 w-px bg-white/10" />
           <span>residue {result.residueScore.toFixed(2)}</span>
+          {durationSec !== null && (
+            <>
+              <span className="h-3 w-px bg-white/10" />
+              <span>duration {formatElapsed(durationSec)}</span>
+            </>
+          )}
         </div>
       </div>
     </motion.div>
@@ -109,10 +126,22 @@ export function Timeline({ result, running, elapsedSec, topic }: Props) {
             </span>
           )}
         </div>
-        {topic && (
-          <span className="max-w-sm truncate text-xs text-zinc-500/80">{topic}</span>
-        )}
       </div>
+
+      {/* Topic hero */}
+      {topic && (
+        <motion.div
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+          className="rounded-xl bg-white/[0.02] p-4 ring-1 ring-white/[0.06]"
+        >
+          <p className="mb-1 text-2xs font-semibold uppercase tracking-widest text-zinc-500">
+            Topic
+          </p>
+          <p className="text-lg font-medium text-zinc-100">{topic}</p>
+        </motion.div>
+      )}
 
       {/* Running indicator */}
       <AnimatePresence>
@@ -219,9 +248,9 @@ export function Timeline({ result, running, elapsedSec, topic }: Props) {
 
       {/* Rounds */}
       <div className="space-y-8">
-        {rounds.map((round, idx) => (
+        {rounds.map((group, idx) => (
           <motion.div
-            key={idx}
+            key={group.round}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: idx * 0.1 }}
@@ -229,15 +258,15 @@ export function Timeline({ result, running, elapsedSec, topic }: Props) {
             {/* Round header */}
             <div className="mb-4 flex items-center gap-3">
               <span className="flex h-6 items-center rounded-md bg-white/[0.04] px-2.5 font-mono text-2xs font-semibold uppercase tracking-widest text-zinc-500 ring-1 ring-white/[0.06]">
-                Round {idx + 1}
+                Round {group.round}
               </span>
               <div className="h-px flex-1 bg-gradient-to-r from-white/[0.06] to-transparent" />
             </div>
 
             {/* Turn cards grid */}
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {round.map((t, i) => (
-                <TurnCard key={i} turn={t} index={i} />
+              {group.turns.map((t, i) => (
+                <TurnCard key={`${group.round}-${i}`} turn={t} index={i} />
               ))}
             </div>
           </motion.div>

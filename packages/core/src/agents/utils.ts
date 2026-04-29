@@ -1,4 +1,27 @@
 /**
+ * Builds the shared header prepended to every non-sentry agent's user prompt.
+ *
+ * The header tells the model:
+ *   1. Today's date (so it doesn't hallucinate stale calendar context).
+ *   2. The cast of participants (so it treats `[Skeptic]:`, `[RedAgent]:`,
+ *      etc. as real co-deliberators rather than fictional voices it should
+ *      "explain" or invent).
+ *   3. The topic itself.
+ *
+ * Sentry is intentionally excluded — it's a structural classifier whose
+ * single job is to emit `ok | specialist_needed | collapse_detected` and
+ * doesn't benefit from cast context.
+ */
+export function buildPromptHeader(topic: string): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return [
+    `Current date: ${today}.`,
+    `This is a multi-agent deliberation. Other participants are named Proposer, Skeptic, Synthesizer, and RedAgent. References to them in the transcript are real participants, not fabrications.`,
+    `Topic: ${topic}`,
+  ].join('\n');
+}
+
+/**
  * Enforces a word count cap on the given text.
  * Returns the (possibly truncated) content and a flag indicating truncation.
  */

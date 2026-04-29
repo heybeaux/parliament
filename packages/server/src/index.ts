@@ -1,8 +1,10 @@
+import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { dirname, resolve as resolvePath } from 'node:path';
 import { serve } from '@hono/node-server';
 import { loadConfig, DEFAULT_PARLIAMENT_DEFAULTS } from '@parliament/core';
 import { initDb } from './db.js';
 import { createRouter } from './routes.js';
-import { loadServerConfig, isPubliclyBound } from './config.js';
+import { loadServerConfig, isPubliclyBound, DEFAULT_DB_PATH } from './config.js';
 import { API_KEY_ENV_VAR, API_KEY_UNSET_WARNING } from './middleware/auth.js';
 
 function resolvePort(): number {
@@ -33,7 +35,27 @@ if (
   );
 }
 
-const db = initDb();
+const dbPath = serverConfig.db_path;
+
+// Ensure the parent directory exists before opening the database.
+mkdirSync(dirname(dbPath), { recursive: true });
+
+// One-time legacy migration: when the user hasn't pinned PARLIAMENT_DB_PATH and
+// an old `./parliament.db` exists in cwd, hoist it into the new home location
+// so prior deliberations remain visible. We never delete the original — the
+// operator is expected to clean up once they confirm the move.
+const envPathPinned = Boolean(process.env['PARLIAMENT_DB_PATH']);
+if (!envPathPinned && dbPath === DEFAULT_DB_PATH) {
+  const legacyPath = resolvePath(process.cwd(), 'parliament.db');
+  if (existsSync(legacyPath) && !existsSync(dbPath)) {
+    copyFileSync(legacyPath, dbPath);
+    console.log(
+      `Parliament: copied legacy DB ${legacyPath} -> ${dbPath} (original left in place; remove when ready).`,
+    );
+  }
+}
+
+const db = initDb(dbPath);
 const app = createRouter(db, { serverConfig, apiKey });
 
 const port = resolvePort();

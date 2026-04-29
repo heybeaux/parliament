@@ -11,13 +11,14 @@ import {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeTurn(agent: string, content: string): Turn {
+function makeTurn(agent: string, content: string, round = 1): Turn {
   return {
     agent,
     neurotype: 'structured',
     model: 'test-model',
     content,
     timestamp: new Date().toISOString(),
+    round,
   };
 }
 

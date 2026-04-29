@@ -56,6 +56,7 @@ export async function getTranscript(file: string): Promise<DeliberationResult> {
   const res = await fetch(`${BASE}/transcripts/${encodeURIComponent(file)}`);
   const raw = await jsonOrThrow<Record<string, unknown>>(res);
   // Transcript files use snake_case; normalize to camelCase for the UI.
+  const fallbackTimestamp = (raw['created_at'] ?? '') as string;
   return {
     topic: raw['topic'] as string,
     turns: raw['turns'] as DeliberationResult['turns'],
@@ -66,6 +67,8 @@ export async function getTranscript(file: string): Promise<DeliberationResult> {
     split: (raw['split'] ?? null) as DeliberationResult['split'],
     terminationReason: (raw['termination_reason'] ?? raw['terminationReason'] ?? 'max_rounds') as DeliberationResult['terminationReason'],
     totalRounds: (raw['total_rounds'] ?? raw['totalRounds'] ?? 0) as number,
+    started_at: (raw['started_at'] ?? fallbackTimestamp) as string,
+    completed_at: (raw['completed_at'] ?? fallbackTimestamp) as string,
   };
 }
 

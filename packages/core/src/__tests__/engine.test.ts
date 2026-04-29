@@ -115,11 +115,52 @@ describe('DeliberationEngine', () => {
       resolved: expect.any(Boolean),
       terminationReason: expect.any(String),
       totalRounds: expect.any(Number),
+      started_at: expect.any(String),
+      completed_at: expect.any(String),
     });
 
     // synthesis and split can be null/object
     expect('synthesis' in result).toBe(true);
     expect('split' in result).toBe(true);
+
+    // started_at must precede completed_at.
+    expect(Date.parse(result.completed_at)).toBeGreaterThanOrEqual(
+      Date.parse(result.started_at),
+    );
+
+    // Every recorded turn must carry a 1-indexed round number bounded by totalRounds.
+    for (const turn of result.turns) {
+      expect(typeof turn.round).toBe('number');
+      expect(turn.round).toBeGreaterThanOrEqual(1);
+      expect(turn.round).toBeLessThanOrEqual(result.totalRounds);
+    }
+  });
+
+  it('records the loop round on every turn', async () => {
+    const config = makeConfig({
+      maxRounds: 3,
+      redAgentInterval: 2,
+      agents: {
+        ...makeConfig().agents,
+        synthesizer: makeSynthesizerAgent(0.3) as unknown as import('../agents/synthesizer.js').SynthesizerAgent,
+      },
+    });
+
+    const result = await engine.run('round-tagging topic', config);
+
+    // Proposer fires only on round 1.
+    const proposerTurns = result.turns.filter((t) => t.agent === 'Proposer');
+    expect(proposerTurns.every((t) => t.round === 1)).toBe(true);
+
+    // RedAgent injection at interval=2 means we expect a RedAgent turn at round 2.
+    const redTurns = result.turns.filter((t) => t.agent === 'RedAgent');
+    expect(redTurns.some((t) => t.round === 2)).toBe(true);
+
+    // Round numbers should appear in non-decreasing order across the transcript.
+    const rounds = result.turns.map((t) => t.round);
+    for (let i = 1; i < rounds.length; i++) {
+      expect(rounds[i]!).toBeGreaterThanOrEqual(rounds[i - 1]!);
+    }
   });
 
   // -------------------------------------------------------------------------

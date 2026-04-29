@@ -23,6 +23,7 @@ const MOCK_RESULT: DeliberationResult = {
       model: 'llama3.2',
       content: 'Initial proposal.',
       timestamp: '2026-01-01T00:00:00.000Z',
+      round: 1,
     },
     {
       agent: 'Skeptic',
@@ -30,6 +31,7 @@ const MOCK_RESULT: DeliberationResult = {
       model: 'mistral',
       content: 'A critique.',
       timestamp: '2026-01-01T00:00:01.000Z',
+      round: 1,
     },
   ],
   conflicts: [],
@@ -39,6 +41,8 @@ const MOCK_RESULT: DeliberationResult = {
   split: null,
   terminationReason: 'consensus',
   totalRounds: 1,
+  started_at: '2026-01-01T00:00:00.000Z',
+  completed_at: '2026-01-01T00:00:30.000Z',
 };
 
 const MOCK_SPLIT_RESULT: DeliberationResult = {
@@ -210,6 +214,7 @@ describe('display.ts role colors', () => {
       model: 'llama3.2',
       content: 'text',
       timestamp: '2026-01-01T00:00:00.000Z',
+      round: 1,
     };
 
     // The real implementation is mocked, mock returns '[MOCK HEADER]'.
@@ -245,6 +250,7 @@ describe('display.ts real output format', () => {
       model: 'llama3.2',
       content: 'text',
       timestamp: '2026-01-01T00:00:00.000Z',
+      round: 1,
     };
 
     // The header template is [ROLE | neurotype | model] — verify shape.

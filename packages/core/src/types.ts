@@ -32,6 +32,8 @@ export interface Turn {
   model: string;
   content: string;
   timestamp: string;
+  /** 1-indexed round number assigned by the engine when this turn was recorded. */
+  round: number;
   osi_score?: number;
   /** Populated by SynthesizerAgent only — structured signals next to the prose. */
   meta?: SynthesizerMeta;
@@ -76,6 +78,10 @@ export interface DeliberationResult {
   split: SplitSummary | null;
   terminationReason: TerminationReason;
   totalRounds: number;
+  /** ISO8601 timestamp captured at the start of run(). */
+  started_at: string;
+  /** ISO8601 timestamp captured immediately before run() returns. */
+  completed_at: string;
 }
 
 export interface Blackboard {

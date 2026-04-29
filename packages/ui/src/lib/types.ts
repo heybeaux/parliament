@@ -10,6 +10,8 @@ export interface Turn {
   model: string;
   content: string;
   timestamp: string;
+  /** 1-indexed round number assigned by the engine when this turn was recorded. */
+  round: number;
   osi_score?: number;
 }
 
@@ -34,6 +36,10 @@ export interface DeliberationResult {
   split: SplitSummary | null;
   terminationReason: TerminationReason;
   totalRounds: number;
+  /** ISO8601 timestamp captured at the start of the deliberation. */
+  started_at: string;
+  /** ISO8601 timestamp captured immediately before the deliberation returned. */
+  completed_at: string;
 }
 
 export interface DeliberationCreated extends DeliberationResult {
