@@ -53,6 +53,16 @@ export interface TopologyPreset {
   isBuiltin: boolean;
   /** Sequential step list. */
   steps: readonly TopologyStep[];
+  /**
+   * Optional parallel step block. When present, every entry executes
+   * concurrently against a read-only blackboard snapshot taken at block
+   * start. Stage 4 — see add-jury-parallel/specs/topology-parallel/spec.md.
+   *
+   * Step IDs across `steps` and `parallel_steps` MUST be globally unique
+   * within the preset; the loader rejects collisions with
+   * `duplicate_step_id`.
+   */
+  parallel_steps?: readonly TopologyStep[];
 }
 
 /**

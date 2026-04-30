@@ -213,8 +213,25 @@ function parseUserPresets(raw: unknown): Record<string, TopologyPreset> {
     }
 
     const steps = (entry['steps'] as unknown[]).map((stepRaw, i) =>
-      parseStep(stepRaw, id, i),
+      parseStep(stepRaw, id, i, 'steps'),
     );
+
+    // `parallel_steps` is optional and additive (Stage 4). Absent → no-op.
+    let parallelSteps: readonly TopologyStep[] | undefined;
+    const parallelRaw = entry['parallel_steps'];
+    if (parallelRaw !== undefined) {
+      if (!Array.isArray(parallelRaw)) {
+        throw new TopologyValidationError(
+          'invalid_preset_shape',
+          `parliament.toml: [topology.presets.${id}].parallel_steps must be an array of step tables`,
+        );
+      }
+      parallelSteps = Object.freeze(
+        (parallelRaw as unknown[]).map((stepRaw, i) =>
+          parseStep(stepRaw, id, i, 'parallel_steps'),
+        ),
+      );
+    }
 
     result[id] = {
       id,
@@ -223,16 +240,22 @@ function parseUserPresets(raw: unknown): Record<string, TopologyPreset> {
       best_for: entry['best_for'] as string,
       isBuiltin: false,
       steps: Object.freeze(steps),
+      ...(parallelSteps !== undefined ? { parallel_steps: parallelSteps } : {}),
     };
   }
   return result;
 }
 
-function parseStep(raw: unknown, presetId: string, index: number): TopologyStep {
+function parseStep(
+  raw: unknown,
+  presetId: string,
+  index: number,
+  block: 'steps' | 'parallel_steps' = 'steps',
+): TopologyStep {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new TopologyValidationError(
       'invalid_preset_shape',
-      `parliament.toml: [topology.presets.${presetId}] step #${index} must be a table`,
+      `parliament.toml: [topology.presets.${presetId}] ${block} #${index} must be a table`,
     );
   }
   const entry = raw as Record<string, unknown>;
@@ -240,13 +263,13 @@ function parseStep(raw: unknown, presetId: string, index: number): TopologyStep 
   if (typeof entry['id'] !== 'string') {
     throw new TopologyValidationError(
       'invalid_preset_shape',
-      `parliament.toml: [topology.presets.${presetId}] step #${index} is missing string field "id"`,
+      `parliament.toml: [topology.presets.${presetId}] ${block} #${index} is missing string field "id"`,
     );
   }
   if (typeof entry['neurotype'] !== 'string') {
     throw new TopologyValidationError(
       'invalid_preset_shape',
-      `parliament.toml: [topology.presets.${presetId}] step #${index} is missing string field "neurotype"`,
+      `parliament.toml: [topology.presets.${presetId}] ${block} #${index} is missing string field "neurotype"`,
     );
   }
 
@@ -286,9 +309,14 @@ function validatePreset(
   preset: TopologyPreset,
   userNeurotypes: Readonly<Record<string, UserNeurotypeConfig>>,
 ): void {
-  const seenIds = new Set<string>();
-  for (const step of preset.steps) {
-    // Kebab-case rule.
+  // Track the originating block for each ID so duplicate errors can name
+  // both locations — e.g. duplicate id "critique" in steps and parallel_steps.
+  const seenIds = new Map<string, 'steps' | 'parallel_steps'>();
+
+  const validateStep = (
+    step: TopologyStep,
+    block: 'steps' | 'parallel_steps',
+  ): void => {
     if (!KEBAB_CASE.test(step.id)) {
       throw new TopologyValidationError(
         'invalid_step_id_format',
@@ -296,33 +324,43 @@ function validatePreset(
       );
     }
 
-    // Duplicate-ID rule.
-    if (seenIds.has(step.id)) {
+    const previousBlock = seenIds.get(step.id);
+    if (previousBlock !== undefined) {
+      const where =
+        previousBlock === block
+          ? `appears twice in ${block}`
+          : `appears in both ${previousBlock} and ${block}`;
       throw new TopologyValidationError(
         'duplicate_step_id',
-        `preset "${preset.id}": duplicate step id "${step.id}"`,
+        `preset "${preset.id}": duplicate step id "${step.id}" — ${where}`,
       );
     }
-    seenIds.add(step.id);
+    seenIds.set(step.id, block);
 
-    // Sentry-in-steps rule (highest signal — this is a structural mistake).
+    // Sentry-in-steps rule applies to BOTH sequential and parallel blocks
+    // (synthesizer/redAgent/sentry are structural infrastructure regardless
+    // of where they're declared).
     if (FORBIDDEN_STEP_NEUROTYPES.has(step.neurotype)) {
       throw new TopologyValidationError(
         'sentry_in_steps',
-        `preset "${preset.id}": step "${step.id}" references "${step.neurotype}", which is structural infrastructure and cannot be used as a preset step`,
+        `preset "${preset.id}": ${block} entry "${step.id}" references "${step.neurotype}", which is structural infrastructure and cannot be used as a preset step`,
       );
     }
 
-    // Neurotype-resolution rule.
     if (
       !isBuiltinNeurotype(step.neurotype) &&
       !Object.prototype.hasOwnProperty.call(userNeurotypes, step.neurotype)
     ) {
       throw new TopologyValidationError(
         'unknown_neurotype',
-        `preset "${preset.id}": step "${step.id}" references unknown neurotype "${step.neurotype}". Known built-in IDs: ${BUILTIN_AGENT_IDS.join(', ')}`,
+        `preset "${preset.id}": ${block} entry "${step.id}" references unknown neurotype "${step.neurotype}". Known built-in IDs: ${BUILTIN_AGENT_IDS.join(', ')}`,
       );
     }
+  };
+
+  for (const step of preset.steps) validateStep(step, 'steps');
+  if (preset.parallel_steps) {
+    for (const step of preset.parallel_steps) validateStep(step, 'parallel_steps');
   }
 }
 

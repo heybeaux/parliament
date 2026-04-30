@@ -136,3 +136,26 @@ Entries under `[neurotypes.<id>]` MUST include at minimum a `model` field (model
 
 - **WHEN** `[neurotypes.historian]` declares `model` and `system_prompt` but no `temperature`
 - **THEN** the neurotype is registered with `temperature = 0.7`
+
+### Requirement: Topology presets MAY declare an additive `parallel_steps` block
+
+A preset MAY declare an optional `parallel_steps` field alongside its sequential `steps` array. The field is purely additive: a preset that omits `parallel_steps` MUST behave identically to a sequential-only preset, with no warnings or behavior changes.
+
+When present, the field MUST be parsed as a list whose entries share the same shape as a sequential step (`id`, `neurotype`, `optional`). Step IDs MUST be globally unique across both `steps` and `parallel_steps`; duplicates MUST cause config loading to fail with the same `duplicate_step_id` validation class used for sequential duplicates.
+
+The Stage 4 capability `topology-parallel` (see `add-jury-parallel/specs/topology-parallel/spec.md`) governs the runtime semantics — read-only snapshot, registration-order merge, block-level timeout, and `parallel_group` annotation. This requirement only governs schema admission.
+
+#### Scenario: Preset omits `parallel_steps`
+
+- **WHEN** a preset declares `steps` but no `parallel_steps`
+- **THEN** the preset validates and runs identically to pre-Stage-4 sequential-only presets
+
+#### Scenario: Preset declares both blocks
+
+- **WHEN** a preset declares both `steps = [proposer, synthesizer]` and `parallel_steps = [skeptic, empiricist, steelmanner, devils-advocate]`
+- **THEN** the loader admits the preset; runtime semantics are governed by `topology-parallel`
+
+#### Scenario: Step ID collision across blocks
+
+- **WHEN** a preset declares `steps = [{id = "critique", neurotype = "skeptic"}]` and `parallel_steps = [{id = "critique", neurotype = "empiricist"}]`
+- **THEN** config loading fails with `duplicate_step_id`, naming both block locations

@@ -434,3 +434,169 @@ active = 42
     );
   });
 });
+
+describe('loadTopology — parallel_steps schema (Stage 4)', () => {
+  it('accepts a preset with both steps and parallel_steps', () => {
+    const config = load(`
+[topology]
+active = "jury-like"
+
+[topology.presets.jury-like]
+name = "Jury-like"
+description = "User-defined preset that mirrors Jury's shape."
+best_for = "parallel critic deliberation"
+steps = [
+  { id = "proposer", neurotype = "proposer" },
+]
+parallel_steps = [
+  { id = "skeptic", neurotype = "skeptic" },
+  { id = "empiricist", neurotype = "empiricist" },
+  { id = "steelmanner", neurotype = "steelmanner" },
+  { id = "devils-advocate", neurotype = "devils-advocate" },
+]
+`);
+    const preset = config.presets['jury-like'];
+    expect(preset).toBeDefined();
+    expect(preset!.steps.map((s) => s.id)).toEqual(['proposer']);
+    expect(preset!.parallel_steps).toBeDefined();
+    expect(preset!.parallel_steps!.map((s) => s.id)).toEqual([
+      'skeptic',
+      'empiricist',
+      'steelmanner',
+      'devils-advocate',
+    ]);
+  });
+
+  it('treats absent parallel_steps as a no-op (sequential-only preset still validates)', () => {
+    const config = load(`
+[topology]
+active = "seq-only"
+
+[topology.presets.seq-only]
+name = "Sequential Only"
+description = "No parallel block."
+best_for = "regression test for additive parallel_steps."
+steps = [
+  { id = "proposer", neurotype = "proposer" },
+  { id = "skeptic", neurotype = "skeptic" },
+]
+`);
+    const preset = config.presets['seq-only'];
+    expect(preset).toBeDefined();
+    expect(preset!.parallel_steps).toBeUndefined();
+  });
+
+  it('built-in sequential-only presets continue to validate without parallel_steps', () => {
+    const config = load(`
+[topology]
+active = "debate"
+`);
+    expect(config.activePreset.parallel_steps).toBeUndefined();
+    // Verify every built-in preset is loadable with no errors.
+    for (const id of Object.keys(BUILTIN_PRESETS)) {
+      const c = load(`
+[topology]
+active = "${id}"
+`);
+      expect(c.activePreset.id).toBe(id);
+    }
+  });
+
+  it('rejects a step ID that appears in both steps and parallel_steps', () => {
+    expectThrowsWithCode(
+      () =>
+        load(`
+[topology]
+active = "dup-cross"
+
+[topology.presets.dup-cross]
+name = "Duplicate Across Blocks"
+description = "Same id in steps and parallel_steps."
+best_for = "Negative test."
+steps = [{ id = "critique", neurotype = "skeptic" }]
+parallel_steps = [{ id = "critique", neurotype = "empiricist" }]
+`),
+      'duplicate_step_id',
+      /both steps and parallel_steps/,
+    );
+  });
+
+  it('rejects duplicate IDs within parallel_steps itself', () => {
+    expectThrowsWithCode(
+      () =>
+        load(`
+[topology]
+active = "dup-par"
+
+[topology.presets.dup-par]
+name = "Dup Parallel"
+description = "Two parallel siblings share an ID."
+best_for = "Negative test."
+steps = [{ id = "proposer", neurotype = "proposer" }]
+parallel_steps = [
+  { id = "voice", neurotype = "skeptic" },
+  { id = "voice", neurotype = "empiricist" },
+]
+`),
+      'duplicate_step_id',
+      /appears twice in parallel_steps/,
+    );
+  });
+
+  it('rejects parallel_steps that is not an array', () => {
+    expectThrowsWithCode(
+      () =>
+        load(`
+[topology]
+active = "bad-par"
+
+[topology.presets.bad-par]
+name = "Bad Parallel"
+description = "parallel_steps is a table, not an array."
+best_for = "Negative test."
+steps = [{ id = "proposer", neurotype = "proposer" }]
+parallel_steps = { id = "skeptic", neurotype = "skeptic" }
+`),
+      'invalid_preset_shape',
+      /parallel_steps must be an array/,
+    );
+  });
+
+  it('rejects sentry/synthesizer/redAgent inside parallel_steps', () => {
+    expectThrowsWithCode(
+      () =>
+        load(`
+[topology]
+active = "sentry-par"
+
+[topology.presets.sentry-par]
+name = "Sentry In Parallel"
+description = "Sentry must not appear as a step in any block."
+best_for = "Negative test."
+steps = [{ id = "proposer", neurotype = "proposer" }]
+parallel_steps = [{ id = "watch", neurotype = "sentry" }]
+`),
+      'sentry_in_steps',
+      /structural infrastructure/,
+    );
+  });
+
+  it('rejects unknown neurotypes inside parallel_steps with the same error class', () => {
+    expectThrowsWithCode(
+      () =>
+        load(`
+[topology]
+active = "ghost-par"
+
+[topology.presets.ghost-par]
+name = "Ghost Parallel"
+description = "References a neurotype that does not exist."
+best_for = "Negative test."
+steps = [{ id = "proposer", neurotype = "proposer" }]
+parallel_steps = [{ id = "ghost", neurotype = "doesnotexist" }]
+`),
+      'unknown_neurotype',
+      /unknown neurotype "doesnotexist"/,
+    );
+  });
+});
