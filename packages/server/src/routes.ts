@@ -277,6 +277,154 @@ function enrichResult(result: DeliberationResult): EnrichedDeliberationResult {
 }
 
 // ---------------------------------------------------------------------------
+// Preset availability — `requires_neurotypes` / `missing_neurotypes`
+// ---------------------------------------------------------------------------
+//
+// Per Stage 4 server contract: each preset entry exposes the union of
+// neurotype IDs referenced by its `steps` and `parallel_steps`, plus the
+// subset that are currently un-registered (neither built-in nor defined under
+// `[neurotypes.<id>]`).
+//
+// Caching strategy: validation walks every step of every preset against the
+// registry, which is wasted work if neither the preset registry nor the
+// user-defined neurotype set has changed. We hash the relevant subset of the
+// resolved `TopologyConfig` and memoize the enriched preset list against that
+// hash. A config reload changes the hash and forces a recompute; otherwise we
+// reuse the prior result on every request.
+
+interface PresetStepShape {
+  id: string;
+  neurotype: string;
+  optional: boolean;
+}
+
+interface EnrichedPreset {
+  id: string;
+  name: string;
+  description: string;
+  best_for: string;
+  isBuiltin: boolean;
+  steps: PresetStepShape[];
+  parallel_steps?: PresetStepShape[];
+  requires_neurotypes: string[];
+  missing_neurotypes: string[];
+}
+
+/**
+ * Stable signature of the inputs that affect availability. Two configs with
+ * the same signature MUST produce identical enriched output, so we can reuse
+ * the cached result. Order-stable: keys are sorted so a re-parse of the same
+ * file produces the same string.
+ */
+function topologySignature(topology: TopologyConfig): string {
+  const presetEntries = Object.keys(topology.presets)
+    .sort()
+    .map((id) => {
+      const p = topology.presets[id]!;
+      const seq = p.steps.map((s) => `${s.id}:${s.neurotype}:${s.optional}`).join(',');
+      const par =
+        p.parallel_steps !== undefined
+          ? p.parallel_steps.map((s) => `${s.id}:${s.neurotype}:${s.optional}`).join(',')
+          : '';
+      return `${id}|${seq}|${par}`;
+    })
+    .join(';');
+  const userKeys = Object.keys(topology.userNeurotypes).sort().join(',');
+  return `presets=${presetEntries}#users=${userKeys}`;
+}
+
+/**
+ * Module-level cache for the enriched preset list. Survives across requests
+ * within a single process so consecutive GET /presets calls reuse the work.
+ */
+interface AvailabilityCache {
+  signature: string;
+  presets: EnrichedPreset[];
+  defaultPreset: string;
+  computeCount: number;
+}
+let presetAvailabilityCache: AvailabilityCache | null = null;
+
+/**
+ * Test seam — call between tests to force a fresh recompute on the next
+ * GET /presets request.
+ */
+export function __resetPresetAvailabilityCache(): void {
+  presetAvailabilityCache = null;
+}
+
+/**
+ * Test seam — read the number of times we have actually walked the registry
+ * since the cache was last cleared. Used by the AC3 cache test to assert that
+ * back-to-back requests do NOT recompute.
+ */
+export function __getPresetAvailabilityComputeCount(): number {
+  return presetAvailabilityCache?.computeCount ?? 0;
+}
+
+function buildEnrichedPresets(topology: TopologyConfig): EnrichedPreset[] {
+  const userKeys = new Set(Object.keys(topology.userNeurotypes));
+  return Object.values(topology.presets).map((p) => {
+    const allSteps = [...p.steps, ...(p.parallel_steps ?? [])];
+    // Preserve declaration order while de-duplicating shared neurotype refs.
+    const requires: string[] = [];
+    const seen = new Set<string>();
+    for (const step of allSteps) {
+      if (!seen.has(step.neurotype)) {
+        seen.add(step.neurotype);
+        requires.push(step.neurotype);
+      }
+    }
+    const missing = requires.filter(
+      (id) => !isBuiltinNeurotype(id) && !userKeys.has(id),
+    );
+
+    const enriched: EnrichedPreset = {
+      id: p.id,
+      name: p.name,
+      description: p.description,
+      best_for: p.best_for,
+      isBuiltin: p.isBuiltin,
+      steps: p.steps.map((s) => ({
+        id: s.id,
+        neurotype: s.neurotype,
+        optional: s.optional,
+      })),
+      requires_neurotypes: requires,
+      missing_neurotypes: missing,
+    };
+    if (p.parallel_steps !== undefined) {
+      enriched.parallel_steps = p.parallel_steps.map((s) => ({
+        id: s.id,
+        neurotype: s.neurotype,
+        optional: s.optional,
+      }));
+    }
+    return enriched;
+  });
+}
+
+function getPresetAvailability(topology: TopologyConfig): {
+  presets: EnrichedPreset[];
+  defaultPreset: string;
+} {
+  const signature = topologySignature(topology);
+  const cached = presetAvailabilityCache;
+  if (cached !== null && cached.signature === signature) {
+    return { presets: cached.presets, defaultPreset: cached.defaultPreset };
+  }
+  const presets = buildEnrichedPresets(topology);
+  const defaultPreset = topology.activePreset.id;
+  presetAvailabilityCache = {
+    signature,
+    presets,
+    defaultPreset,
+    computeCount: (cached?.computeCount ?? 0) + 1,
+  };
+  return { presets, defaultPreset };
+}
+
+// ---------------------------------------------------------------------------
 // Route factory
 // ---------------------------------------------------------------------------
 
@@ -388,10 +536,11 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
   // -------------------------------------------------------------------------
   // GET /presets — full topology preset registry plus the resolved default.
   //
-  // Response shape: { presets: TopologyPreset[], defaultPreset: string }.
-  // `defaultPreset` is the resolved active preset id from parliament.toml
-  // (debate when [topology] is absent or active is unset, per the loader's
-  // fallback rule).
+  // Response shape: { presets: EnrichedPreset[], defaultPreset: string }.
+  // Each preset entry carries `requires_neurotypes` / `missing_neurotypes` so
+  // the UI can grey out presets whose required neurotypes are not currently
+  // registered. The availability map is cached against a signature of the
+  // resolved topology — see `topologySignature` above for the cache key.
   // -------------------------------------------------------------------------
   app.get('/presets', (c) => {
     let topology: TopologyConfig;
@@ -406,19 +555,8 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
         500,
       );
     }
-    const presets = Object.values(topology.presets).map((p) => ({
-      id: p.id,
-      name: p.name,
-      description: p.description,
-      best_for: p.best_for,
-      isBuiltin: p.isBuiltin,
-      steps: p.steps.map((s) => ({
-        id: s.id,
-        neurotype: s.neurotype,
-        optional: s.optional,
-      })),
-    }));
-    return c.json({ presets, defaultPreset: topology.activePreset.id }, 200);
+    const { presets, defaultPreset } = getPresetAvailability(topology);
+    return c.json({ presets, defaultPreset }, 200);
   });
 
   // -------------------------------------------------------------------------
