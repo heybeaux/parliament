@@ -1,0 +1,56 @@
+schema: spec-driven
+
+context: |
+  Parliament — multi-agent deliberation engine.
+
+  Tech stack:
+    - TypeScript, pnpm workspace
+    - Server: Hono + better-sqlite3 (persistence under ~/.parliament/parliament.db)
+    - UI: Vite + React + framer-motion
+    - Model backend: Apple Silicon MLX via oMLX provider (Bearer auth, port 8000)
+
+  Packages:
+    - @parliament/core    — agents, blackboard, OSI/residue scoring, topology runtime
+    - @parliament/server  — HTTP API, deliberation orchestration, transcript storage
+    - @parliament/cli     — operator-facing entry point
+    - @parliament/ui      — deliberation viewer + observability panels
+
+  Domain primitives:
+    - Neurotype: an agent persona with a distinct cognitive posture (Proposer, Skeptic,
+      Synthesizer, RedAgent, Sentry, plus stage-1 additions Historian, Forecaster,
+      Pragmatist, Steelmanner, Empiricist, Lateralist, Translator, Devil's Advocate).
+    - Topology: an ordered/parallel execution plan over neurotypes, configured via
+      [topology.*] / [neurotypes.*] in parliament.toml.
+    - Preset: a named topology with metadata (name, description, best_for) — six ship
+      in stage-1 (Debate, Star Chamber, Chain-of-Verifiers, Socratic, Long-View,
+      Reframe, Pragmatic) with Jury (parallel) deferred to stage-4.
+
+  Conventions:
+    - Specifications use RFC 2119 keywords (MUST / SHOULD / MAY) deliberately.
+    - Topology execution is strict-by-default: every step in a preset runs unless
+      explicitly marked `optional: true`. Skipping is a per-step opt-in, not a default.
+    - Preset metadata (name, description, best_for) is required even when not yet
+      surfaced in UI — adding it later is a breaking schema change.
+    - Stage labels (Stage 0–4) anchor every change to the rollout roadmap. Stage 0 is
+      spec-only; runtime/UI work happens in 1–4.
+
+  Inspiration:
+    - Hernández-Espinosa et al., PNAS Nexus 2026: "Neurodivergent influenceability in
+      agentic AI as a contingent solution to the AI alignment problem." Parliament is
+      not a research replication — it's an end-user deliberation tool that borrows the
+      paper's structural bet (cognitive diversity > polished single-model output).
+
+rules:
+  proposal:
+    - Lead with Why before What.
+    - Include an explicit "Non-goals" section.
+    - Reference the Parliament roadmap stage (0–4) the change belongs to.
+    - Name affected packages explicitly (@parliament/core, /server, /cli, /ui).
+  tasks:
+    - Break tasks into reviewable chunks (≤ 1 day of focused work each).
+    - Mark tasks that depend on a later stage with "(deferred to Stage N)".
+    - Group tasks by package when a change spans more than one.
+  design:
+    - Document strict-by-default semantics whenever a step or field could be skipped.
+    - Call out backward-incompatible schema changes loudly — Parliament's TOML config
+      is user-facing.
