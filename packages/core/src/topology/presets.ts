@@ -42,12 +42,95 @@ const DEBATE_PRESET: TopologyPreset = Object.freeze({
   ]),
 });
 
+const STAR_CHAMBER_PRESET: TopologyPreset = Object.freeze({
+  id: 'star-chamber',
+  name: 'Star Chamber',
+  description:
+    'A Proposer opens and is then interrogated in turn by three distinct critics — Skeptic, Devils-Advocate, and Empiricist — before the Synthesizer reconciles the round.',
+  best_for:
+    'Questions where multiple critique angles need to fire before synthesis: combining logical, adversarial, and evidence-based scrutiny against a single proposal.',
+  isBuiltin: true,
+  steps: Object.freeze([
+    Object.freeze({ id: 'proposer', neurotype: 'proposer', optional: false }),
+    Object.freeze({ id: 'skeptic', neurotype: 'skeptic', optional: false }),
+    Object.freeze({ id: 'devils-advocate', neurotype: 'devils-advocate', optional: false }),
+    Object.freeze({ id: 'empiricist', neurotype: 'empiricist', optional: false }),
+  ]),
+});
+
+const CHAIN_OF_VERIFIERS_PRESET: TopologyPreset = Object.freeze({
+  id: 'chain-of-verifiers',
+  name: 'Chain-of-Verifiers',
+  description:
+    'A sequence of verifiers each apply a different quality check to the Proposer: Empiricist demands evidence, Steelmanner restates charitably, Skeptic applies logic.',
+  best_for:
+    'Factual claims or arguments where evidence-then-charity-then-logic is the natural review order.',
+  isBuiltin: true,
+  steps: Object.freeze([
+    Object.freeze({ id: 'proposer', neurotype: 'proposer', optional: false }),
+    Object.freeze({ id: 'empiricist', neurotype: 'empiricist', optional: false }),
+    Object.freeze({ id: 'steelmanner', neurotype: 'steelmanner', optional: false }),
+    Object.freeze({ id: 'skeptic', neurotype: 'skeptic', optional: false }),
+  ]),
+});
+
+const SOCRATIC_PRESET: TopologyPreset = Object.freeze({
+  id: 'socratic',
+  name: 'Socratic',
+  description:
+    'No Proposer at the head: the Translator opens by surfacing implicit assumptions in the user-supplied topic, the Empiricist demands evidence, the Skeptic applies logical scrutiny, and the Synthesizer reconciles.',
+  best_for:
+    'Questions where the user wants their OWN claim dissected, not a pre-existing thesis defended.',
+  isBuiltin: true,
+  steps: Object.freeze([
+    Object.freeze({ id: 'translator', neurotype: 'translator', optional: false }),
+    Object.freeze({ id: 'empiricist', neurotype: 'empiricist', optional: false }),
+    Object.freeze({ id: 'skeptic', neurotype: 'skeptic', optional: false }),
+  ]),
+});
+
+const LONG_VIEW_PRESET: TopologyPreset = Object.freeze({
+  id: 'long-view',
+  name: 'Long-View',
+  description:
+    'A temporally-aware deliberation: the Historian frames past precedent, the Proposer asserts the present claim, the Forecaster projects forward, and the Pragmatist constrains by what is feasible before synthesis.',
+  best_for:
+    'Strategic or policy questions where time-horizon matters and decisions must be situated against past precedent and future projection.',
+  isBuiltin: true,
+  steps: Object.freeze([
+    Object.freeze({ id: 'historian', neurotype: 'historian', optional: false }),
+    Object.freeze({ id: 'proposer', neurotype: 'proposer', optional: false }),
+    Object.freeze({ id: 'forecaster', neurotype: 'forecaster', optional: false }),
+    Object.freeze({ id: 'pragmatist', neurotype: 'pragmatist', optional: false }),
+  ]),
+});
+
+const REFRAME_PRESET: TopologyPreset = Object.freeze({
+  id: 'reframe',
+  name: 'Reframe',
+  description:
+    'A deliberation that introduces analogy, surfaces assumptions, and charitably opposes before synthesizing: the Lateralist reframes by analogy, the Translator surfaces hidden assumptions, the Steelmanner builds the strongest opposing case, and the Synthesizer reconciles.',
+  best_for:
+    'Questions where the framing seems wrong but you cannot say why — helps surface alternative framings before committing to a critique.',
+  isBuiltin: true,
+  steps: Object.freeze([
+    Object.freeze({ id: 'lateralist', neurotype: 'lateralist', optional: false }),
+    Object.freeze({ id: 'translator', neurotype: 'translator', optional: false }),
+    Object.freeze({ id: 'steelmanner', neurotype: 'steelmanner', optional: false }),
+  ]),
+});
+
 /**
  * Built-in presets keyed by ID. Frozen so callers cannot mutate the registry
  * at runtime.
  */
 export const BUILTIN_PRESETS: Readonly<Record<string, TopologyPreset>> = Object.freeze({
   debate: DEBATE_PRESET,
+  'star-chamber': STAR_CHAMBER_PRESET,
+  'chain-of-verifiers': CHAIN_OF_VERIFIERS_PRESET,
+  socratic: SOCRATIC_PRESET,
+  'long-view': LONG_VIEW_PRESET,
+  reframe: REFRAME_PRESET,
 });
 
 /** All built-in preset IDs in registration order. */
