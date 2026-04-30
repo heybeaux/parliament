@@ -141,8 +141,10 @@ active = "debate"
 
     expect(result.terminationReason).toBe('max_rounds');
     expect(result.totalRounds).toBe(2);
-    // Proposer + Skeptic + Synthesizer each fire 2× (once per round).
-    expect((proposer.generate as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(2);
+    // Proposer is round-1-only (matches legacy Debate semantics: opens once,
+    // synthesizer reconciliation carries the thread on subsequent rounds).
+    // Skeptic + Synthesizer each fire once per round.
+    expect((proposer.generate as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
     expect((skeptic.generate as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(2);
     // Resolved synthesizer is on the config object directly.
     expect((config.synthesizer.generate as ReturnType<typeof vi.fn>))

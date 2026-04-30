@@ -402,6 +402,13 @@ export class DeliberationEngine {
       // Step phase: walk the preset's declared step list in order.
       // ------------------------------------------------------------------ //
       for (const step of topology.activePreset.steps) {
+        // Round-1-only Proposer: the Proposer opens the deliberation; on
+        // subsequent rounds the synthesizer's reconciliation carries the
+        // thread forward via the blackboard. This matches the legacy
+        // pipeline's behavior and is what the byte-identical Debate
+        // regression test pins.
+        if (round > 1 && step.neurotype === 'proposer') continue;
+
         const agent = resolveNeurotype(step);
         const result = await agent.generate(blackboard);
         recordTurn(blackboard, agent, result.content, round);
