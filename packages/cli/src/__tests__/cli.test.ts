@@ -43,6 +43,7 @@ const MOCK_RESULT: DeliberationResult = {
   totalRounds: 1,
   started_at: '2026-01-01T00:00:00.000Z',
   completed_at: '2026-01-01T00:00:30.000Z',
+  events: [],
 };
 
 const MOCK_SPLIT_RESULT: DeliberationResult = {

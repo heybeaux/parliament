@@ -82,6 +82,29 @@ export interface SplitSummary {
   irreconcilable: boolean;
 }
 
+/**
+ * Out-of-band events the engine records alongside the turn stream. These are
+ * NOT turns themselves — they capture engine-level interventions (RedAgent
+ * injections) and infrastructure signals (Sentry echo-collapse warnings) that
+ * the Stage 3 Observability UI surfaces in the event list.
+ *
+ * Kinds:
+ *   - `red_agent.injection` — RedAgent fired at the configured interval. The
+ *     RedAgent's content is also recorded as a turn; the event is the
+ *     out-of-band marker for the panel's chronological list.
+ *   - `sentry.echo` — Sentry returned `collapse_detected`, terminating the
+ *     deliberation with `echo_loop`. No corresponding turn is recorded for
+ *     this event (Sentry never produces transcript prose).
+ */
+export interface SystemEvent {
+  /** 1-indexed round in which the event fired. */
+  round: number;
+  /** Discriminator for the event source. */
+  kind: 'red_agent.injection' | 'sentry.echo';
+  /** Human-readable description for the Observability panel's event list. */
+  message: string;
+}
+
 /** Result produced by DeliberationEngine.run(). */
 export interface DeliberationResult {
   topic: string;
@@ -100,6 +123,12 @@ export interface DeliberationResult {
   started_at: string;
   /** ISO8601 timestamp captured immediately before run() returns. */
   completed_at: string;
+  /**
+   * Out-of-band system events captured during deliberation. Empty array when
+   * no RedAgent injection or Sentry warning fired. See `SystemEvent` for the
+   * recorded kinds. Stage 3 Observability UI consumes this directly.
+   */
+  events: SystemEvent[];
 }
 
 export interface Blackboard {
