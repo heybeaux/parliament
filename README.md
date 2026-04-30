@@ -93,6 +93,7 @@ curl -s -X POST http://localhost:3000/deliberate \
 
 ```
 parliament deliberate <topic> [options]
+  --preset <name>           Override [topology].active for this run
   --max-rounds <n>          Override [parliament].max_rounds
   --model-proposer <id>     Override the Proposer's model
   --model-skeptic <id>      Override the Skeptic's model
@@ -102,6 +103,8 @@ parliament get <id>
   Fetch a previously-saved deliberation from the server.
   Server URL is read from PARLIAMENT_SERVER_URL (default http://localhost:3030).
 ```
+
+`--preset` accepts any registered preset id (built-in or user-defined). Unknown values exit `1` with a `did you mean "X"?` suggestion plus the alphabetized list of available presets — the same format the loader emits when `[topology].active` points at a non-existent preset. When omitted, the CLI uses `[topology].active` from `parliament.toml`, falling back to `debate`. The default `debate` path is byte-identical to legacy runs; any non-default preset routes through the topology runtime.
 
 The deliberate command streams a colored transcript turn-by-turn, then prints either a SYNTHESIS section (consensus) or an UNRESOLVED SPLIT section (irreconcilable positions), followed by the residue score and termination reason.
 

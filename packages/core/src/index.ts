@@ -79,6 +79,7 @@ export type {
 } from './topology/index.js';
 export {
   loadTopology,
+  resolveActivePreset,
   BUILTIN_PRESETS,
   BUILTIN_PRESET_IDS,
   isBuiltinPreset,
