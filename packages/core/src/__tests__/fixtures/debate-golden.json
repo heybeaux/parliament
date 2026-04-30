@@ -1,0 +1,75 @@
+{
+  "_metadata": {
+    "purpose": "Byte-identical Debate transcript regression fixture (Stage 1 / topology-runtime).",
+    "scope": "Transcript only — Turn[] content/ordering/scoring. Logs, timestamps, and engine-internal counters are explicitly out of scope per the elaboration decision.",
+    "originating_commit": "d59ca65f2d1d47997d5ae6a5434bc54dcc62f963",
+    "originating_branch": "main",
+    "captured_via": "DeliberationEngine.run() with the deterministic stubs declared in byte-identical-debate.test.ts. Re-generate by setting REGENERATE_DEBATE_GOLDEN=1 when running vitest in packages/core.",
+    "normalization": [
+      "timestamp -> 'NORMALIZED'",
+      "round preserved (load-bearing — round-1-only Proposer, per-round Skeptic/Synthesizer)",
+      "model preserved (assertion includes per-turn metadata)"
+    ],
+    "what_this_pins": "DeliberationEngine.runTopology() with [topology].active = 'debate' MUST produce a Turn[] equal to this fixture (after the same timestamp normalization). The fixture is the regression contract for the Debate preset across the topology refactor."
+  },
+  "topic": "Should the team adopt feature flags for every new endpoint?",
+  "turns": [
+    {
+      "agent": "Proposer",
+      "neurotype": "structured",
+      "model": "stub-proposer",
+      "content": "Adopt feature flags universally because they decouple deploy from release.",
+      "timestamp": "NORMALIZED",
+      "round": 1,
+      "word_count": 10
+    },
+    {
+      "agent": "Skeptic",
+      "neurotype": "critical",
+      "model": "stub-skeptic",
+      "content": "Universal flags add operational tax; not every endpoint needs runtime gating.",
+      "timestamp": "NORMALIZED",
+      "round": 1,
+      "word_count": 11
+    },
+    {
+      "agent": "Synthesizer",
+      "neurotype": "integrative",
+      "model": "stub-synthesizer",
+      "content": "Adopt flags for risky endpoints; let trivial CRUD ship without the overhead.",
+      "timestamp": "NORMALIZED",
+      "round": 1,
+      "word_count": 12,
+      "meta": {
+        "confidence": 0.5,
+        "consensus": false,
+        "agreed": ["flags help risky rollouts"],
+        "unresolved": ["scope: every endpoint vs subset"]
+      }
+    },
+    {
+      "agent": "Skeptic",
+      "neurotype": "critical",
+      "model": "stub-skeptic",
+      "content": "Universal flags add operational tax; not every endpoint needs runtime gating.",
+      "timestamp": "NORMALIZED",
+      "round": 2,
+      "word_count": 11
+    },
+    {
+      "agent": "Synthesizer",
+      "neurotype": "integrative",
+      "model": "stub-synthesizer",
+      "content": "Adopt flags for risky endpoints; let trivial CRUD ship without the overhead.",
+      "timestamp": "NORMALIZED",
+      "round": 2,
+      "word_count": 12,
+      "meta": {
+        "confidence": 0.5,
+        "consensus": false,
+        "agreed": ["flags help risky rollouts"],
+        "unresolved": ["scope: every endpoint vs subset"]
+      }
+    }
+  ]
+}
