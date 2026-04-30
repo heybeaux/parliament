@@ -338,8 +338,10 @@ active = "xyzzy"
       'unknown_active_preset',
     );
     expect(err.message).not.toMatch(/did you mean/);
-    // Available presets list MUST appear regardless.
-    expect(err.message).toMatch(/Available presets: \[debate\]/);
+    // Available presets list MUST appear regardless. With multiple built-ins,
+    // the loader emits them sorted alphabetically.
+    expect(err.message).toMatch(/Available presets: \[/);
+    expect(err.message).toMatch(/debate/);
   });
 
   it('lists user-defined presets in the available list', () => {
