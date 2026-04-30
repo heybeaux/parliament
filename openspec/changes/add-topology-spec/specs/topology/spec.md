@@ -16,7 +16,7 @@
 
 ### Requirement: Every preset MUST declare required metadata
 
-Each preset definition MUST include `name`, `description`, and `best_for` fields. All three are required string fields. Loading MUST fail with a validation error if any preset omits any of these fields.
+Each preset definition MUST include `name`, `description`, and `best_for` fields. All three are required string fields. Loading MUST fail with a validation error if any preset omits any of these fields. This requirement applies uniformly to built-in presets and user-defined presets in `parliament.toml`; there is no metadata-exempt preset class.
 
 #### Scenario: Preset declares all required metadata
 
@@ -27,6 +27,11 @@ Each preset definition MUST include `name`, `description`, and `best_for` fields
 
 - **WHEN** a preset defines `name` and `description` but not `best_for`
 - **THEN** config loading fails with a validation error naming the offending preset and the missing field
+
+#### Scenario: User-defined preset omits metadata
+
+- **WHEN** `parliament.toml` declares `[topology.presets.my-flow]` with a `steps` array but no `name`, `description`, or `best_for`
+- **THEN** config loading fails with a validation error naming `my-flow` and listing the missing metadata fields
 
 ### Requirement: Topology steps MUST execute strictly by default
 
@@ -75,9 +80,47 @@ Within a single preset's `steps` array, every step's `id` MUST be unique. Duplic
 - **WHEN** a preset's `steps` array contains two entries with `id = "critique"`
 - **THEN** config loading fails with a validation error naming the duplicate ID
 
+### Requirement: Step IDs MUST be kebab-case
+
+Every step `id` MUST match the regex `^[a-z][a-z0-9-]*$` — lowercase ASCII letters, digits, and hyphens, beginning with a letter. Step IDs that do not match this pattern MUST cause config loading to fail with a validation error naming the offending step and the rule violated.
+
+#### Scenario: Step ID is valid kebab-case
+
+- **WHEN** a step declares `id = "devils-advocate"`
+- **THEN** the step ID is accepted
+
+#### Scenario: Step ID uses snake_case
+
+- **WHEN** a step declares `id = "devils_advocate"`
+- **THEN** config loading fails with a validation error citing the kebab-case rule and the offending ID
+
+#### Scenario: Step ID uses PascalCase
+
+- **WHEN** a step declares `id = "DevilsAdvocate"`
+- **THEN** config loading fails with a validation error citing the kebab-case rule and the offending ID
+
+#### Scenario: Step ID begins with a digit
+
+- **WHEN** a step declares `id = "1critique"`
+- **THEN** config loading fails with a validation error citing the kebab-case rule and the offending ID
+
+### Requirement: Unknown active preset MUST surface a "did you mean" suggestion
+
+When `[topology] active` resolves to a preset ID that is not defined (neither built-in nor user-defined), config loading MUST fail with an error that lists the available preset IDs AND, when at least one available ID is within Levenshtein distance 2 of the unknown name, includes a "did you mean `<closest>`?" suggestion. Suggestion computation MUST run only at config-load time, not on every deliberation.
+
+#### Scenario: Active preset name has a near match
+
+- **WHEN** `parliament.toml` contains `[topology] active = "debat"` and `debate` is an available preset
+- **THEN** config loading fails with an error of the form `unknown preset "debat" — did you mean "debate"? Available presets: [debate, star-chamber, ...]`
+
+#### Scenario: Active preset name has no near match
+
+- **WHEN** `parliament.toml` contains `[topology] active = "xyzzy"` and no available preset is within edit distance 2
+- **THEN** config loading fails with an error listing the available presets but omitting the "did you mean" suggestion
+
 ### Requirement: User-defined neurotypes MUST declare their model adapter and prompt
 
-Entries under `[neurotypes.<id>]` MUST include at minimum a `model` field (model adapter identifier) and a `system_prompt` field (string). Optional fields MAY include `description` and `temperature`.
+Entries under `[neurotypes.<id>]` MUST include at minimum a `model` field (model adapter identifier) and a `system_prompt` field (string). Optional fields MAY include `description` and `temperature`. When `temperature` is omitted, the engine MUST apply a default of `0.7`.
 
 #### Scenario: User-defined neurotype declares minimum required fields
 
@@ -88,3 +131,8 @@ Entries under `[neurotypes.<id>]` MUST include at minimum a `model` field (model
 
 - **WHEN** `[neurotypes.historian]` declares `model` but no `system_prompt`
 - **THEN** config loading fails with a validation error naming the neurotype and the missing field
+
+#### Scenario: User-defined neurotype omits `temperature`
+
+- **WHEN** `[neurotypes.historian]` declares `model` and `system_prompt` but no `temperature`
+- **THEN** the neurotype is registered with `temperature = 0.7`
