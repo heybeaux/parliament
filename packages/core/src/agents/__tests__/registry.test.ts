@@ -58,18 +58,7 @@ describe('built-in agent registry', () => {
     expect(() => createBuiltinAgent('nope', makeAdapter())).toThrow(/historian/);
   });
 
-  it('every Stage 1 stub returns a placeholder marker without calling the adapter', async () => {
-    for (const id of STAGE_1_NEUROTYPES) {
-      const adapter = makeAdapter();
-      const agent = createBuiltinAgent(id, adapter);
-      const result = await agent.generate(makeBlackboard());
-      expect(result.truncated).toBe(false);
-      expect(result.content).toMatch(/stub.*implementation pending/i);
-      expect(adapter.generate).not.toHaveBeenCalled();
-    }
-  });
-
-  it('every Stage 1 stub reports its neurotype ID matching its registry key', () => {
+  it('every Stage 1 agent reports its neurotype ID matching its registry key', () => {
     // The pre-existing Proposer / Skeptic agents use legacy mood-style
     // neurotype labels (`'structured'`, `'critical'`) for backward
     // compatibility with the original Debate engine; aligning those is the
