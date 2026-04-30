@@ -104,13 +104,23 @@ The `DeliberationEngine` runs each round as: Proposer (round 1 only) → Skeptic
 
 ## Agents
 
-| Agent       | Model                                                        | Provider | Role                                                        |
-|-------------|--------------------------------------------------------------|----------|-------------------------------------------------------------|
-| Proposer    | gemma-4-31b-it-8bit                                          | oMLX     | Opens with a clear, well-reasoned initial position          |
-| Skeptic     | Qwen3.5-35B-A3B-8bit                                         | oMLX     | Challenges assumptions and identifies logical gaps          |
-| Synthesizer | MLX-Qwen3.5-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled-8bit | oMLX     | Reconciles conflicts or marks irreconcilable splits         |
-| Red Agent   | Qwen3.5-35B-A3B-8bit                                         | oMLX     | Adversarial injection to disrupt premature consensus        |
-| Sentry      | gemma-4-31b-it-8bit                                          | oMLX     | Echo-loop + convergence monitor (`OK` / `SPECIALIST_NEEDED` / `COLLAPSE_DETECTED`) |
+Parliament ships with thirteen built-in **neurotypes** — deliberation postures that topology presets compose from — plus three pieces of structural infrastructure (Synthesizer, Sentry, RedAgent). The full roster, their posture axes, and the non-obvious behaviors of each are documented in **[docs/neurotypes.md](docs/neurotypes.md)**.
+
+| Agent             | Posture                                                                            |
+|-------------------|------------------------------------------------------------------------------------|
+| Proposer          | Opens with a clear, well-reasoned initial position                                 |
+| Skeptic           | Challenges assumptions, identifies logical gaps                                    |
+| Historian         | Precedent-first — reasons from "what has happened"                                 |
+| Forecaster        | Forward-projection — likely consequences across time horizons                      |
+| Pragmatist        | Constraint-first — what is actually doable                                         |
+| Empiricist        | Evidence-first — distinguishes empirical claims from value judgments               |
+| Steelmanner       | Charity — constructs the strongest opposing case                                   |
+| Devil's Advocate  | Contrarian-to-consensus — anti-groupthink                                          |
+| Lateralist        | Structural analogy — cross-domain reframing                                        |
+| Translator        | Assumption-surfacing + plain-language gloss                                        |
+| Synthesizer       | _infrastructure_ — reconciles conflicts or marks irreconcilable splits             |
+| Red Agent         | _infrastructure_ — adversarial injection to disrupt premature consensus            |
+| Sentry            | _infrastructure_ — echo-loop + convergence monitor                                 |
 
 All agents run locally via [oMLX](https://github.com/openclaw/omlx). Set `OMLX_BASE_URL` if your instance isn't at the default `http://localhost:8080/v1`.
 
