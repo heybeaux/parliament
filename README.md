@@ -108,6 +108,22 @@ parliament get <id>
 
 The deliberate command streams a colored transcript turn-by-turn, then prints either a SYNTHESIS section (consensus) or an UNRESOLVED SPLIT section (irreconcilable positions), followed by the residue score and termination reason.
 
+## Presets
+
+Topology presets compose neurotypes into reusable deliberation shapes. Pick one with `--preset <id>` (CLI), `preset` in the `POST /deliberate` body, or by setting `[topology].active` in `parliament.toml`. The full topology rationale, parallel-step semantics, and order-bias notes live in **[docs/topology.md](docs/topology.md)**.
+
+| Preset               | Shape                                                              | Pick when                                                                                                              |
+| -------------------- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `debate`             | Proposer → Skeptic                                                 | You want the original, byte-identical Parliament debate. The default when `[topology]` is absent.                      |
+| `star-chamber`       | Proposer → Skeptic → Devil's Advocate → Empiricist                 | Sequential interrogation. Each critic builds on the prior one's framing.                                               |
+| `chain-of-verifiers` | Proposer → Empiricist → Steelmanner → Skeptic                      | Claim-checking pipelines where each step verifies the prior turn before advancing.                                     |
+| `socratic`           | Translator → Empiricist → Skeptic                                  | Surfacing hidden assumptions before stress-testing them.                                                               |
+| `long-view`          | Historian → Proposer → Forecaster → Pragmatist                     | Decisions whose consequences play out over years — precedent in, constraint out.                                       |
+| `reframe`            | Lateralist → Translator → Steelmanner                              | Stuck framings. Forces a structural shift before anyone defends a position.                                            |
+| `jury`               | Proposer, then **{Skeptic, Empiricist, Steelmanner, Devil's Advocate}** in parallel | Use Jury when you don't want the first speaker's framing to dominate the room — four critics fire concurrently against one snapshot. |
+
+Built-in presets always include their full metadata (`name`, `description`, `best_for`, step list, plus `requires_neurotypes` / `missing_neurotypes`) under `GET /presets`, so a UI picker can render them without a second round-trip. User-defined presets author the same fields under `[topology.presets.<id>]`.
+
 ## Architecture
 
 - **`@parliament/core`** — pure TypeScript engine. Contains `DeliberationEngine`, the five agent classes, model adapters (Ollama, LM Studio, OMLX, OpenAI-compatible), the OSI calibration module, the model-aware scheduler, and the TOML config loader.
