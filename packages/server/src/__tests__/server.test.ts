@@ -32,11 +32,21 @@ vi.mock('@parliament/core', async (importOriginal) => {
 
   const MockDeliberationEngine = vi.fn().mockImplementation(() => ({
     run: vi.fn().mockResolvedValue(mockResult),
+    runTopology: vi.fn().mockResolvedValue(mockResult),
   }));
+
+  // Default topology config: built-in Debate preset is active. Tests that need
+  // a different active preset can override via vi.mocked(loadTopologyConfig).
+  const baseTopology = {
+    activePreset: actual.BUILTIN_PRESETS['debate']!,
+    presets: { ...actual.BUILTIN_PRESETS },
+    userNeurotypes: {},
+  };
 
   return {
     ...actual,
     DeliberationEngine: MockDeliberationEngine,
+    loadTopologyConfig: vi.fn().mockReturnValue(baseTopology),
     loadConfig: vi.fn().mockReturnValue({
       neurotypes: {
         proposer: { model: 'mock', system_prompt: 'You are a proposer.' },
@@ -44,6 +54,15 @@ vi.mock('@parliament/core', async (importOriginal) => {
         synthesizer: { model: 'mock', system_prompt: 'You are a synthesizer.' },
         redAgent: { model: 'mock', system_prompt: 'You are a red agent.' },
         sentry: { model: 'mock', system_prompt: 'You are a sentry.' },
+        // Stage 1 built-in neurotypes — required for non-Debate preset paths.
+        historian: { model: 'mock', system_prompt: 'You are a historian.' },
+        forecaster: { model: 'mock', system_prompt: 'You are a forecaster.' },
+        pragmatist: { model: 'mock', system_prompt: 'You are a pragmatist.' },
+        empiricist: { model: 'mock', system_prompt: 'You are an empiricist.' },
+        steelmanner: { model: 'mock', system_prompt: 'You are a steelmanner.' },
+        'devils-advocate': { model: 'mock', system_prompt: "You are a devil's advocate." },
+        lateralist: { model: 'mock', system_prompt: 'You are a lateralist.' },
+        translator: { model: 'mock', system_prompt: 'You are a translator.' },
       },
     }),
     buildAgentsFromConfig: vi.fn().mockReturnValue([
@@ -274,6 +293,121 @@ describe('GET /deliberate/:id', () => {
     const body = await res.json() as Record<string, unknown>;
     expect(typeof body['error']).toBe('string');
     expect((body['error'] as string).toLowerCase()).toContain('not found');
+  });
+});
+
+describe('GET /presets', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns the full preset registry plus defaultPreset', async () => {
+    const app = makeApp();
+
+    const res = await app.request('/presets');
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as { presets: unknown[]; defaultPreset: string };
+    expect(Array.isArray(body.presets)).toBe(true);
+    expect(body.presets.length).toBeGreaterThan(0);
+
+    // Each preset entry exposes the full required-metadata triple plus steps.
+    const presets = body.presets as Array<{
+      id: string;
+      name: string;
+      description: string;
+      best_for: string;
+      isBuiltin: boolean;
+      steps: Array<{ id: string; neurotype: string; optional: boolean }>;
+    }>;
+    for (const p of presets) {
+      expect(typeof p.id).toBe('string');
+      expect(typeof p.name).toBe('string');
+      expect(typeof p.description).toBe('string');
+      expect(typeof p.best_for).toBe('string');
+      expect(typeof p.isBuiltin).toBe('boolean');
+      expect(Array.isArray(p.steps)).toBe(true);
+    }
+
+    // All six Stage 1 built-ins must surface.
+    const ids = presets.map((p) => p.id).sort();
+    expect(ids).toContain('debate');
+    expect(ids).toContain('star-chamber');
+    expect(ids).toContain('chain-of-verifiers');
+    expect(ids).toContain('socratic');
+    expect(ids).toContain('long-view');
+    expect(ids).toContain('reframe');
+
+    // Default reflects the resolved active preset (debate, per the loader's
+    // fallback when [topology] is absent).
+    expect(body.defaultPreset).toBe('debate');
+  });
+});
+
+describe('POST /deliberate — preset override (AC: precedence)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSaveDeliberation.mockReturnValue(undefined);
+  });
+
+  it('routes through runTopology when a request preset is supplied', async () => {
+    const { DeliberationEngine } = await import('@parliament/core');
+    const EngineMock = vi.mocked(DeliberationEngine);
+    const app = makeApp();
+
+    const res = await app.request('/deliberate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic: 'preset override', preset: 'star-chamber' }),
+    });
+
+    expect(res.status).toBe(200);
+    // The mock's most recent engine instance must have had runTopology
+    // invoked, NOT run, because the request specified a non-default preset.
+    const lastInstance = EngineMock.mock.results.at(-1)!.value as {
+      run: ReturnType<typeof vi.fn>;
+      runTopology: ReturnType<typeof vi.fn>;
+    };
+    expect(lastInstance.runTopology).toHaveBeenCalledTimes(1);
+    expect(lastInstance.run).not.toHaveBeenCalled();
+  });
+
+  it('uses legacy run() when no preset is supplied and config active is debate', async () => {
+    const { DeliberationEngine } = await import('@parliament/core');
+    const EngineMock = vi.mocked(DeliberationEngine);
+    const app = makeApp();
+
+    const res = await app.request('/deliberate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic: 'default debate path' }),
+    });
+
+    expect(res.status).toBe(200);
+    const lastInstance = EngineMock.mock.results.at(-1)!.value as {
+      run: ReturnType<typeof vi.fn>;
+      runTopology: ReturnType<typeof vi.fn>;
+    };
+    expect(lastInstance.run).toHaveBeenCalledTimes(1);
+    expect(lastInstance.runTopology).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 with descriptive error when the preset is unknown', async () => {
+    const app = makeApp();
+
+    const res = await app.request('/deliberate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic: 'bad preset', preset: 'xyzzy' }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(typeof body['error']).toBe('string');
+    expect(body['error']).toMatch(/unknown preset "xyzzy"/);
+    // Available presets list must accompany the error so clients can recover.
+    expect(body['error']).toMatch(/Available presets/);
+    expect(body['code']).toBe('unknown_active_preset');
   });
 });
 

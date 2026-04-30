@@ -24,6 +24,7 @@ export type {
 } from './config.js';
 export {
   loadConfig,
+  loadTopologyConfig,
   resolveConfigPath,
   getConfig,
   getNeurotype,
@@ -51,8 +52,13 @@ export {
   SynthesizerAgent,
   RedAgent,
   SentryAgent,
+  StubNeurotypeAgent,
   enforceWordCap,
   jaccardSimilarity,
+  BUILTIN_AGENT_REGISTRY,
+  BUILTIN_AGENT_IDS,
+  isBuiltinNeurotype,
+  createBuiltinAgent,
 } from './agents/index.js';
 
 export type {
