@@ -3,6 +3,7 @@ import type {
   DeliberationResult,
   SplitSummary,
   SynthesizerMeta,
+  SystemEvent,
   TerminationReason,
   Turn,
 } from './types.js';
@@ -247,6 +248,7 @@ export class DeliberationEngine {
     let terminationReason: TerminationReason = 'max_rounds';
     let synthesis: string | null = null;
     let totalRounds = 0;
+    const events: SystemEvent[] = [];
 
     for (let round = 1; round <= maxRounds; round++) {
       totalRounds = round;
@@ -272,6 +274,11 @@ export class DeliberationEngine {
       // ------------------------------------------------------------------ //
       const sentryResult1 = await sentry.generate(blackboard);
       if (sentryResult1.signal === 'collapse_detected') {
+        events.push({
+          round,
+          kind: 'sentry.echo',
+          message: 'Sentry detected echo collapse after critic phase; deliberation terminated.',
+        });
         terminationReason = 'echo_loop';
         break;
       }
@@ -294,6 +301,11 @@ export class DeliberationEngine {
       // ------------------------------------------------------------------ //
       const sentryResult2 = await sentry.generate(blackboard);
       if (sentryResult2.signal === 'collapse_detected') {
+        events.push({
+          round,
+          kind: 'sentry.echo',
+          message: 'Sentry detected echo collapse after synthesizer; deliberation terminated.',
+        });
         terminationReason = 'echo_loop';
         break;
       }
@@ -304,6 +316,11 @@ export class DeliberationEngine {
       if (round % redAgentInterval === 0) {
         const redResult = await redAgent.generate(blackboard);
         recordTurn(blackboard, redAgent, redResult.content, round);
+        events.push({
+          round,
+          kind: 'red_agent.injection',
+          message: redResult.content,
+        });
       }
     }
 
@@ -333,6 +350,7 @@ export class DeliberationEngine {
       totalRounds,
       started_at: startedAt,
       completed_at: completedAt,
+      events,
     };
   }
 
@@ -393,6 +411,7 @@ export class DeliberationEngine {
     let terminationReason: TerminationReason = 'max_rounds';
     let synthesis: string | null = null;
     let totalRounds = 0;
+    const events: SystemEvent[] = [];
 
     // Log every optional-flagged step exactly once at engine start so the
     // information surfaces even when we terminate before that step runs.
@@ -428,6 +447,11 @@ export class DeliberationEngine {
         // place Sentry runs during the step phase.
         const sentryStepResult = await sentry.generate(blackboard);
         if (sentryStepResult.signal === 'collapse_detected') {
+          events.push({
+            round,
+            kind: 'sentry.echo',
+            message: `Sentry detected echo collapse after step "${step.id}"; deliberation terminated.`,
+          });
           terminationReason = 'echo_loop';
           break roundLoop;
         }
@@ -468,6 +492,11 @@ export class DeliberationEngine {
         // logical step in the preset's contract.
         const sentryParallelResult = await sentry.generate(blackboard);
         if (sentryParallelResult.signal === 'collapse_detected') {
+          events.push({
+            round,
+            kind: 'sentry.echo',
+            message: 'Sentry detected echo collapse after parallel block; deliberation terminated.',
+          });
           terminationReason = 'echo_loop';
           break roundLoop;
         }
@@ -488,6 +517,11 @@ export class DeliberationEngine {
       // Out-of-band Sentry after synthesizer.
       const sentryPostSynthResult = await sentry.generate(blackboard);
       if (sentryPostSynthResult.signal === 'collapse_detected') {
+        events.push({
+          round,
+          kind: 'sentry.echo',
+          message: 'Sentry detected echo collapse after synthesizer; deliberation terminated.',
+        });
         terminationReason = 'echo_loop';
         break;
       }
@@ -498,6 +532,11 @@ export class DeliberationEngine {
       if (round % redAgentInterval === 0) {
         const redResult = await redAgent.generate(blackboard);
         recordTurn(blackboard, redAgent, redResult.content, round);
+        events.push({
+          round,
+          kind: 'red_agent.injection',
+          message: redResult.content,
+        });
       }
     }
 
@@ -524,6 +563,7 @@ export class DeliberationEngine {
       totalRounds,
       started_at: startedAt,
       completed_at: completedAt,
+      events,
     };
   }
 }

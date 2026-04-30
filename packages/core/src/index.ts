@@ -5,6 +5,7 @@ export type {
   DebateResult,
   DeliberationResult,
   SplitSummary,
+  SystemEvent,
   TerminationReason,
   SentrySignal,
 } from './types.js';

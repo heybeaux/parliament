@@ -28,6 +28,7 @@ vi.mock('@parliament/core', async (importOriginal) => {
     totalRounds: 1,
     started_at: '2026-01-01T00:00:00.000Z',
     completed_at: '2026-01-01T00:00:30.000Z',
+    events: [],
   };
 
   const MockDeliberationEngine = vi.fn().mockImplementation(() => ({
@@ -151,6 +152,7 @@ const MOCK_RESULT: DeliberationResult = {
   totalRounds: 1,
   started_at: '2026-01-01T00:00:00.000Z',
   completed_at: '2026-01-01T00:00:30.000Z',
+  events: [],
 };
 
 // ---------------------------------------------------------------------------

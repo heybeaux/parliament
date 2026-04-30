@@ -24,9 +24,12 @@ import {
 import type {
   Agent,
   DeliberationConfig,
+  DeliberationResult,
+  SystemEvent,
   TopologyConfig,
   TopologyDeliberationConfig,
   TopologyStep,
+  Turn,
 } from '@parliament/core';
 import { saveDeliberation, getDeliberation, listDeliberations } from './db.js';
 import { loadServerConfig, type ServerConfig } from './config.js';
@@ -163,6 +166,113 @@ function buildTopologyDeliberationConfig(
     synthesizer: structuralAgents.synthesizer,
     redAgent: structuralAgents.redAgent,
     sentry: structuralAgents.sentry,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Response shape — additive Stage 3/4 enrichment
+// ---------------------------------------------------------------------------
+//
+// The server response is the contract the Stage 3 Observability UI consumes:
+// every turn carries `model_name`, `neurotype_posture`, `word_count`, and
+// `convergence_delta`; the deliberation result carries an `events[]` array.
+// The transform here is additive on the wire — old client builds keep
+// parsing because no existing field is renamed or removed.
+//
+// `convergence_delta` semantics, per the Stage 4 elaboration decision on task
+// `a3aa8255`:
+//   - Round 1 turns → `null` (no prior synthesizer output to compare against).
+//   - Round R > 1 → `synth_confidence(R-1) - synth_confidence(R-2)`. We treat
+//     "missing" priors as 0 so round 2's delta equals round 1's confidence.
+//   - This is the change-in-confidence the room moved through coming INTO
+//     this round, attached uniformly to every turn in the round so the UI
+//     can render a "room movement" badge per turn card without recomputing.
+
+interface EnrichedTurn extends Turn {
+  /** Mirrors `turn.model` under the contract's wire-name. Always populated. */
+  model_name: string;
+  /** Mirrors `turn.neurotype` under the contract's wire-name (e.g. "epistemic/evidence-first"). */
+  neurotype_posture: string;
+  /** Whitespace-delimited word count. Pre-Stage-3 stored turns may lack `word_count`; we fall back to recomputing. */
+  word_count: number;
+  /** Per-round convergence delta. Null on round 1 per the elaboration decision. */
+  convergence_delta: number | null;
+}
+
+interface EnrichedDeliberationResult extends Omit<DeliberationResult, 'turns'> {
+  turns: EnrichedTurn[];
+  events: SystemEvent[];
+}
+
+/**
+ * Whitespace-delimited word count fallback — used only for stored turns that
+ * pre-date the engine's `word_count` population.
+ */
+function countWords(content: string): number {
+  const trimmed = content.trim();
+  if (trimmed.length === 0) return 0;
+  return trimmed.split(/\s+/).length;
+}
+
+/**
+ * Build a per-round map of synthesizer confidence so we can compute
+ * `convergence_delta` without re-walking turns for every record.
+ */
+function buildSynthConfidenceByRound(turns: readonly Turn[]): Map<number, number> {
+  const out = new Map<number, number>();
+  for (const turn of turns) {
+    if (turn.agent === 'Synthesizer' && turn.meta !== undefined) {
+      out.set(turn.round, turn.meta.confidence);
+    }
+  }
+  return out;
+}
+
+/**
+ * Compute the per-round convergence delta for a given round.
+ *
+ * Definition: how the synthesizer's confidence shifted going INTO this round.
+ *   delta(R) = synth_confidence(R-1) - synth_confidence(R-2)
+ *
+ * Round 1 → null (per elaboration decision: there is no R-1 synth to compare).
+ * Missing R-2 (i.e. R = 2) → treat as 0, so delta is just synth(R-1).
+ */
+function computeConvergenceDelta(
+  round: number,
+  synthByRound: Map<number, number>,
+): number | null {
+  if (round <= 1) return null;
+  const prior = synthByRound.get(round - 1) ?? null;
+  const before = synthByRound.get(round - 2) ?? 0;
+  if (prior === null) return null;
+  return Number((prior - before).toFixed(4));
+}
+
+/**
+ * Apply additive Stage 3 enrichment to a DeliberationResult so the response
+ * matches the UI contract.
+ *
+ * Tolerant of stored rows that pre-date Stage 3: missing `events`, missing
+ * `word_count`, and turns without `parallel_group` all degrade gracefully.
+ */
+function enrichResult(result: DeliberationResult): EnrichedDeliberationResult {
+  const synthByRound = buildSynthConfidenceByRound(result.turns);
+
+  const turns: EnrichedTurn[] = result.turns.map((turn) => {
+    const wordCount = turn.word_count ?? countWords(turn.content);
+    return {
+      ...turn,
+      word_count: wordCount,
+      model_name: turn.model,
+      neurotype_posture: turn.neurotype,
+      convergence_delta: computeConvergenceDelta(turn.round, synthByRound),
+    };
+  });
+
+  return {
+    ...result,
+    turns,
+    events: result.events ?? [],
   };
 }
 
@@ -408,7 +518,7 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
       );
     }
 
-    return c.json({ id, ...result }, 200);
+    return c.json({ id, ...enrichResult(result) }, 200);
   });
 
   // -------------------------------------------------------------------------
@@ -497,7 +607,7 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
       return c.json({ error: `Deliberation "${id}" not found` }, 404);
     }
 
-    return c.json(result, 200);
+    return c.json(enrichResult(result), 200);
   });
 
   return app;
