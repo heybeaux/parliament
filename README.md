@@ -48,9 +48,20 @@ The server binds to `parliament.server_port` (3000 by default) or the `PORT` env
 
 | Endpoint                | Description                                            |
 | ----------------------- | ------------------------------------------------------ |
-| `POST /deliberate`      | Run a new deliberation. Body: `{ topic, config? }`.    |
+| `POST /deliberate`      | Run a new deliberation. Body: `{ topic, preset?, config? }`. |
 | `GET  /deliberate/:id`  | Fetch a stored deliberation by UUID.                   |
+| `GET  /presets`         | List the topology preset registry plus the active default. |
 | `GET  /health`          | Probe each model's adapter for connectivity.           |
+
+#### Preset precedence
+
+`POST /deliberate` resolves the preset to use in this order:
+
+1. `request.preset` — wins when supplied. Unknown values return `400` with a list of available preset IDs.
+2. `[topology].active` from `parliament.toml` — used when the request omits `preset`.
+3. `debate` — falls back here when `[topology]` is absent or `active` is unset (matches the loader's default-fallback rule).
+
+`GET /presets` returns `{ presets, defaultPreset }`. Each entry carries the full required metadata (`id`, `name`, `description`, `best_for`) plus its step list, so clients can render a picker without a second round-trip.
 
 ### Hardening
 
@@ -68,7 +79,7 @@ To expose the API beyond loopback set `host = "0.0.0.0"` **and** explicitly set 
 
 Set `PARLIAMENT_API_KEY=<secret>` to require `Authorization: Bearer <secret>` on every route (timing-safe compare). When unset, the server logs a warning at startup and accepts unauthenticated requests so localhost dev works out of the box. `POST /deliberate` is rate-limited per client IP using the values above.
 
-`config` accepts `maxRounds`, `redAgentInterval`, and `confidenceThreshold` overrides; anything omitted falls back to the values in `parliament.toml`. Results are persisted to a SQLite file (`parliament.db`) in the working directory.
+`config` accepts `maxRounds`, `redAgentInterval`, and `confidenceThreshold` overrides; anything omitted falls back to the values in `parliament.toml`. `preset` accepts any registered preset id (built-in or user-defined). Results are persisted to a SQLite file (`parliament.db`) in the working directory.
 
 Example:
 

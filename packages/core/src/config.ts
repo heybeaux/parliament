@@ -3,6 +3,8 @@ import { dirname, resolve } from 'node:path';
 import { parse } from 'smol-toml';
 import type { AgentDefinition } from './debate.js';
 import type { ModelAdapter } from './adapters/base.js';
+import { loadTopology, type LoadTopologyOptions } from './topology/loader.js';
+import type { TopologyConfig } from './topology/types.js';
 
 export interface NeurotypeConfig {
   model: string;
@@ -114,6 +116,41 @@ export function loadConfig(explicitPath?: string): ParliamentTomlConfig {
   }
 
   return validateConfig(parsed, configPath);
+}
+
+/**
+ * Loads the Parliament TOML config file and resolves it into a `TopologyConfig`.
+ *
+ * Same resolution order as `loadConfig`. When [topology] is absent, the loader
+ * falls back to the Debate preset and emits an info-level log via the optional
+ * logger. When the file itself is missing, behaves identically to a config
+ * with no [topology] block (the topology system is opt-in for legacy users).
+ */
+export function loadTopologyConfig(
+  options: { explicitPath?: string } & LoadTopologyOptions = {},
+): TopologyConfig {
+  const { explicitPath, ...loadOptions } = options;
+  const configPath = resolveConfigPath(explicitPath);
+
+  let raw: string;
+  try {
+    raw = readFileSync(configPath, 'utf-8');
+  } catch {
+    // Treat missing config as "no [topology] block" — the loader will fall
+    // back to debate and emit its info log via the supplied logger.
+    return loadTopology({}, loadOptions);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = parse(raw);
+  } catch (err) {
+    throw new Error(
+      `Parliament: invalid TOML in "${configPath}": ${String(err)}`,
+    );
+  }
+
+  return loadTopology(parsed, loadOptions);
 }
 
 /**
