@@ -511,3 +511,159 @@ active = "debate"
     expect(redTurns.map((t) => t.round)).toEqual([2, 4]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Stage 4 — runTopology executes parallel_steps after sequential steps
+// ---------------------------------------------------------------------------
+
+describe('runTopology — parallel_steps integration (Stage 4)', () => {
+  it('runs parallel siblings against a snapshot, merges in registration order, annotates parallel_group', async () => {
+    const topology = buildTopology(`
+[topology]
+active = "jury-like"
+
+[topology.presets.jury-like]
+name = "Jury-like"
+description = "Sequential proposer + parallel critics + sequential synthesizer."
+best_for = "Order-bias regression test."
+steps = [
+  { id = "open", neurotype = "proposer" },
+]
+parallel_steps = [
+  { id = "skep", neurotype = "skeptic" },
+  { id = "emp", neurotype = "empiricist" },
+  { id = "steel", neurotype = "steelmanner" },
+  { id = "devil", neurotype = "devils-advocate" },
+]
+`);
+
+    // Make the first declared sibling slow so completion order != registration
+    // order. This pins the registration-order-merge invariant from inside the
+    // engine (rather than just from inside the executor).
+    const proposer = makeAgent('Proposer', 'proposer', 'proposal');
+    const skeptic = makeAgent('Skeptic', 'skeptic', 'skeptic');
+    // Slow it down so it finishes last.
+    (skeptic.generate as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 25));
+      return { content: 'skeptic', truncated: false };
+    });
+    const empiricist = makeAgent('Empiricist', 'empiricist', 'empiricist');
+    const steelmanner = makeAgent('Steelmanner', 'steelmanner', 'steelmanner');
+    const devils = makeAgent('DevilsAdvocate', 'devils-advocate', 'devil');
+
+    const config = makeBaseConfig(
+      topology,
+      {
+        open: proposer,
+        skep: skeptic,
+        emp: empiricist,
+        steel: steelmanner,
+        devil: devils,
+      },
+      { maxRounds: 1 },
+    );
+
+    const engine = new DeliberationEngine();
+    const result = await engine.runTopology('parallel topic', config);
+
+    // Order on the live transcript: Proposer, then 4 critics in REGISTRATION
+    // order (skeptic finished last but still appears first), then Synthesizer.
+    const stepRoles = result.turns.map((t) => t.agent);
+    expect(stepRoles).toEqual([
+      'Proposer',
+      'Skeptic',
+      'Empiricist',
+      'Steelmanner',
+      'DevilsAdvocate',
+      'Synthesizer',
+    ]);
+
+    // Every critic turn shares the same parallel_group; sequential turns omit
+    // it (or set it to null).
+    const criticTurns = result.turns.filter((t) =>
+      ['Skeptic', 'Empiricist', 'Steelmanner', 'DevilsAdvocate'].includes(t.agent),
+    );
+    const groups = criticTurns.map((t) => t.parallel_group);
+    expect(new Set(groups).size).toBe(1);
+    expect(groups[0]).toBeTruthy();
+
+    const sequentialTurns = result.turns.filter(
+      (t) => t.agent === 'Proposer' || t.agent === 'Synthesizer',
+    );
+    for (const t of sequentialTurns) {
+      // Sequential turns either omit parallel_group entirely OR carry null.
+      expect(t.parallel_group ?? null).toBeNull();
+    }
+  });
+
+  it('aborts the deliberation when a parallel sibling exceeds parallelBlockTimeoutMs', async () => {
+    const topology = buildTopology(`
+[topology]
+active = "slow-jury"
+
+[topology.presets.slow-jury]
+name = "Slow Jury"
+description = "Has a slow critic to exercise the timeout path."
+best_for = "Timeout regression test."
+steps = [
+  { id = "open", neurotype = "proposer" },
+]
+parallel_steps = [
+  { id = "fast", neurotype = "empiricist" },
+  { id = "slow", neurotype = "skeptic" },
+]
+`);
+
+    const proposer = makeAgent('Proposer', 'proposer', 'p');
+    const fast = makeAgent('Empiricist', 'empiricist', 'fast');
+    const slow = makeAgent('Skeptic', 'skeptic', 'never');
+    (slow.generate as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 200));
+      return { content: 'never', truncated: false };
+    });
+
+    const config = makeBaseConfig(
+      topology,
+      { open: proposer, fast, slow },
+      { maxRounds: 1, parallelBlockTimeoutMs: 25 },
+    );
+
+    const engine = new DeliberationEngine();
+    await expect(engine.runTopology('timeout topic', config)).rejects.toThrow(
+      /parallel block exceeded 25ms timeout.*"slow"/,
+    );
+  });
+
+  it('runs Sentry once after the parallel block (out-of-band invariant)', async () => {
+    const topology = buildTopology(`
+[topology]
+active = "minimal"
+
+[topology.presets.minimal]
+name = "Minimal"
+description = "Just a parallel block."
+best_for = "Sentry-after-block test."
+steps = []
+parallel_steps = [
+  { id = "a", neurotype = "skeptic" },
+  { id = "b", neurotype = "empiricist" },
+]
+`);
+
+    const sentry = makeSentry('ok');
+    const a = makeAgent('Skeptic', 'skeptic', 'a');
+    const b = makeAgent('Empiricist', 'empiricist', 'b');
+    const config = makeBaseConfig(
+      topology,
+      { a, b },
+      { maxRounds: 1, sentry },
+    );
+
+    const engine = new DeliberationEngine();
+    await engine.runTopology('topic', config);
+
+    // Sentry fires: 0 step-phase calls (steps=[]), 1 post-parallel-block,
+    // 1 post-synthesizer = 2 total.
+    expect((sentry.generate as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(2);
+  });
+});

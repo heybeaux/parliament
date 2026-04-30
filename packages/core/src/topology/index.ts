@@ -19,3 +19,9 @@ export {
   resolveActivePreset,
   type LoadTopologyOptions,
 } from './loader.js';
+export {
+  executeParallelBlock,
+  ParallelBlockTimeoutError,
+  type ExecuteParallelBlockOptions,
+  type ParallelBlockResult,
+} from './parallel.js';

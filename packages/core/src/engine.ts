@@ -10,6 +10,7 @@ import type { Agent } from './agents/base.js';
 import type { SynthesizerAgent, SynthesizerResult } from './agents/synthesizer.js';
 import type { SentryAgent } from './agents/sentry.js';
 import type { TopologyConfig, TopologyStep } from './topology/index.js';
+import { executeParallelBlock } from './topology/parallel.js';
 
 export interface DeliberationConfig {
   /** Maximum number of deliberation rounds. Default: 5. */
@@ -87,6 +88,15 @@ export interface TopologyDeliberationConfig {
    * no-op when omitted.
    */
   logger?: TopologyRuntimeLogger;
+  /**
+   * Block-level timeout for `parallel_steps` execution, in milliseconds.
+   * Stage 4 — see `add-jury-parallel/specs/topology-parallel/spec.md`. When
+   * any sibling exceeds the timeout, the entire deliberation aborts with a
+   * `ParallelBlockTimeoutError` naming the slow agent (per the elaboration
+   * decision: fail loudly beats silently degrading). When omitted, parallel
+   * blocks run without a timeout.
+   */
+  parallelBlockTimeoutMs?: number;
 }
 
 
@@ -418,6 +428,46 @@ export class DeliberationEngine {
         // place Sentry runs during the step phase.
         const sentryStepResult = await sentry.generate(blackboard);
         if (sentryStepResult.signal === 'collapse_detected') {
+          terminationReason = 'echo_loop';
+          break roundLoop;
+        }
+      }
+
+      // ------------------------------------------------------------------ //
+      // Parallel-step phase: when a preset declares `parallel_steps`, every
+      // sibling runs against the SAME read-only snapshot of the blackboard
+      // taken at block start. Results merge back into the live blackboard
+      // in registration order, NOT completion order. A single block-level
+      // timeout aborts the whole deliberation if any sibling stalls.
+      // Stage 4 — see add-jury-parallel/specs/topology-parallel/spec.md.
+      // ------------------------------------------------------------------ //
+      const parallelSteps = topology.activePreset.parallel_steps;
+      if (parallelSteps !== undefined && parallelSteps.length > 0) {
+        const parallelOpts: { timeoutMs?: number; logger?: TopologyRuntimeLogger } = {
+          logger,
+        };
+        if (config.parallelBlockTimeoutMs !== undefined) {
+          parallelOpts.timeoutMs = config.parallelBlockTimeoutMs;
+        }
+        const parallelResult = await executeParallelBlock(
+          parallelSteps,
+          blackboard,
+          resolveNeurotype,
+          round,
+          parallelOpts,
+        );
+        // Append turns + new conflicts in registration order. We push
+        // straight onto the live blackboard rather than calling
+        // `recordTurn` because the parallel executor already produced
+        // fully-formed `Turn` records (with `parallel_group` set).
+        blackboard.turns.push(...parallelResult.turns);
+        blackboard.conflicts.push(...parallelResult.conflicts);
+
+        // Out-of-band Sentry once after the parallel block. We check ONCE
+        // after the merge, not per-sibling, because the block is a single
+        // logical step in the preset's contract.
+        const sentryParallelResult = await sentry.generate(blackboard);
+        if (sentryParallelResult.signal === 'collapse_detected') {
           terminationReason = 'echo_loop';
           break roundLoop;
         }

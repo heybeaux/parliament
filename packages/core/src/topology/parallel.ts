@@ -1,0 +1,254 @@
+/**
+ * ----------------------------------------------------------------------------
+ * Parallel-step executor (Stage 4 — add-jury-parallel)
+ * ----------------------------------------------------------------------------
+ *
+ * Runs a `parallel_steps` block declared on a topology preset. Behaviour
+ * pinned by `openspec/changes/add-jury-parallel/specs/topology-parallel/
+ * spec.md` and the elaboration decisions on task 6483cac1:
+ *
+ *   1. Read-only snapshot of the blackboard captured at block start; every
+ *      sibling reads from the same snapshot. Siblings never see each other's
+ *      mid-block output.
+ *   2. Strict happens-before — all prior step persistence is complete by the
+ *      time the snapshot is taken (the caller owns this; the executor is
+ *      called only after sequential steps return).
+ *   3. Concurrent execution via `Promise.allSettled`-style semantics, BUT
+ *      governed by a single block-level timeout that aborts the whole block
+ *      if any sibling exceeds it.
+ *   4. Registration-order merge: results are appended to the live blackboard
+ *      in the order the steps appear in `parallel_steps`, NOT the order in
+ *      which agents finished.
+ *   5. Every produced turn is annotated with a `parallel_group` field — a
+ *      random UUID generated once per block invocation.
+ * ----------------------------------------------------------------------------
+ */
+
+import { randomUUID } from 'node:crypto';
+import type { Agent } from '../agents/base.js';
+import type { Blackboard, Conflict, Turn } from '../types.js';
+import type { NeurotypeResolver, TopologyRuntimeLogger } from '../engine.js';
+import type { TopologyStep } from './types.js';
+
+/** Result of executing a parallel block. The caller appends these in order. */
+export interface ParallelBlockResult {
+  /** Turns produced by siblings, in registration order. */
+  turns: Turn[];
+  /** New conflicts produced by siblings (e.g. Skeptic), in registration order. */
+  conflicts: Conflict[];
+  /** UUID assigned to this block; shared by every sibling turn. */
+  parallelGroup: string;
+}
+
+export interface ExecuteParallelBlockOptions {
+  /**
+   * Per-block timeout in milliseconds. When any sibling exceeds this, the
+   * returned promise rejects with a `ParallelBlockTimeoutError` naming the
+   * slow agent. `undefined` disables the timeout (used by tests that don't
+   * exercise the timeout path).
+   */
+  timeoutMs?: number;
+  /** Optional logger for completion-timing debug output. */
+  logger?: TopologyRuntimeLogger;
+}
+
+/**
+ * Error thrown when one or more parallel-block siblings fail to produce a
+ * result within the block-level timeout. Carries a stable `code` so callers
+ * can distinguish timeout aborts from generic agent errors.
+ */
+export class ParallelBlockTimeoutError extends Error {
+  readonly code = 'parallel_block_timeout';
+  /** Step IDs of the agents that exceeded the timeout. */
+  readonly slowSteps: readonly string[];
+  constructor(slowSteps: readonly string[], timeoutMs: number) {
+    const list = slowSteps.map((s) => `"${s}"`).join(', ');
+    super(
+      `Parliament: parallel block exceeded ${timeoutMs}ms timeout — slow agent(s): ${list}`,
+    );
+    this.name = 'ParallelBlockTimeoutError';
+    this.slowSteps = Object.freeze([...slowSteps]);
+  }
+}
+
+/**
+ * Builds a deep-clone snapshot of the blackboard. The clone shares no array
+ * or object references with the original, so any agent that mutates its
+ * snapshot (notably Skeptic, which pushes onto `blackboard.conflicts`) cannot
+ * affect siblings or the live blackboard.
+ *
+ * We use `structuredClone` rather than JSON-roundtripping so that Date-like
+ * values (none currently, but future-proofing) and `undefined` slots survive.
+ */
+function snapshotBlackboard(blackboard: Blackboard): Blackboard {
+  return {
+    topic: blackboard.topic,
+    turns: structuredClone(blackboard.turns),
+    conflicts: structuredClone(blackboard.conflicts),
+    metadata: structuredClone(blackboard.metadata),
+  };
+}
+
+/**
+ * Counts whitespace-delimited words. Mirrors `engine.ts#countWords` so the
+ * `word_count` field on a parallel turn matches the convention used by the
+ * sequential path (load-bearing for the Stage 3 Timeline UI).
+ */
+function countWords(content: string): number {
+  const trimmed = content.trim();
+  if (trimmed.length === 0) return 0;
+  return trimmed.split(/\s+/).length;
+}
+
+/**
+ * Wraps a sibling agent's `generate` call so the block can attribute timeouts
+ * and unexpected errors back to a specific step ID. Returns the agent's
+ * `AgentResult` plus the resolved `Agent` (used to pull `role`, `neurotype`,
+ * `modelName` for the recorded turn) and elapsed time (for debug logging).
+ */
+async function runSibling(
+  step: TopologyStep,
+  snapshot: Blackboard,
+  resolveNeurotype: NeurotypeResolver,
+): Promise<{ step: TopologyStep; agent: Agent; content: string; elapsedMs: number; conflicts: Conflict[] }> {
+  // Each sibling gets its OWN clone of the snapshot so any mutation it makes
+  // (e.g. Skeptic pushing to `conflicts`) is isolated. The outer snapshot is
+  // shared only by reference for read-only fields like `topic` — we still
+  // re-clone here to keep the invariant unconditional.
+  const ownView = snapshotBlackboard(snapshot);
+  const startedAt = Date.now();
+  const agent = resolveNeurotype(step);
+  const result = await agent.generate(ownView);
+  const elapsedMs = Date.now() - startedAt;
+
+  // Capture any conflicts the agent appended. We compare lengths against the
+  // input snapshot, not `ownView` post-call, to be defensive against agents
+  // that might re-order conflicts (none currently do).
+  const newConflicts = ownView.conflicts.slice(snapshot.conflicts.length);
+
+  return {
+    step,
+    agent,
+    content: result.content,
+    elapsedMs,
+    conflicts: newConflicts,
+  };
+}
+
+/**
+ * Executes a parallel block.
+ *
+ * Concurrency model: spawn every sibling at once. Race the joined `Promise.all`
+ * against an optional timeout `setTimeout`. On timeout, identify which
+ * siblings haven't resolved yet and throw `ParallelBlockTimeoutError`; the
+ * caller is expected to abort the whole deliberation (per spec — partial
+ * results are NEVER committed to the live blackboard).
+ *
+ * On success, results are sorted into registration order (the order of `steps`
+ * in the input array) before being returned, regardless of completion order.
+ */
+export async function executeParallelBlock(
+  steps: readonly TopologyStep[],
+  blackboard: Blackboard,
+  resolveNeurotype: NeurotypeResolver,
+  round: number,
+  options: ExecuteParallelBlockOptions = {},
+): Promise<ParallelBlockResult> {
+  const { timeoutMs, logger } = options;
+  const parallelGroup = randomUUID();
+
+  if (steps.length === 0) {
+    return { turns: [], conflicts: [], parallelGroup };
+  }
+
+  // Capture the snapshot ONCE up front. All siblings read from it; none
+  // observe each other's outputs.
+  const snapshot = snapshotBlackboard(blackboard);
+
+  // Track per-step settlement so that on timeout we can name the offenders.
+  const settled = new Set<string>();
+  const tasks = steps.map((step) =>
+    runSibling(step, snapshot, resolveNeurotype).then(
+      (res) => {
+        settled.add(step.id);
+        return { kind: 'ok' as const, value: res };
+      },
+      (err: unknown) => {
+        settled.add(step.id);
+        return { kind: 'err' as const, step, error: err };
+      },
+    ),
+  );
+
+  const allTasks = Promise.all(tasks);
+
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
+  const timeoutPromise: Promise<never> | null =
+    timeoutMs === undefined
+      ? null
+      : new Promise<never>((_resolve, reject) => {
+          timeoutHandle = setTimeout(() => {
+            timedOut = true;
+            const slow = steps.filter((s) => !settled.has(s.id)).map((s) => s.id);
+            reject(new ParallelBlockTimeoutError(slow, timeoutMs));
+          }, timeoutMs);
+        });
+
+  let outcomes: Array<{ kind: 'ok'; value: Awaited<ReturnType<typeof runSibling>> } | { kind: 'err'; step: TopologyStep; error: unknown }>;
+  try {
+    outcomes = await (timeoutPromise === null
+      ? allTasks
+      : Promise.race([allTasks, timeoutPromise]));
+  } finally {
+    if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+  }
+
+  // If we bailed via timeout, the race threw above; this guard is defensive.
+  if (timedOut) {
+    const slow = steps.filter((s) => !settled.has(s.id)).map((s) => s.id);
+    throw new ParallelBlockTimeoutError(slow, timeoutMs!);
+  }
+
+  // Surface any agent errors that aren't timeouts. We propagate the FIRST
+  // failure in registration order to keep error messages deterministic.
+  for (let i = 0; i < outcomes.length; i++) {
+    const o = outcomes[i]!;
+    if (o.kind === 'err') {
+      const stepId = o.step.id;
+      const cause = o.error instanceof Error ? o.error.message : String(o.error);
+      throw new Error(
+        `Parliament: parallel sibling "${stepId}" failed: ${cause}`,
+      );
+    }
+  }
+
+  // Registration-order merge. `outcomes` is already in registration order
+  // because `tasks` was built from `steps` in order and `Promise.all`
+  // preserves position; we map to turns/conflicts here.
+  const turns: Turn[] = [];
+  const conflicts: Conflict[] = [];
+
+  for (let i = 0; i < outcomes.length; i++) {
+    const o = outcomes[i] as { kind: 'ok'; value: Awaited<ReturnType<typeof runSibling>> };
+    const { step, agent, content, elapsedMs, conflicts: stepConflicts } = o.value;
+    turns.push({
+      agent: agent.role,
+      neurotype: agent.neurotype,
+      model: agent.modelName,
+      content,
+      timestamp: new Date().toISOString(),
+      round,
+      word_count: countWords(content),
+      parallel_group: parallelGroup,
+    });
+    conflicts.push(...stepConflicts);
+    if (logger !== undefined) {
+      logger.info(
+        `topology: parallel sibling "${step.id}" (neurotype "${step.neurotype}") completed in ${elapsedMs}ms`,
+      );
+    }
+  }
+
+  return { turns, conflicts, parallelGroup };
+}
