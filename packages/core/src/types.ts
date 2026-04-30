@@ -35,6 +35,17 @@ export interface Turn {
   /** 1-indexed round number assigned by the engine when this turn was recorded. */
   round: number;
   osi_score?: number;
+  /**
+   * Whitespace-delimited word count of `content`, populated by the engine when
+   * the turn is recorded. Stage 3 UI surfaces this directly; downstream
+   * consumers (the Timeline word-budget badge, transcript exporters) MUST
+   * trust this value rather than recomputing it from `content`.
+   *
+   * Optional for backward-compat with already-recorded transcripts that
+   * pre-date the topology runtime; new turns the engine appends always
+   * populate it.
+   */
+  word_count?: number;
   /** Populated by SynthesizerAgent only — structured signals next to the prose. */
   meta?: SynthesizerMeta;
 }

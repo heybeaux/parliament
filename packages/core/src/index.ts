@@ -55,8 +55,31 @@ export {
   jaccardSimilarity,
 } from './agents/index.js';
 
-export type { DeliberationConfig } from './engine.js';
+export type {
+  DeliberationConfig,
+  TopologyDeliberationConfig,
+  NeurotypeResolver,
+  TopologyRuntimeLogger,
+} from './engine.js';
 export { DeliberationEngine } from './engine.js';
+
+export type {
+  TopologyConfig,
+  TopologyPreset,
+  TopologyStep,
+  TopologyLogger,
+  TopologyValidationCode,
+  UserNeurotypeConfig,
+} from './topology/index.js';
+export {
+  loadTopology,
+  BUILTIN_PRESETS,
+  BUILTIN_PRESET_IDS,
+  isBuiltinPreset,
+  TopologyValidationError,
+  DEFAULT_NEUROTYPE_TEMPERATURE,
+  FALLBACK_PRESET_ID,
+} from './topology/index.js';
 
 export type { ScheduledTurn, BatchSchedule } from './scheduler/index.js';
 export { buildBatchSchedule, countModelSwaps } from './scheduler/index.js';

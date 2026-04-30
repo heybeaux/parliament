@@ -9,6 +9,7 @@ import type {
 import type { Agent } from './agents/base.js';
 import type { SynthesizerAgent, SynthesizerResult } from './agents/synthesizer.js';
 import type { SentryAgent } from './agents/sentry.js';
+import type { TopologyConfig, TopologyStep } from './topology/index.js';
 
 export interface DeliberationConfig {
   /** Maximum number of deliberation rounds. Default: 5. */
@@ -24,6 +25,68 @@ export interface DeliberationConfig {
     redAgent: Agent;
     sentry: SentryAgent;
   };
+}
+
+/**
+ * Resolves a step's `neurotype` ID to a concrete `Agent` instance the runtime
+ * can call. The runtime is deliberately decoupled from the registry so that
+ * user-defined neurotypes (parsed from `[neurotypes.<id>]`) and built-in
+ * factories share a single resolution surface.
+ *
+ * The resolver MUST throw a descriptive `Error` when an ID is unknown — the
+ * loader has already validated that every step's neurotype is resolvable, so
+ * any throw here is a bug, not user-input handling.
+ */
+export type NeurotypeResolver = (step: TopologyStep) => Agent;
+
+/** Logger sink the topology runtime uses for non-fatal informational events. */
+export interface TopologyRuntimeLogger {
+  info(message: string): void;
+}
+
+/**
+ * Configuration for `DeliberationEngine.runTopology`.
+ *
+ * The engine wires the resolved `TopologyConfig` (from the loader) plus the
+ * three structural-infrastructure agents (Synthesizer, RedAgent, Sentry) that
+ * are NOT steppable — Sentry runs out-of-band and Synthesizer/RedAgent are
+ * runtime concerns, not preset postures.
+ */
+export interface TopologyDeliberationConfig {
+  /** Maximum number of deliberation rounds. */
+  maxRounds: number;
+  /** Inject RedAgent every N rounds. Set to a value > maxRounds to disable. */
+  redAgentInterval: number;
+  /** Synthesizer confidence threshold to declare consensus. */
+  confidenceThreshold: number;
+  /**
+   * The fully-resolved topology configuration from the loader. The engine
+   * runs `topology.activePreset.steps` sequentially each round.
+   */
+  topology: TopologyConfig;
+  /**
+   * Resolves a step's neurotype ID to a concrete agent instance. The runtime
+   * calls this once per step per round so adapters bound to model lifecycles
+   * (e.g. lazy-loaded local models) can decide whether to reuse instances.
+   */
+  resolveNeurotype: NeurotypeResolver;
+  /** Synthesizer is structural infrastructure — not steppable. */
+  synthesizer: SynthesizerAgent;
+  /** RedAgent is structural infrastructure — fires at `redAgentInterval`. */
+  redAgent: Agent;
+  /**
+   * Sentry runs **out-of-band** on every preset — never as a step. The
+   * runtime invokes Sentry after each step and after the synthesizer; any
+   * `collapse_detected` signal terminates the round with `echo_loop`.
+   */
+  sentry: SentryAgent;
+  /**
+   * Optional logger; used to emit one info-level message when a step carries
+   * `optional: true` (Stage 1 logs the field but does NOT skip the step —
+   * the deferred-evaluation behavior is a Stage 2 concern). Defaults to a
+   * no-op when omitted.
+   */
+  logger?: TopologyRuntimeLogger;
 }
 
 
@@ -79,10 +142,24 @@ function buildSplitSummary(turns: Turn[], residueScore: number): SplitSummary {
 }
 
 /**
+ * Counts whitespace-delimited words in `content`. The empty string is zero
+ * words; we mirror enforceWordCap's split (`/\s+/` after trim) so the
+ * `word_count` field on a Turn is consistent with the cap-counting logic
+ * that produced its content.
+ */
+function countWords(content: string): number {
+  const trimmed = content.trim();
+  if (trimmed.length === 0) return 0;
+  return trimmed.split(/\s+/).length;
+}
+
+/**
  * Adds a turn to the blackboard after an agent generates output.
  *
- * `meta` is populated only by the synthesizer; for all other agents it is
- * omitted so the field stays undefined on the recorded Turn.
+ * Populates the per-turn metadata required by Stage 3 UI work
+ * (`agent` → role label, `neurotype` → posture, `model` → model name,
+ * `word_count` → whitespace-delimited count). Synthesizer turns also carry
+ * structured `meta` (confidence, consensus, agreed[], unresolved[]).
  */
 function recordTurn(
   blackboard: Blackboard,
@@ -98,6 +175,7 @@ function recordTurn(
     content,
     timestamp: new Date().toISOString(),
     round,
+    word_count: countWords(content),
   };
   if (meta !== undefined) {
     turn.meta = meta;
@@ -222,6 +300,150 @@ export class DeliberationEngine {
     // -------------------------------------------------------------------- //
     // Compute final outcome
     // -------------------------------------------------------------------- //
+    const residueScore = computeResidueScore(blackboard.conflicts);
+    const resolved = blackboard.conflicts.length === 0 ||
+      blackboard.conflicts.every((c) => c.resolved);
+
+    const split: SplitSummary | null =
+      synthesis === null
+        ? buildSplitSummary(blackboard.turns, residueScore)
+        : null;
+
+    const completedAt = new Date().toISOString();
+
+    return {
+      topic,
+      turns: blackboard.turns,
+      conflicts: blackboard.conflicts,
+      residueScore,
+      resolved,
+      synthesis,
+      split,
+      terminationReason,
+      totalRounds,
+      started_at: startedAt,
+      completed_at: completedAt,
+    };
+  }
+
+  /**
+   * Topology-driven deliberation. Replaces the hardcoded five-agent pipeline
+   * (`run` above) with a generic step-sequencer that consumes a resolved
+   * `TopologyConfig` from the loader.
+   *
+   * Per-round execution order:
+   *   1. Walk `topology.activePreset.steps` in declared order. For each step:
+   *        a. Resolve the step's neurotype ID via `resolveNeurotype(step)`.
+   *        b. Call `agent.generate(blackboard)` and record the turn.
+   *        c. Out-of-band Sentry check — any `collapse_detected` signal
+   *           terminates with `echo_loop` immediately. Sentry is NEVER a
+   *           step; the loader rejects any preset that lists it in `steps`.
+   *   2. Synthesizer (structural infrastructure, not a step). Records its
+   *      turn with `meta`. Terminates with `consensus` when
+   *      `meta.consensus === true && meta.confidence >= confidenceThreshold`.
+   *   3. Out-of-band Sentry check again after the synthesizer.
+   *   4. RedAgent injection when `round % redAgentInterval === 0` (also
+   *      structural infrastructure — fires after the synthesizer to disrupt
+   *      premature consensus mid-debate).
+   *   After `maxRounds` with no earlier termination: `max_rounds`.
+   *
+   * The `optional: true` field on a step is parsed (the loader accepts and
+   * defaults it) and logged but NOT acted on in Stage 1 — skip semantics
+   * are deferred per the elaboration decision so this stage can ship before
+   * the runtime has a way to evaluate skip predicates.
+   */
+  async runTopology(
+    topic: string,
+    config: TopologyDeliberationConfig,
+  ): Promise<DeliberationResult> {
+    const {
+      maxRounds,
+      redAgentInterval,
+      confidenceThreshold,
+      topology,
+      resolveNeurotype,
+      synthesizer,
+      redAgent,
+      sentry,
+    } = config;
+
+    const logger: TopologyRuntimeLogger = config.logger ?? { info: () => {} };
+
+    const startedAt = new Date().toISOString();
+
+    const blackboard: Blackboard = {
+      topic,
+      turns: [],
+      conflicts: [],
+      metadata: {
+        active_preset: topology.activePreset.id,
+      },
+    };
+
+    let terminationReason: TerminationReason = 'max_rounds';
+    let synthesis: string | null = null;
+    let totalRounds = 0;
+
+    // Log every optional-flagged step exactly once at engine start so the
+    // information surfaces even when we terminate before that step runs.
+    for (const step of topology.activePreset.steps) {
+      if (step.optional) {
+        logger.info(
+          `topology: step "${step.id}" (neurotype "${step.neurotype}") declared optional=true; ` +
+          `Stage 1 runs it anyway (skip semantics are deferred)`,
+        );
+      }
+    }
+
+    roundLoop: for (let round = 1; round <= maxRounds; round++) {
+      totalRounds = round;
+
+      // ------------------------------------------------------------------ //
+      // Step phase: walk the preset's declared step list in order.
+      // ------------------------------------------------------------------ //
+      for (const step of topology.activePreset.steps) {
+        const agent = resolveNeurotype(step);
+        const result = await agent.generate(blackboard);
+        recordTurn(blackboard, agent, result.content, round);
+
+        // Out-of-band Sentry after every step. The loader has already
+        // forbidden Sentry from appearing in steps, so this is the ONLY
+        // place Sentry runs during the step phase.
+        const sentryStepResult = await sentry.generate(blackboard);
+        if (sentryStepResult.signal === 'collapse_detected') {
+          terminationReason = 'echo_loop';
+          break roundLoop;
+        }
+      }
+
+      // ------------------------------------------------------------------ //
+      // Synthesizer (structural infrastructure — not a step).
+      // ------------------------------------------------------------------ //
+      const synthResult = await synthesizer.generate(blackboard);
+      recordTurn(blackboard, synthesizer, synthResult.content, round, synthResult.meta);
+
+      if (shouldTerminateOnConsensus(synthResult, confidenceThreshold)) {
+        synthesis = synthResult.content;
+        terminationReason = 'consensus';
+        break;
+      }
+
+      // Out-of-band Sentry after synthesizer.
+      const sentryPostSynthResult = await sentry.generate(blackboard);
+      if (sentryPostSynthResult.signal === 'collapse_detected') {
+        terminationReason = 'echo_loop';
+        break;
+      }
+
+      // ------------------------------------------------------------------ //
+      // RedAgent injection at interval (structural infrastructure).
+      // ------------------------------------------------------------------ //
+      if (round % redAgentInterval === 0) {
+        const redResult = await redAgent.generate(blackboard);
+        recordTurn(blackboard, redAgent, redResult.content, round);
+      }
+    }
+
     const residueScore = computeResidueScore(blackboard.conflicts);
     const resolved = blackboard.conflicts.length === 0 ||
       blackboard.conflicts.every((c) => c.resolved);
