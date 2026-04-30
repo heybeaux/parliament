@@ -121,6 +121,37 @@ const REFRAME_PRESET: TopologyPreset = Object.freeze({
 });
 
 /**
+ * Jury — Stage 4 (add-jury-parallel). Proposer opens, then four critics fire
+ * concurrently against the SAME read-only blackboard snapshot, then the
+ * Synthesizer reconciles. The parallel block breaks the order-bias problem
+ * the sequential `star-chamber` preset can't avoid: in Star Chamber the
+ * Skeptic's framing is read by the Devils-Advocate, which is then read by the
+ * Empiricist, etc. — the first critic dominates the room.
+ *
+ * Critic count is fixed at 4 per the elaboration decision on task `e5781f6d`.
+ * Users wanting 3 or 5 critics author their own user-defined preset with
+ * `parallel_steps`.
+ */
+const JURY_PRESET: TopologyPreset = Object.freeze({
+  id: 'jury',
+  name: 'Jury',
+  description:
+    'A Proposer opens, then four independent critics fire concurrently — Skeptic, Empiricist, Steelmanner, Devil\'s Advocate — each reading the same blackboard with no knowledge of the others, before the Synthesizer reconciles. Breaks the order-bias of sequential critic chains.',
+  best_for:
+    'Questions where you don\'t want the first speaker\'s framing to dominate the room — the four parallel critics each bring an independent angle to the same proposal.',
+  isBuiltin: true,
+  steps: Object.freeze([
+    Object.freeze({ id: 'proposer', neurotype: 'proposer', optional: false }),
+  ]),
+  parallel_steps: Object.freeze([
+    Object.freeze({ id: 'skeptic', neurotype: 'skeptic', optional: false }),
+    Object.freeze({ id: 'empiricist', neurotype: 'empiricist', optional: false }),
+    Object.freeze({ id: 'steelmanner', neurotype: 'steelmanner', optional: false }),
+    Object.freeze({ id: 'devils-advocate', neurotype: 'devils-advocate', optional: false }),
+  ]),
+});
+
+/**
  * Built-in presets keyed by ID. Frozen so callers cannot mutate the registry
  * at runtime.
  */
@@ -131,6 +162,7 @@ export const BUILTIN_PRESETS: Readonly<Record<string, TopologyPreset>> = Object.
   socratic: SOCRATIC_PRESET,
   'long-view': LONG_VIEW_PRESET,
   reframe: REFRAME_PRESET,
+  jury: JURY_PRESET,
 });
 
 /** All built-in preset IDs in registration order. */

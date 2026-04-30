@@ -32,6 +32,7 @@ const PRESET_SPECS: ReadonlyArray<{
   id: string;
   name: string;
   expectedSteps: readonly string[];
+  expectedParallelSteps?: readonly string[];
 }> = [
   { id: 'debate', name: 'Debate', expectedSteps: ['proposer', 'skeptic'] },
   {
@@ -59,10 +60,16 @@ const PRESET_SPECS: ReadonlyArray<{
     name: 'Reframe',
     expectedSteps: ['lateralist', 'translator', 'steelmanner'],
   },
+  {
+    id: 'jury',
+    name: 'Jury',
+    expectedSteps: ['proposer'],
+    expectedParallelSteps: ['skeptic', 'empiricist', 'steelmanner', 'devils-advocate'],
+  },
 ];
 
 describe('built-in preset registry', () => {
-  it('registers exactly the six Stage 1 presets', () => {
+  it('registers exactly the seven Stage 1 + Stage 4 built-in presets', () => {
     expect(new Set(BUILTIN_PRESET_IDS)).toEqual(new Set(PRESET_SPECS.map((p) => p.id)));
   });
 
@@ -124,7 +131,7 @@ active = "${id}"
     expect(config.activePreset.isBuiltin).toBe(true);
   });
 
-  it('exposes all six built-ins under config.presets even when only one is active', () => {
+  it('exposes all seven built-ins under config.presets even when only one is active', () => {
     const config = load(`
 [topology]
 active = "debate"
@@ -134,6 +141,20 @@ active = "debate"
       expect(config.presets[id]!.isBuiltin).toBe(true);
     }
   });
+
+  it.each(PRESET_SPECS.filter((p) => p.expectedParallelSteps !== undefined))(
+    'declares "$id" parallel_steps in expected order with no structural-infrastructure leakage',
+    ({ id, expectedParallelSteps }) => {
+      const preset = BUILTIN_PRESETS[id] as TopologyPreset;
+      expect(preset.parallel_steps).toBeDefined();
+      expect(preset.parallel_steps!.map((s) => s.id)).toEqual(expectedParallelSteps);
+      expect(preset.parallel_steps!.map((s) => s.neurotype)).toEqual(expectedParallelSteps);
+      const parallelNeurotypes = new Set(preset.parallel_steps!.map((s) => s.neurotype));
+      expect(parallelNeurotypes.has('synthesizer')).toBe(false);
+      expect(parallelNeurotypes.has('red-agent')).toBe(false);
+      expect(parallelNeurotypes.has('sentry')).toBe(false);
+    },
+  );
 });
 
 describe('Socratic preset shape (AC: no Proposer required)', () => {
@@ -145,5 +166,66 @@ describe('Socratic preset shape (AC: no Proposer required)', () => {
   it('opens with translator (assumption-surfacing) per the topology spec', () => {
     const preset = BUILTIN_PRESETS['socratic'] as TopologyPreset;
     expect(preset.steps[0]!.neurotype).toBe('translator');
+  });
+});
+
+describe('Jury preset shape (Stage 4 — task e5781f6d)', () => {
+  it('declares full metadata including a best_for that names the order-bias use case', () => {
+    const preset = BUILTIN_PRESETS['jury'] as TopologyPreset;
+    expect(preset.name).toBe('Jury');
+    expect(preset.description).toMatch(/parallel|concurrent|same blackboard/i);
+    // The best_for field is what the picker UI surfaces as "when to choose this".
+    // It MUST advertise the order-bias / framing-domination use case.
+    expect(preset.best_for).toMatch(/framing|first speaker|order-bias|dominate/i);
+  });
+
+  it('runs Proposer first (sequential), then 4 critics in parallel — Synthesizer is engine infrastructure', () => {
+    const preset = BUILTIN_PRESETS['jury'] as TopologyPreset;
+    expect(preset.steps.map((s) => s.neurotype)).toEqual(['proposer']);
+    expect(preset.parallel_steps!.map((s) => s.neurotype)).toEqual([
+      'skeptic',
+      'empiricist',
+      'steelmanner',
+      'devils-advocate',
+    ]);
+    // Synthesizer is structural infrastructure and runs after the parallel
+    // block automatically — it does NOT appear in either steps or parallel_steps.
+    const allNeurotypes = [
+      ...preset.steps.map((s) => s.neurotype),
+      ...preset.parallel_steps!.map((s) => s.neurotype),
+    ];
+    expect(allNeurotypes).not.toContain('synthesizer');
+    expect(allNeurotypes).not.toContain('sentry');
+  });
+
+  it('fixes critic count at exactly 4 — no parliament.toml override path', () => {
+    const preset = BUILTIN_PRESETS['jury'] as TopologyPreset;
+    expect(preset.parallel_steps).toBeDefined();
+    expect(preset.parallel_steps!.length).toBe(4);
+    // Per elaboration decision: no critic-count knob is wired on this
+    // built-in. Users wanting a different count author their own
+    // user-defined preset with `parallel_steps`. We assert the four IDs to
+    // pin the contract and prevent accidental drift.
+    expect(preset.parallel_steps!.map((s) => s.id).sort()).toEqual([
+      'devils-advocate',
+      'empiricist',
+      'skeptic',
+      'steelmanner',
+    ]);
+  });
+
+  it('resolves through the loader when set as the active preset', () => {
+    const config = load(`
+[topology]
+active = "jury"
+`);
+    expect(config.activePreset.id).toBe('jury');
+    expect(config.activePreset.steps.map((s) => s.id)).toEqual(['proposer']);
+    expect(config.activePreset.parallel_steps!.map((s) => s.id)).toEqual([
+      'skeptic',
+      'empiricist',
+      'steelmanner',
+      'devils-advocate',
+    ]);
   });
 });
