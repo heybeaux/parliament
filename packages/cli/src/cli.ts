@@ -5,15 +5,17 @@
  * executing side-effects at import time.
  *
  * Commands:
- *   parliament deliberate "<topic>" [--model-proposer <id>] [--model-skeptic <id>]
- *                                   [--max-rounds <n>]
+ *   parliament deliberate "<topic>" [--preset <name>]
+ *                                   [--model-proposer <id>] [--model-skeptic <id>]
+ *                                   [--max-rounds <n>] [--config <path>]
  *   parliament get <id>
  */
 
 import { Command } from 'commander';
 import {
   loadConfig,
-  buildAgentsFromConfig,
+  loadTopologyConfig,
+  resolveActivePreset,
   createAdapter,
   DeliberationEngine,
   ProposerAgent,
@@ -21,9 +23,17 @@ import {
   SynthesizerAgent,
   RedAgent,
   SentryAgent,
+  StubNeurotypeAgent,
+  TopologyValidationError,
+  isBuiltinNeurotype,
+  createBuiltinAgent,
   DEFAULT_PARLIAMENT_DEFAULTS,
 } from '@parliament/core';
-import type { DeliberationResult } from '@parliament/core';
+import type {
+  Agent,
+  DeliberationResult,
+  TopologyStep,
+} from '@parliament/core';
 import { printResult } from './display.js';
 
 // ---------------------------------------------------------------------------
@@ -31,6 +41,7 @@ import { printResult } from './display.js';
 // ---------------------------------------------------------------------------
 
 interface DeliberateOptions {
+  preset?: string;
   modelProposer?: string;
   modelSkeptic?: string;
   maxRounds?: string;
@@ -41,13 +52,6 @@ async function runDeliberate(topic: string, opts: DeliberateOptions): Promise<vo
   const configPath = opts.config ?? process.env['PARLIAMENT_CONFIG'];
   const cfg = loadConfig(configPath);
 
-  // Allow per-invocation model overrides for proposer and skeptic.
-  const proposerModel = opts.modelProposer ?? cfg.neurotypes['proposer']?.model ?? 'llama3.2';
-  const skepticModel = opts.modelSkeptic ?? cfg.neurotypes['skeptic']?.model ?? 'mistral';
-  const synthModel = cfg.neurotypes['synthesizer']?.model ?? 'llama3.2';
-  const redModel = cfg.neurotypes['redAgent']?.model ?? 'mistral';
-  const sentryModel = cfg.neurotypes['sentry']?.model ?? 'llama3.2';
-
   const defaults = cfg.parliament ?? DEFAULT_PARLIAMENT_DEFAULTS;
   const maxRounds =
     opts.maxRounds !== undefined ? parseInt(opts.maxRounds, 10) : defaults.max_rounds;
@@ -57,8 +61,13 @@ async function runDeliberate(topic: string, opts: DeliberateOptions): Promise<vo
     process.exit(1);
   }
 
-  const proposer = new ProposerAgent(createAdapter(proposerModel));
-  const skeptic = new SkepticAgent(createAdapter(skepticModel));
+  // Structural-infrastructure agents (synthesizer, redAgent, sentry) are
+  // always wired. They are NOT steppable in topology presets but the engine
+  // requires them on both code paths.
+  const synthModel = cfg.neurotypes['synthesizer']?.model ?? 'llama3.2';
+  const redModel = cfg.neurotypes['redAgent']?.model ?? 'mistral';
+  const sentryModel = cfg.neurotypes['sentry']?.model ?? 'llama3.2';
+
   const synthesizer = new SynthesizerAgent(createAdapter(synthModel));
   const redAgent = new RedAgent(createAdapter(redModel));
   const sentry = new SentryAgent(createAdapter(sentryModel), {
@@ -68,12 +77,81 @@ async function runDeliberate(topic: string, opts: DeliberateOptions): Promise<vo
 
   const engine = new DeliberationEngine();
 
-  const result = await engine.run(topic, {
-    maxRounds,
-    redAgentInterval: defaults.red_agent_interval,
-    confidenceThreshold: defaults.confidence_threshold,
-    agents: { proposer, skeptic, synthesizer, redAgent, sentry },
-  });
+  // Load the topology config once; we need it both to know the active preset
+  // (so we can stay on the legacy path when it's "debate" and no override was
+  // supplied) and to feed `runTopology` when we route through topology mode.
+  const baseTopology = (() => {
+    try {
+      return loadTopologyConfig({ explicitPath: configPath });
+    } catch (err) {
+      if (err instanceof TopologyValidationError) {
+        process.stderr.write(`Parliament: ${err.message}\n`);
+        process.exit(1);
+      }
+      throw err;
+    }
+  })();
+
+  const useTopologyPath =
+    opts.preset !== undefined || baseTopology.activePreset.id !== 'debate';
+
+  let result: DeliberationResult;
+
+  if (useTopologyPath) {
+    let topology;
+    try {
+      topology = resolveActivePreset(
+        baseTopology,
+        opts.preset ?? baseTopology.activePreset.id,
+      );
+    } catch (err) {
+      if (err instanceof TopologyValidationError) {
+        process.stderr.write(`Parliament: ${err.message}\n`);
+        process.exit(1);
+      }
+      throw err;
+    }
+
+    const resolveNeurotype = (step: TopologyStep): Agent => {
+      const neurotype = cfg.neurotypes[step.neurotype];
+      if (!neurotype) {
+        throw new Error(
+          `Parliament: step "${step.id}" references neurotype "${step.neurotype}" but no [neurotypes.${step.neurotype}] entry exists in parliament.toml`,
+        );
+      }
+      const adapter = createAdapter(neurotype.model, neurotype.provider);
+      if (isBuiltinNeurotype(step.neurotype)) {
+        return createBuiltinAgent(step.neurotype, adapter);
+      }
+      return new StubNeurotypeAgent(step.id, step.neurotype, adapter);
+    };
+
+    result = await engine.runTopology(topic, {
+      maxRounds,
+      redAgentInterval: defaults.red_agent_interval,
+      confidenceThreshold: defaults.confidence_threshold,
+      topology,
+      resolveNeurotype,
+      synthesizer,
+      redAgent,
+      sentry,
+    });
+  } else {
+    // Legacy 5-agent path — preserved byte-identically for the default Debate
+    // preset to honor task d520d96a's regression contract.
+    const proposerModel = opts.modelProposer ?? cfg.neurotypes['proposer']?.model ?? 'llama3.2';
+    const skepticModel = opts.modelSkeptic ?? cfg.neurotypes['skeptic']?.model ?? 'mistral';
+
+    const proposer = new ProposerAgent(createAdapter(proposerModel));
+    const skeptic = new SkepticAgent(createAdapter(skepticModel));
+
+    result = await engine.run(topic, {
+      maxRounds,
+      redAgentInterval: defaults.red_agent_interval,
+      confidenceThreshold: defaults.confidence_threshold,
+      agents: { proposer, skeptic, synthesizer, redAgent, sentry },
+    });
+  }
 
   printResult(result);
 }
@@ -134,6 +212,7 @@ export function createProgram(): Command {
   program
     .command('deliberate <topic>')
     .description('Run a multi-agent deliberation on a topic')
+    .option('--preset <name>', 'Override [topology].active for this run')
     .option('--model-proposer <id>', 'Model ID override for the Proposer agent')
     .option('--model-skeptic <id>', 'Model ID override for the Skeptic agent')
     .option('--max-rounds <n>', 'Maximum number of deliberation rounds (default: 5)')

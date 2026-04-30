@@ -14,4 +14,8 @@ export {
   BUILTIN_PRESET_IDS,
   isBuiltinPreset,
 } from './presets.js';
-export { loadTopology, type LoadTopologyOptions } from './loader.js';
+export {
+  loadTopology,
+  resolveActivePreset,
+  type LoadTopologyOptions,
+} from './loader.js';

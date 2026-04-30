@@ -64,22 +64,118 @@ const MOCK_SPLIT_RESULT: DeliberationResult = {
 // Mocks — hoisted so they run before imports in the module under test
 // ---------------------------------------------------------------------------
 
+// Built-in preset registry mirror for the mock. Keep in sync with
+// packages/core/src/topology/presets.ts. The CLI only reads
+// `id`, `steps`, and uses `presets[id]` lookups, so these stub steps
+// are enough to exercise the topology-routing branch.
+const MOCK_BUILTIN_PRESETS = {
+  debate: {
+    id: 'debate',
+    name: 'Debate',
+    description: 'classic 2-agent debate',
+    best_for: 'binary decisions',
+    steps: [
+      { id: 'proposer', neurotype: 'proposer', optional: false },
+      { id: 'skeptic', neurotype: 'skeptic', optional: false },
+    ],
+  },
+  socratic: {
+    id: 'socratic',
+    name: 'Socratic',
+    description: 'translator-led inquiry',
+    best_for: 'assumption surfacing',
+    steps: [
+      { id: 'translator', neurotype: 'translator', optional: false },
+      { id: 'empiricist', neurotype: 'empiricist', optional: false },
+      { id: 'skeptic', neurotype: 'skeptic', optional: false },
+    ],
+  },
+  'star-chamber': {
+    id: 'star-chamber',
+    name: 'Star Chamber',
+    description: 'multi-skeptic',
+    best_for: 'high-stakes reviews',
+    steps: [
+      { id: 'proposer', neurotype: 'proposer', optional: false },
+      { id: 'skeptic', neurotype: 'skeptic', optional: false },
+    ],
+  },
+};
+
+const MOCK_TOPOLOGY = {
+  activePreset: MOCK_BUILTIN_PRESETS.debate,
+  presets: MOCK_BUILTIN_PRESETS,
+  userNeurotypes: {},
+};
+
+class MockTopologyValidationError extends Error {
+  code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.code = code;
+    this.name = 'TopologyValidationError';
+  }
+}
+
 vi.mock('@parliament/core', () => {
   const mockRun = vi.fn().mockResolvedValue(MOCK_RESULT);
+  const mockRunTopology = vi.fn().mockResolvedValue(MOCK_RESULT);
+
+  const builtinNeurotypes = new Set([
+    'proposer',
+    'skeptic',
+    'historian',
+    'forecaster',
+    'pragmatist',
+    'empiricist',
+    'steelmanner',
+    'devils-advocate',
+    'lateralist',
+    'translator',
+  ]);
 
   return {
     loadConfig: vi.fn().mockReturnValue({
       neurotypes: {
-        proposer: { model: 'llama3.2', system_prompt: 'You are a proposer.' },
-        skeptic: { model: 'mistral', system_prompt: 'You are a skeptic.' },
-        synthesizer: { model: 'llama3.2', system_prompt: 'You are a synthesizer.' },
-        red_agent: { model: 'mistral', system_prompt: 'You are a red agent.' },
-        sentry: { model: 'llama3.2', system_prompt: 'You are a sentry.' },
+        proposer: { model: 'llama3.2', provider: 'omlx', system_prompt: 'You are a proposer.' },
+        skeptic: { model: 'mistral', provider: 'omlx', system_prompt: 'You are a skeptic.' },
+        synthesizer: { model: 'llama3.2', provider: 'omlx', system_prompt: 'You are a synthesizer.' },
+        redAgent: { model: 'mistral', provider: 'omlx', system_prompt: 'You are a red agent.' },
+        sentry: { model: 'llama3.2', provider: 'omlx', system_prompt: 'You are a sentry.' },
+        translator: { model: 'llama3.2', provider: 'omlx', system_prompt: 'You are a translator.' },
+        empiricist: { model: 'llama3.2', provider: 'omlx', system_prompt: 'You are an empiricist.' },
       },
     }),
+    loadTopologyConfig: vi.fn().mockReturnValue(MOCK_TOPOLOGY),
+    resolveActivePreset: vi.fn().mockImplementation((cfg, overrideId) => {
+      if (overrideId === cfg.activePreset.id) return cfg;
+      const preset = cfg.presets[overrideId];
+      if (!preset) {
+        const available = Object.keys(cfg.presets).sort().join(', ');
+        throw new MockTopologyValidationError(
+          'unknown_active_preset',
+          `unknown preset "${overrideId}". Available presets: [${available}]`,
+        );
+      }
+      return { ...cfg, activePreset: preset };
+    }),
+    BUILTIN_PRESETS: MOCK_BUILTIN_PRESETS,
+    TopologyValidationError: MockTopologyValidationError,
+    isBuiltinNeurotype: vi.fn().mockImplementation((id: string) => builtinNeurotypes.has(id)),
+    createBuiltinAgent: vi.fn().mockImplementation((id: string) => ({
+      role: id,
+      neurotype: id,
+    })),
+    StubNeurotypeAgent: vi.fn().mockImplementation((stepId: string, ntId: string) => ({
+      role: stepId,
+      neurotype: ntId,
+    })),
     buildAgentsFromConfig: vi.fn().mockReturnValue([]),
     createAdapter: vi.fn().mockReturnValue({}),
-    DeliberationEngine: vi.fn().mockImplementation(() => ({ run: mockRun })),
+    DeliberationEngine: vi.fn().mockImplementation(() => ({
+      run: mockRun,
+      runTopology: mockRunTopology,
+    })),
     ProposerAgent: vi.fn().mockImplementation(() => ({ role: 'Proposer', neurotype: 'structured' })),
     SkepticAgent: vi.fn().mockImplementation(() => ({ role: 'Skeptic', neurotype: 'critical' })),
     SynthesizerAgent: vi.fn().mockImplementation(() => ({
@@ -201,6 +297,135 @@ describe('parliament --help', () => {
     expect(helpOutput).toContain('parliament');
     expect(helpOutput).toContain('deliberate');
     expect(helpOutput).toContain('get');
+  });
+
+  it('deliberate --help advertises the --preset flag', async () => {
+    const { createProgram } = await import('../cli.js');
+    const program = createProgram();
+
+    let helpOutput = '';
+    program.configureOutput({
+      writeOut: (str) => { helpOutput += str; },
+      writeErr: () => {},
+    });
+    // exitOverride must propagate to subcommands so `deliberate --help`
+    // throws instead of calling process.exit.
+    program.exitOverride();
+    program.commands.forEach((cmd) => {
+      cmd.configureOutput({
+        writeOut: (str) => { helpOutput += str; },
+        writeErr: () => {},
+      });
+      cmd.exitOverride();
+    });
+
+    let exitCode: number | undefined;
+    try {
+      await program.parseAsync(['node', 'parliament', 'deliberate', '--help']);
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'exitCode' in err) {
+        exitCode = (err as { exitCode: number }).exitCode;
+      }
+    }
+
+    expect(exitCode).toBe(0);
+    expect(helpOutput).toContain('--preset');
+    // The description should mention overriding [topology].active.
+    expect(helpOutput).toMatch(/topology.*active|preset/i);
+  });
+});
+
+describe('parliament deliberate --preset', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('routes a known preset through runTopology with the resolved preset', async () => {
+    const core = await import('@parliament/core');
+    const mockEngineRun = vi.fn().mockResolvedValue(MOCK_RESULT);
+    const mockEngineRunTopology = vi.fn().mockResolvedValue(MOCK_RESULT);
+    (core.DeliberationEngine as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () => ({ run: mockEngineRun, runTopology: mockEngineRunTopology }),
+    );
+
+    const { createProgram } = await import('../cli.js');
+    const program = createProgram();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+
+    await program.parseAsync([
+      'node', 'parliament', 'deliberate', 'a topic', '--preset', 'socratic',
+    ]);
+
+    // runTopology was called, run() was not.
+    expect(mockEngineRunTopology).toHaveBeenCalledTimes(1);
+    expect(mockEngineRun).not.toHaveBeenCalled();
+
+    // Topology passed in should carry the resolved socratic preset.
+    const callArgs = mockEngineRunTopology.mock.calls[0]?.[1] as {
+      topology: { activePreset: { id: string } };
+    };
+    expect(callArgs.topology.activePreset.id).toBe('socratic');
+
+    // Result was rendered.
+    expect(mockPrintResult).toHaveBeenCalledTimes(1);
+  });
+
+  it('exits 1 with did-you-mean message when preset is unknown', async () => {
+    const { createProgram } = await import('../cli.js');
+    const program = createProgram();
+
+    let stderrCapture = '';
+    const originalWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: unknown) => {
+      stderrCapture += String(chunk);
+      return true;
+    }) as typeof process.stderr.write;
+
+    const exitSpy = vi
+      .spyOn(process, 'exit')
+      .mockImplementation(((code?: number) => {
+        throw new Error(`__exit_${code ?? 0}__`);
+      }) as never);
+
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+
+    let caught: unknown;
+    try {
+      await program.parseAsync([
+        'node', 'parliament', 'deliberate', 'topic', '--preset', 'nope',
+      ]);
+    } catch (err) {
+      caught = err;
+    } finally {
+      process.stderr.write = originalWrite;
+      exitSpy.mockRestore();
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toContain('__exit_1__');
+    expect(stderrCapture).toContain('unknown preset "nope"');
+    expect(stderrCapture).toContain('Available presets:');
+    // The list should be alphabetized — debate, socratic, star-chamber.
+    expect(stderrCapture).toMatch(/debate.*socratic.*star-chamber/);
+  });
+
+  it('uses legacy run() path when no --preset is given and active is debate', async () => {
+    const core = await import('@parliament/core');
+    const mockEngineRun = vi.fn().mockResolvedValue(MOCK_RESULT);
+    const mockEngineRunTopology = vi.fn().mockResolvedValue(MOCK_RESULT);
+    (core.DeliberationEngine as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () => ({ run: mockEngineRun, runTopology: mockEngineRunTopology }),
+    );
+
+    const { createProgram } = await import('../cli.js');
+    const program = createProgram();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+
+    await program.parseAsync(['node', 'parliament', 'deliberate', 'a topic']);
+
+    // Legacy path stays on run() — preserves byte-identical Debate.
+    expect(mockEngineRun).toHaveBeenCalledTimes(1);
+    expect(mockEngineRunTopology).not.toHaveBeenCalled();
   });
 });
 

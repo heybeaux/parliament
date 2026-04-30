@@ -379,6 +379,27 @@ function unknownActivePresetError(
 }
 
 /**
+ * Returns a `TopologyConfig` whose `activePreset` is `overrideId`, leaving
+ * the registry and user neurotypes intact.
+ *
+ * Throws a `TopologyValidationError` (`unknown_active_preset`) with the
+ * loader's standard error format — `did you mean "..."?` suggestion plus
+ * the alphabetized available list — when `overrideId` isn't registered.
+ *
+ * Use this when a runtime caller (CLI, server) wants to override the
+ * preset chosen by `[topology].active` without re-reading the TOML file.
+ */
+export function resolveActivePreset(
+  config: TopologyConfig,
+  overrideId: string,
+): TopologyConfig {
+  if (overrideId === config.activePreset.id) return config;
+  const preset = config.presets[overrideId];
+  if (!preset) throw unknownActivePresetError(overrideId, config.presets);
+  return { ...config, activePreset: preset };
+}
+
+/**
  * Levenshtein-based "did you mean" lookup. Returns the closest available
  * preset ID when its edit distance to `target` is ≤ 2, otherwise returns
  * `null`. The threshold is fixed by the topology spec.
