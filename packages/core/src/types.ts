@@ -48,6 +48,13 @@ export interface Turn {
   word_count?: number;
   /** Populated by SynthesizerAgent only — structured signals next to the prose. */
   meta?: SynthesizerMeta;
+  /**
+   * Group identifier shared by all sibling turns produced inside the same
+   * `parallel_steps` block. Sequential turns either omit this field or set it
+   * to `null`. Stage 4 (add-jury-parallel) — see
+   * `openspec/changes/add-jury-parallel/specs/topology-parallel/spec.md`.
+   */
+  parallel_group?: string | null;
 }
 
 export interface Conflict {
