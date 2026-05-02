@@ -27,7 +27,11 @@ export class TranslatorAgent implements Agent {
       .map((t) => `[${t.agent}]: ${t.content}`)
       .join('\n\n');
 
-    const header = buildPromptHeader(blackboard.topic, blackboard.context);
+    const header = buildPromptHeader(
+      blackboard.topic,
+      blackboard.context,
+      blackboard.sources,
+    );
     const userPrompt = recentTurns.length > 0
       ? `${header}\n\nRecent discussion:\n\n${recentTurns}`
       : header;

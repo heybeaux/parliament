@@ -116,6 +116,23 @@ export interface Conflict {
   resolved: boolean;
 }
 
+/**
+ * PAR-17 — single structured source attached to a deliberation. Mirrors the
+ * engine `DeliberationSource` shape. The Sources panel renders one row per
+ * entry: the `[id]` chip is what the agents quote in citations, `kind`
+ * (when present) renders as a category chip, `title` is the human-readable
+ * display name, and `content` is the truncated prose pulled into the prompt.
+ *
+ * Optional / additive — pre-PAR-17 deliberations omit this field entirely;
+ * the panel hides itself in that case.
+ */
+export interface DeliberationSource {
+  id: string;
+  title: string;
+  content: string;
+  kind?: 'paper' | 'memo' | 'code' | 'transcript' | 'other';
+}
+
 export interface SplitSummary {
   positions: Record<string, string>;
   irreconcilable: boolean;
@@ -139,6 +156,14 @@ export interface DeliberationResult {
    * optional and render only when present.
    */
   context?: string;
+  /**
+   * Optional structured sources the user supplied alongside the topic
+   * (PAR-17). Echoed back unchanged on `POST /deliberate` and persisted on
+   * the deliberation record so `GET /deliberate/:id` round-trips them.
+   * Old server builds omit this field; UI consumers must treat it as
+   * optional and only render the Sources panel when non-empty.
+   */
+  sources?: DeliberationSource[];
   turns: Turn[];
   conflicts: Conflict[];
   residueScore: number;

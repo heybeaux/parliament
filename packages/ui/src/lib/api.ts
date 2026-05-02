@@ -1,6 +1,7 @@
 import type {
   DeliberationAccepted,
   DeliberationResult,
+  DeliberationSource,
   DeliberationSummary,
   PresetsResponse,
   TranscriptFile,
@@ -20,6 +21,11 @@ export interface DeliberateOptions {
   maxRounds?: number;
   redAgentInterval?: number;
   confidenceThreshold?: number;
+  /**
+   * PAR-17 — per-source word cap. When set, overrides the engine's 500-word
+   * default applied during prompt construction.
+   */
+  maxSourceWords?: number;
 }
 
 export async function startDeliberation(
@@ -33,12 +39,21 @@ export async function startDeliberation(
      * in the topic still works for back-compat but is deprecated.
      */
     context?: string;
+    /**
+     * PAR-17: optional structured sources. When non-empty, included as the
+     * `sources` field on the POST body so the engine renders a `## Sources`
+     * block on every non-Sentry agent's user prompt and the Empiricist
+     * activates evidence-backed claim mode. Caller is responsible for
+     * pre-extracting `content` (no on-demand retrieval in the engine).
+     */
+    sources?: DeliberationSource[];
     config?: DeliberateOptions;
   },
   signal?: AbortSignal,
 ): Promise<DeliberationAccepted> {
   const preset = options?.preset?.trim();
   const context = options?.context?.trim();
+  const sources = options?.sources;
   const config = options?.config;
   const res = await fetch(`${BASE}/deliberate`, {
     method: 'POST',
@@ -47,6 +62,7 @@ export async function startDeliberation(
       topic,
       ...(preset ? { preset } : {}),
       ...(context ? { context } : {}),
+      ...(sources && sources.length > 0 ? { sources } : {}),
       ...(config ? { config } : {}),
     }),
     signal,
@@ -92,7 +108,7 @@ export async function getTranscript(file: string): Promise<DeliberationResult> {
   const raw = await jsonOrThrow<Record<string, unknown>>(res);
   // Transcript files use snake_case; normalize to camelCase for the UI.
   const fallbackTimestamp = (raw['created_at'] ?? '') as string;
-  return {
+  const result: DeliberationResult = {
     topic: raw['topic'] as string,
     turns: raw['turns'] as DeliberationResult['turns'],
     conflicts: (raw['conflicts'] ?? []) as DeliberationResult['conflicts'],
@@ -106,6 +122,11 @@ export async function getTranscript(file: string): Promise<DeliberationResult> {
     completed_at: (raw['completed_at'] ?? fallbackTimestamp) as string,
     events: (raw['events'] ?? []) as DeliberationResult['events'],
   };
+  // PAR-17 — round-trip optional sources from the transcript file when present.
+  if (Array.isArray(raw['sources']) && raw['sources'].length > 0) {
+    result.sources = raw['sources'] as DeliberationResult['sources'];
+  }
+  return result;
 }
 
 export interface HealthResponse {

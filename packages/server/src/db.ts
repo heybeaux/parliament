@@ -1,5 +1,11 @@
 import Database from 'better-sqlite3';
-import type { DeliberationResult, DeliberationStatus, SystemEvent, Turn } from '@parliament/core';
+import type {
+  DeliberationResult,
+  DeliberationSource,
+  DeliberationStatus,
+  SystemEvent,
+  Turn,
+} from '@parliament/core';
 
 export { Database };
 
@@ -82,11 +88,20 @@ export function initDb(path = 'parliament.db'): Database.Database {
 function buildPlaceholderResultJson(args: {
   topic: string;
   context?: string | undefined;
+  /**
+   * PAR-17 — structured sources echoed onto the placeholder so a client
+   * polling mid-run sees the same `sources` array the completed run will
+   * eventually carry. Empty / undefined → omitted entirely so old client
+   * builds and the GET-list endpoint continue to parse rows without sources.
+   */
+  sources?: readonly DeliberationSource[] | undefined;
   startedAt: string;
 }): string {
+  const hasSources = args.sources !== undefined && args.sources.length > 0;
   const placeholder: DeliberationResult = {
     topic: args.topic,
     ...(args.context !== undefined && args.context !== '' ? { context: args.context } : {}),
+    ...(hasSources ? { sources: [...args.sources!] } : {}),
     turns: [],
     conflicts: [],
     residueScore: 0,
@@ -122,6 +137,14 @@ export function createDeliberationRow(
      * list show the correct preset badge during the live run.
      */
     preset?: string | undefined;
+    /**
+     * PAR-17 — caller-supplied sources echoed onto the placeholder row so a
+     * client polling mid-run sees the same `sources` array the completed
+     * run will carry. Persisted only inside `result_json` (no dedicated
+     * column) per the ticket: round-trip is sufficient, query-by-source is
+     * out of scope.
+     */
+    sources?: readonly DeliberationSource[] | undefined;
   },
 ): void {
   const startedAt = new Date().toISOString();
@@ -129,6 +152,7 @@ export function createDeliberationRow(
     buildPlaceholderResultJson({
       topic: args.topic,
       context: args.context,
+      sources: args.sources,
       startedAt,
     }),
   ) as DeliberationResult;

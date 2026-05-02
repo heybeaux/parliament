@@ -21,6 +21,43 @@ export type SentrySignal = 'ok' | 'specialist_needed' | 'collapse_detected';
 export type DeliberationStatus = 'in_flight' | 'completed' | 'failed';
 
 /**
+ * A single, structured, labeled source attached to a deliberation (PAR-17).
+ *
+ * Unlike PAR-16's free-form `context` blob, sources are first-class evidence
+ * the engine exposes to every non-Sentry agent's user prompt under a stable
+ * `## Sources` heading. Agents are instructed to cite a source by its
+ * `[id]` — the user-provided id, NOT the array index — so citations stay
+ * stable across regenerations and downstream tooling (which the engine does
+ * NOT enforce; it only exposes the contract) can validate them.
+ *
+ * Field semantics:
+ *   - `id`: short, human-meaningful identifier the agent will quote in
+ *     `[brackets]`. The CLI derives this from the file basename
+ *     (e.g. `foo-2024.md` → `foo-2024`); the UI / API client accepts whatever
+ *     the caller supplies. Non-empty.
+ *   - `title`: human-readable display name shown in the UI Sources panel
+ *     (e.g. "Foo et al. 2024 — Title"). Non-empty.
+ *   - `content`: pre-extracted plain text. Tool-use / on-demand retrieval is
+ *     out of scope; this ticket assumes the caller has already pulled the
+ *     prose. Per-source word cap is applied at prompt-construction time
+ *     (default 500 words; configurable via
+ *     `DeliberationConfig.maxSourceWords`). Non-empty.
+ *   - `kind`: optional taxonomy label rendered as a chip in the UI and as a
+ *     parenthesized hint in the prompt header. Free enum — `paper` |
+ *     `memo` | `code` | `transcript` | `other`.
+ *
+ * Additive / fully optional: existing callers that omit `sources` see no
+ * behaviour change. Sources can coexist with PAR-16 `context`; the prompt
+ * builder emits both (context first, then sources) when both are present.
+ */
+export interface DeliberationSource {
+  id: string;
+  title: string;
+  content: string;
+  kind?: 'paper' | 'memo' | 'code' | 'transcript' | 'other';
+}
+
+/**
  * Structured signal emitted by the SynthesizerAgent alongside its prose summary.
  * Carries the model's calibrated certainty (`confidence`), its own self-reported
  * judgement on whether the debate has resolved (`consensus`), and short
@@ -273,6 +310,18 @@ export interface DeliberationResult {
    * or removed.
    */
   context?: string;
+  /**
+   * Optional structured sources the user supplied alongside the topic
+   * (PAR-17). When non-empty, the engine renders them under a stable
+   * `## Sources` heading on every non-Sentry agent's user prompt and instructs
+   * agents to cite by `[id]`. Echoed back unchanged on `POST /deliberate` and
+   * persisted on the deliberation record so `GET /deliberate/:id` round-trips
+   * them. Coexists with `context` — both can be present.
+   *
+   * Additive: stored deliberations recorded before PAR-17 omit this field;
+   * old client builds keep parsing.
+   */
+  sources?: DeliberationSource[];
   turns: Turn[];
   conflicts: Conflict[];
   /** Weighted fraction of unresolved conflicts, 0–1. 0 = all resolved. */
@@ -331,6 +380,15 @@ export interface Blackboard {
    * `Blackboard` literals without context.
    */
   context?: string;
+  /**
+   * Optional structured sources (PAR-17). The engine writes the deliberation's
+   * user-supplied `sources` here at run start (after applying the per-source
+   * word cap) so every non-Sentry agent's prompt builder can render the same
+   * `## Sources` block and so the Empiricist can flip into evidence-backed
+   * mode. Optional for back-compat with test mocks that construct
+   * `Blackboard` literals without sources.
+   */
+  sources?: DeliberationSource[];
   turns: Turn[];
   conflicts: Conflict[];
   metadata: Record<string, unknown>;
