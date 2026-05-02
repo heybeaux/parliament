@@ -12,6 +12,7 @@
  */
 
 import fs from 'node:fs';
+import path from 'node:path';
 import { Command } from 'commander';
 import {
   loadConfig,
@@ -33,6 +34,7 @@ import {
 import type {
   Agent,
   DeliberationResult,
+  DeliberationSource,
   TopologyStep,
 } from '@parliament/core';
 import { printResult } from './display.js';
@@ -56,6 +58,103 @@ interface DeliberateOptions {
    * back-compat but pollutes the topic display.
    */
   contextFile?: string;
+  /**
+   * One or more file paths to attach as structured `sources[]` (PAR-17).
+   * Repeatable: `--source ./a.md --source ./b.txt` produces a 2-source
+   * deliberation. The engine renders them under a `## Sources` block on
+   * every non-Sentry agent's user prompt and the Empiricist activates
+   * evidence-backed claim mode. Per-source word cap is set via
+   * `--max-source-words` (default 500) and applied at prompt construction
+   * time.
+   */
+  source?: string[];
+  /**
+   * Per-source word cap forwarded to the engine's `maxSourceWords` config
+   * (PAR-17). Optional. Must parse to a positive integer.
+   */
+  maxSourceWords?: string;
+}
+
+/**
+ * Map a file extension to a `DeliberationSource.kind`. The taxonomy is the
+ * fixed enum the engine accepts; everything else maps to `other` so a user
+ * can drop in any UTF-8 file without the CLI rejecting it. The engine
+ * itself never enforces kind correctness — it only uses the value as a
+ * presentation chip in the prompt header.
+ */
+function deriveKindFromExt(ext: string): DeliberationSource['kind'] {
+  const e = ext.toLowerCase().replace(/^\./, '');
+  if (e === 'md' || e === 'pdf' || e === 'tex') return 'paper';
+  if (e === 'memo' || e === 'doc' || e === 'docx' || e === 'rtf') return 'memo';
+  if (
+    e === 'ts' ||
+    e === 'tsx' ||
+    e === 'js' ||
+    e === 'jsx' ||
+    e === 'py' ||
+    e === 'rs' ||
+    e === 'go' ||
+    e === 'java' ||
+    e === 'rb' ||
+    e === 'sh' ||
+    e === 'cpp' ||
+    e === 'c' ||
+    e === 'h'
+  ) {
+    return 'code';
+  }
+  if (e === 'srt' || e === 'vtt' || e === 'transcript') return 'transcript';
+  return 'other';
+}
+
+/**
+ * Read the user-supplied source files from disk and turn each into a
+ * structured `DeliberationSource`. Returns `undefined` when no
+ * `--source` flag was passed.
+ *
+ *   - `id` derived from the file basename (sans extension) so citations
+ *     stay stable even if the same file is re-used across runs.
+ *   - `title` defaults to the bare filename so users see something they
+ *     recognise in the UI Sources panel.
+ *   - `kind` derived from the file extension via {@link deriveKindFromExt}.
+ *   - `content` is the file's UTF-8 prose; the engine truncates to the
+ *     `maxSourceWords` cap at prompt-construction time.
+ *
+ * Fails fast with a clear CLI-level error if any file cannot be read so
+ * the user finds out before the model spin-up.
+ *
+ * Exported for direct unit-testing of the argv → request body shape.
+ */
+export function readSourcesFromArgs(
+  paths: string[] | undefined,
+): DeliberationSource[] | undefined {
+  if (paths === undefined || paths.length === 0) return undefined;
+  const sources: DeliberationSource[] = [];
+  for (const p of paths) {
+    let content: string;
+    try {
+      content = fs.readFileSync(p, 'utf8');
+    } catch (err) {
+      process.stderr.write(
+        `Parliament: failed to read --source "${p}": ${
+          err instanceof Error ? err.message : String(err)
+        }\n`,
+      );
+      process.exit(1);
+    }
+    const base = path.basename(p);
+    const ext = path.extname(base);
+    const id = ext.length > 0 ? base.slice(0, -ext.length) : base;
+    const kind = deriveKindFromExt(ext);
+    const source: DeliberationSource = {
+      id,
+      title: base,
+      content,
+    };
+    if (kind !== undefined) source.kind = kind;
+    sources.push(source);
+  }
+  return sources;
 }
 
 /**
@@ -83,6 +182,21 @@ async function runDeliberate(topic: string, opts: DeliberateOptions): Promise<vo
   // PAR-16: optional --context-file. We resolve once up-front so a missing
   // file fails fast (before models are loaded) rather than mid-run.
   const context = readContextFile(opts.contextFile);
+
+  // PAR-17: optional --source flags. Read each file once up-front (same
+  // fail-fast rationale as --context-file) and derive id/kind/title.
+  const sources = readSourcesFromArgs(opts.source);
+
+  let maxSourceWords: number | undefined;
+  if (opts.maxSourceWords !== undefined) {
+    maxSourceWords = parseInt(opts.maxSourceWords, 10);
+    if (isNaN(maxSourceWords) || maxSourceWords < 1) {
+      process.stderr.write(
+        'Parliament: --max-source-words must be a positive integer\n',
+      );
+      process.exit(1);
+    }
+  }
 
   const defaults = cfg.parliament ?? DEFAULT_PARLIAMENT_DEFAULTS;
   const maxRounds =
@@ -168,6 +282,8 @@ async function runDeliberate(topic: string, opts: DeliberateOptions): Promise<vo
       redAgent,
       sentry,
       ...(context !== undefined ? { context } : {}),
+      ...(sources !== undefined ? { sources } : {}),
+      ...(maxSourceWords !== undefined ? { maxSourceWords } : {}),
     });
   } else {
     // Legacy 5-agent path — preserved byte-identically for the default Debate
@@ -184,6 +300,8 @@ async function runDeliberate(topic: string, opts: DeliberateOptions): Promise<vo
       confidenceThreshold: defaults.confidence_threshold,
       agents: { proposer, skeptic, synthesizer, redAgent, sentry },
       ...(context !== undefined ? { context } : {}),
+      ...(sources !== undefined ? { sources } : {}),
+      ...(maxSourceWords !== undefined ? { maxSourceWords } : {}),
     });
   }
 
@@ -257,6 +375,19 @@ export function createProgram(): Command {
       // approach. Each agent sees the file contents under a stable
       // `## Background` heading at the top of its user prompt.
       'Path to a UTF-8 file whose contents are sent as the deliberation context (prepended to every agent prompt). The legacy inline `CONTEXT:` marker in <topic> is deprecated.',
+    )
+    .option(
+      '--source <path>',
+      // PAR-17: repeatable. Commander's variadic-collector pattern is used —
+      // pass a custom accumulator so `--source a --source b` produces
+      // `["a", "b"]` rather than just the last value.
+      'Path to a UTF-8 file to attach as a structured source (PAR-17). Repeatable: pass `--source <path>` multiple times to attach several sources. The id is derived from the file basename (e.g. `foo-2024.md` -> `foo-2024`); the kind is derived from the extension; the content is the file body, truncated to `--max-source-words` (default 500) at prompt time.',
+      (value: string, prev: string[] = []) => prev.concat([value]),
+      [] as string[],
+    )
+    .option(
+      '--max-source-words <n>',
+      'Per-source word cap applied at prompt-construction time (PAR-17). Default: 500.',
     )
     .action(async (topic: string, opts: DeliberateOptions) => {
       await runDeliberate(topic, opts);

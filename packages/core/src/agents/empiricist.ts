@@ -10,6 +10,18 @@ export const EMPIRICIST_SYSTEM_PROMPT =
   'Do NOT reject value-judgment claims and do NOT treat them as out-of-scope; ethics and policy deliberations depend on them remaining in the transcript. Flag the limitation, then move on. ' +
   'Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists.';
 
+/**
+ * PAR-17 — additional line prepended to the Empiricist's system prompt when
+ * `blackboard.sources` is non-empty. Activates "Evidence-backed claim mode":
+ * the agent is instructed to prefer pulling evidence directly from the
+ * supplied `## Sources` block (citing each by its `[id]`) before issuing a
+ * "demand evidence" call. The standing posture (distinguish empirical from
+ * value-judgment claims, stay within 200 words, plain prose) is otherwise
+ * unchanged — this is a single-line activation, not a rewrite.
+ */
+export const EMPIRICIST_SOURCES_MODE_PREFIX =
+  'Evidence-backed claim mode: structured sources are attached. When an empirical claim has support in those sources, cite the relevant source id in `[brackets]` rather than issuing a "demand evidence" call; reserve "demand evidence" for empirical claims the supplied sources do NOT cover.';
+
 export class EmpiricistAgent implements Agent {
   readonly role = 'Empiricist';
   readonly neurotype = 'empiricist';
@@ -26,12 +38,26 @@ export class EmpiricistAgent implements Agent {
       .map((t) => `[${t.agent}]: ${t.content}`)
       .join('\n\n');
 
-    const header = buildPromptHeader(blackboard.topic, blackboard.context);
+    const header = buildPromptHeader(
+      blackboard.topic,
+      blackboard.context,
+      blackboard.sources,
+    );
     const userPrompt = recentTurns.length > 0
       ? `${header}\n\nRecent discussion:\n\n${recentTurns}`
       : header;
 
-    const raw = await this.adapter.generate(userPrompt, EMPIRICIST_SYSTEM_PROMPT);
+    // PAR-17: when structured sources are attached, activate evidence-backed
+    // claim mode by prepending the single activation line to the standing
+    // system prompt. The prepended line ends with `\n\n` so the activation
+    // and the standing posture are visually delimited.
+    const hasSources =
+      blackboard.sources !== undefined && blackboard.sources.length > 0;
+    const systemPrompt = hasSources
+      ? `${EMPIRICIST_SOURCES_MODE_PREFIX}\n\n${EMPIRICIST_SYSTEM_PROMPT}`
+      : EMPIRICIST_SYSTEM_PROMPT;
+
+    const raw = await this.adapter.generate(userPrompt, systemPrompt);
     return enforceWordCap(raw);
   }
 }

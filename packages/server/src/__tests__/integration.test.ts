@@ -450,4 +450,138 @@ describe('REST API end-to-end (real engine + in-memory SQLite)', () => {
     expect(final).not.toBeNull();
     expect(final!['context']).toBeUndefined();
   });
+
+  // -------------------------------------------------------------------------
+  // PAR-17: structured sources[] — POST + GET round-trip + persistence
+  // -------------------------------------------------------------------------
+  it('POST /deliberate accepts structured sources, persists them, and GET round-trips them verbatim (PAR-17)', async () => {
+    const sources = [
+      {
+        id: 'foo-2024',
+        title: 'foo-2024.md',
+        kind: 'paper' as const,
+        content:
+          'A canonical paper claiming X. Section 1 establishes the baseline; ' +
+          'section 2 reports the experiment; section 3 reconciles with prior work.',
+      },
+      {
+        id: 'memo-internal',
+        title: 'memo-internal.md',
+        kind: 'memo' as const,
+        content:
+          'Internal memo recording the team disagreement and the final ' +
+          'design decision adopted by the architecture council.',
+      },
+    ];
+
+    const res = await app.request('/deliberate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        topic: 'Should we adopt approach X?',
+        sources,
+        config: { maxRounds: 1, confidenceThreshold: 0.7 },
+      }),
+    });
+
+    expect(res.status).toBe(202);
+    const accepted = (await res.json()) as Record<string, unknown>;
+    expect(typeof accepted['id']).toBe('string');
+    expect(accepted['status']).toBe('in_flight');
+    const id = accepted['id'] as string;
+
+    // Placeholder row should already carry the sources array because
+    // createDeliberationRow seeds the `result_json` with them.
+    const placeholder = getDeliberation(db, id);
+    expect(placeholder).not.toBeNull();
+    expect(placeholder?.sources).toEqual(sources);
+
+    // Poll until completion.
+    const deadline = Date.now() + 5000;
+    let final: Record<string, unknown> | null = null;
+    while (Date.now() < deadline) {
+      const get = await app.request(`/deliberate/${id}`);
+      const body = (await get.json()) as Record<string, unknown>;
+      if (body['status'] === 'completed' || body['status'] === 'failed') {
+        final = body;
+        break;
+      }
+      await new Promise((r) => setImmediate(r));
+    }
+    expect(final).not.toBeNull();
+    expect(final!['status']).toBe('completed');
+
+    // GET round-trips the sources verbatim — both the array structure and
+    // every per-source field survive the JSON write/read.
+    expect(final!['sources']).toEqual(sources);
+
+    // SQLite row carries them too (round-tripped via result_json).
+    const stored = getDeliberation(db, id);
+    expect(stored).not.toBeNull();
+    expect(stored?.sources).toEqual(sources);
+  });
+
+  it('POST /deliberate without sources: persisted row and GET response omit the sources field (PAR-17)', async () => {
+    const res = await app.request('/deliberate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        topic: 'No-sources topic.',
+        config: { maxRounds: 1, confidenceThreshold: 0.7 },
+      }),
+    });
+
+    expect(res.status).toBe(202);
+    const accepted = (await res.json()) as Record<string, unknown>;
+    const id = accepted['id'] as string;
+
+    const deadline = Date.now() + 5000;
+    let final: Record<string, unknown> | null = null;
+    while (Date.now() < deadline) {
+      const get = await app.request(`/deliberate/${id}`);
+      const body = (await get.json()) as Record<string, unknown>;
+      if (body['status'] === 'completed' || body['status'] === 'failed') {
+        final = body;
+        break;
+      }
+      await new Promise((r) => setImmediate(r));
+    }
+    expect(final).not.toBeNull();
+    expect(final!['sources']).toBeUndefined();
+
+    const stored = getDeliberation(db, id);
+    expect(stored?.sources).toBeUndefined();
+  });
+
+  it('POST /deliberate rejects sources with empty id/title/content (PAR-17)', async () => {
+    const res = await app.request('/deliberate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        topic: 'Topic with malformed source.',
+        sources: [{ id: '', title: 'x', content: 'y' }],
+        config: { maxRounds: 1 },
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['error']).toBe('Validation failed');
+  });
+
+  it('POST /deliberate rejects sources with an unknown kind (PAR-17)', async () => {
+    const res = await app.request('/deliberate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        topic: 'Topic with bogus kind.',
+        sources: [
+          { id: 'a', title: 'a', content: 'a', kind: 'not-a-real-kind' },
+        ],
+        config: { maxRounds: 1 },
+      }),
+    });
+
+    expect(res.status).toBe(400);
+  });
 });

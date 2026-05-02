@@ -466,6 +466,188 @@ describe('display.ts role colors', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// PAR-17: --source flag and readSourcesFromArgs argv-to-body shape
+// ---------------------------------------------------------------------------
+
+describe('parliament deliberate --source (PAR-17)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('readSourcesFromArgs produces DeliberationSource[] with derived id/kind/title from file paths', async () => {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+
+    // Materialise a couple of fixture files in a tmp dir so we can drive
+    // the function with realistic input. Cleanup happens via process tmp
+    // semantics; we don't bother removing them under test.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'par17-cli-'));
+    const paperPath = path.join(tmp, 'foo-2024.md');
+    const codePath = path.join(tmp, 'snippet.ts');
+    const otherPath = path.join(tmp, 'misc.xyz');
+    fs.writeFileSync(paperPath, '# Foo paper\n\nClaim X.', 'utf8');
+    fs.writeFileSync(codePath, 'export const k = 1;\n', 'utf8');
+    fs.writeFileSync(otherPath, 'unclassified content', 'utf8');
+
+    const { readSourcesFromArgs } = await import('../cli.js');
+    const out = readSourcesFromArgs([paperPath, codePath, otherPath]);
+
+    expect(out).toBeDefined();
+    expect(out).toHaveLength(3);
+
+    expect(out![0]).toEqual({
+      id: 'foo-2024',
+      title: 'foo-2024.md',
+      kind: 'paper',
+      content: '# Foo paper\n\nClaim X.',
+    });
+    expect(out![1]).toEqual({
+      id: 'snippet',
+      title: 'snippet.ts',
+      kind: 'code',
+      content: 'export const k = 1;\n',
+    });
+    expect(out![2]).toEqual({
+      id: 'misc',
+      title: 'misc.xyz',
+      kind: 'other',
+      content: 'unclassified content',
+    });
+  });
+
+  it('readSourcesFromArgs returns undefined for empty/undefined input', async () => {
+    const { readSourcesFromArgs } = await import('../cli.js');
+    expect(readSourcesFromArgs(undefined)).toBeUndefined();
+    expect(readSourcesFromArgs([])).toBeUndefined();
+  });
+
+  it('--source flag (repeatable) forwards a sources[] array to engine.run', async () => {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'par17-cli-flag-'));
+    const aPath = path.join(tmp, 'a.md');
+    const bPath = path.join(tmp, 'b.md');
+    fs.writeFileSync(aPath, 'A content', 'utf8');
+    fs.writeFileSync(bPath, 'B content', 'utf8');
+
+    const core = await import('@parliament/core');
+    const mockEngineRun = vi.fn().mockResolvedValue(MOCK_RESULT);
+    (core.DeliberationEngine as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () => ({ run: mockEngineRun, runTopology: vi.fn() }),
+    );
+
+    const { createProgram } = await import('../cli.js');
+    const program = createProgram();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+
+    await program.parseAsync([
+      'node', 'parliament', 'deliberate', 'a topic',
+      '--source', aPath,
+      '--source', bPath,
+    ]);
+
+    expect(mockEngineRun).toHaveBeenCalledTimes(1);
+    const call = mockEngineRun.mock.calls[0]!;
+    expect(call[0]).toBe('a topic');
+    const cfg = call[1] as { sources?: unknown[] };
+    expect(Array.isArray(cfg.sources)).toBe(true);
+    expect(cfg.sources).toHaveLength(2);
+    expect(cfg.sources![0]).toEqual({
+      id: 'a',
+      title: 'a.md',
+      kind: 'paper',
+      content: 'A content',
+    });
+    expect(cfg.sources![1]).toEqual({
+      id: 'b',
+      title: 'b.md',
+      kind: 'paper',
+      content: 'B content',
+    });
+  });
+
+  it('--max-source-words forwards as numeric maxSourceWords to engine.run', async () => {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'par17-cli-cap-'));
+    const aPath = path.join(tmp, 'a.md');
+    fs.writeFileSync(aPath, 'A content', 'utf8');
+
+    const core = await import('@parliament/core');
+    const mockEngineRun = vi.fn().mockResolvedValue(MOCK_RESULT);
+    (core.DeliberationEngine as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () => ({ run: mockEngineRun, runTopology: vi.fn() }),
+    );
+
+    const { createProgram } = await import('../cli.js');
+    const program = createProgram();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+
+    await program.parseAsync([
+      'node', 'parliament', 'deliberate', 'a topic',
+      '--source', aPath,
+      '--max-source-words', '120',
+    ]);
+
+    expect(mockEngineRun).toHaveBeenCalledTimes(1);
+    const cfg = mockEngineRun.mock.calls[0]![1] as { maxSourceWords?: number };
+    expect(cfg.maxSourceWords).toBe(120);
+  });
+
+  it('omits sources/maxSourceWords from engine config when no --source is passed', async () => {
+    const core = await import('@parliament/core');
+    const mockEngineRun = vi.fn().mockResolvedValue(MOCK_RESULT);
+    (core.DeliberationEngine as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () => ({ run: mockEngineRun, runTopology: vi.fn() }),
+    );
+
+    const { createProgram } = await import('../cli.js');
+    const program = createProgram();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+
+    await program.parseAsync(['node', 'parliament', 'deliberate', 'a topic']);
+
+    expect(mockEngineRun).toHaveBeenCalledTimes(1);
+    const cfg = mockEngineRun.mock.calls[0]![1] as Record<string, unknown>;
+    expect(cfg.sources).toBeUndefined();
+    expect(cfg.maxSourceWords).toBeUndefined();
+  });
+
+  it('deliberate --help advertises the --source and --max-source-words flags', async () => {
+    const { createProgram } = await import('../cli.js');
+    const program = createProgram();
+
+    let helpOutput = '';
+    program.configureOutput({
+      writeOut: (str) => { helpOutput += str; },
+      writeErr: () => {},
+    });
+    program.exitOverride();
+    program.commands.forEach((cmd) => {
+      cmd.configureOutput({
+        writeOut: (str) => { helpOutput += str; },
+        writeErr: () => {},
+      });
+      cmd.exitOverride();
+    });
+
+    try {
+      await program.parseAsync(['node', 'parliament', 'deliberate', '--help']);
+    } catch {
+      // exitOverride throws — ignore.
+    }
+
+    expect(helpOutput).toContain('--source');
+    expect(helpOutput).toContain('--max-source-words');
+  });
+});
+
 describe('display.ts real output format', () => {
   it('formats turn header with role, neurotype, and model', () => {
     // Test the real formatTurnHeader logic without mocking by importing

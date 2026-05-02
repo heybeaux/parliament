@@ -1,6 +1,7 @@
 import type {
   Blackboard,
   DeliberationResult,
+  DeliberationSource,
   SplitSummary,
   SynthesizerMeta,
   SystemEvent,
@@ -12,6 +13,7 @@ import type { SynthesizerAgent, SynthesizerResult } from './agents/synthesizer.j
 import type { SentryAgent } from './agents/sentry.js';
 import type { TopologyConfig, TopologyStep } from './topology/index.js';
 import { executeParallelBlock } from './topology/parallel.js';
+import { DEFAULT_MAX_SOURCE_WORDS } from './agents/utils.js';
 
 export interface DeliberationConfig {
   /** Maximum number of deliberation rounds. Default: 5. */
@@ -31,6 +33,28 @@ export interface DeliberationConfig {
    * change.
    */
   context?: string;
+  /**
+   * Optional structured sources (PAR-17). When non-empty, the engine writes
+   * them onto the blackboard at run start so every non-Sentry agent's
+   * `buildPromptHeader` call renders the same `## Sources` block; the
+   * Empiricist additionally flips into evidence-backed mode when any source
+   * is present. Echoed back unchanged on the result so the server response
+   * round-trips them.
+   *
+   * Optional and additive — existing callers that omit it see no behaviour
+   * change.
+   */
+  sources?: DeliberationSource[];
+  /**
+   * Per-source word cap applied at prompt-construction time (PAR-17). Defaults
+   * to {@link DEFAULT_MAX_SOURCE_WORDS} (500). The engine truncates each
+   * source's `content` to this cap (whitespace-delimited word split) before
+   * placing the sources on the blackboard so every agent that reads
+   * `blackboard.sources` sees the already-capped content; truncated content
+   * carries a trailing `... [truncated]` marker so downstream consumers can
+   * detect it.
+   */
+  maxSourceWords?: number;
   agents: {
     proposer: Agent;
     skeptic: Agent;
@@ -121,6 +145,18 @@ export interface TopologyDeliberationConfig {
    */
   context?: string;
   /**
+   * Optional structured sources (PAR-17). Same semantics as
+   * {@link DeliberationConfig.sources} — written onto the blackboard at run
+   * start, capped per-source via `maxSourceWords`, echoed back unchanged on
+   * the result.
+   */
+  sources?: DeliberationSource[];
+  /**
+   * Per-source word cap applied at prompt-construction time (PAR-17). Defaults
+   * to {@link DEFAULT_MAX_SOURCE_WORDS} (500).
+   */
+  maxSourceWords?: number;
+  /**
    * PAR-18 — invoked synchronously after the engine appends each fresh `Turn`
    * to the blackboard. The server layer uses this to persist turns
    * progressively (so `GET /deliberate/:id` returns partial state during a
@@ -142,6 +178,42 @@ export interface TopologyDeliberationConfig {
   onEvent?: (event: SystemEvent) => void;
 }
 
+
+/**
+ * PAR-17 — normalises a caller-supplied `sources` array for placement on the
+ * blackboard.
+ *
+ *   - Returns `undefined` when the input is undefined / empty so the result
+ *     and blackboard echo back a missing field rather than an empty array.
+ *   - Truncates each source's `content` to `maxSourceWords` (default 500) at
+ *     ingest time using the same whitespace-delimited word split the rest of
+ *     the package uses, appending the stable `... [truncated]` marker when
+ *     truncation occurred. Doing this once at engine start (rather than on
+ *     every prompt build) means `blackboard.sources` is already the
+ *     prompt-ready shape every agent and downstream consumer can rely on.
+ *   - Preserves the user-supplied `id`, `title`, and `kind` verbatim.
+ */
+function normalizeSources(
+  sources: readonly DeliberationSource[] | undefined,
+  maxSourceWords: number,
+): DeliberationSource[] | undefined {
+  if (sources === undefined || sources.length === 0) return undefined;
+  const cap = maxSourceWords > 0 ? maxSourceWords : DEFAULT_MAX_SOURCE_WORDS;
+  return sources.map((src) => {
+    const trimmed = src.content.trim();
+    if (trimmed.length === 0) {
+      const result: DeliberationSource = { id: src.id, title: src.title, content: '' };
+      if (src.kind !== undefined) result.kind = src.kind;
+      return result;
+    }
+    const words = trimmed.split(/\s+/);
+    const content =
+      words.length <= cap ? trimmed : `${words.slice(0, cap).join(' ')} ... [truncated]`;
+    const result: DeliberationSource = { id: src.id, title: src.title, content };
+    if (src.kind !== undefined) result.kind = src.kind;
+    return result;
+  });
+}
 
 /**
  * Computes the residue-of-conflict score for a list of conflicts.
@@ -368,12 +440,21 @@ export class DeliberationEngine {
         ? trimmedContext
         : undefined;
 
+    // PAR-17: normalise sources once at engine start so `blackboard.sources`
+    // carries the prompt-ready shape every agent's `buildPromptHeader` call
+    // can render directly without re-running the per-source word-cap.
+    const normalizedSources = normalizeSources(
+      config.sources,
+      config.maxSourceWords ?? DEFAULT_MAX_SOURCE_WORDS,
+    );
+
     const blackboard: Blackboard = {
       topic,
       turns: [],
       conflicts: [],
       metadata: {},
       ...(normalizedContext !== undefined ? { context: normalizedContext } : {}),
+      ...(normalizedSources !== undefined ? { sources: normalizedSources } : {}),
     };
 
     let terminationReason: TerminationReason = 'max_rounds';
@@ -559,6 +640,7 @@ export class DeliberationEngine {
     return {
       topic,
       ...(normalizedContext !== undefined ? { context: normalizedContext } : {}),
+      ...(normalizedSources !== undefined ? { sources: normalizedSources } : {}),
       turns: blackboard.turns,
       conflicts: blackboard.conflicts,
       residueScore,
@@ -630,6 +712,12 @@ export class DeliberationEngine {
         ? trimmedContext
         : undefined;
 
+    // PAR-17: see `run()` above — normalise sources once at engine start.
+    const normalizedSources = normalizeSources(
+      config.sources,
+      config.maxSourceWords ?? DEFAULT_MAX_SOURCE_WORDS,
+    );
+
     const blackboard: Blackboard = {
       topic,
       turns: [],
@@ -638,6 +726,7 @@ export class DeliberationEngine {
         active_preset: topology.activePreset.id,
       },
       ...(normalizedContext !== undefined ? { context: normalizedContext } : {}),
+      ...(normalizedSources !== undefined ? { sources: normalizedSources } : {}),
     };
 
     let terminationReason: TerminationReason = 'max_rounds';
@@ -954,6 +1043,7 @@ export class DeliberationEngine {
       // intentionally pins the pre-topology contract.
       preset: topology.activePreset.id,
       ...(normalizedContext !== undefined ? { context: normalizedContext } : {}),
+      ...(normalizedSources !== undefined ? { sources: normalizedSources } : {}),
       turns: blackboard.turns,
       conflicts: blackboard.conflicts,
       residueScore,

@@ -22,6 +22,7 @@ import {
 import type {
   Agent,
   DeliberationResult,
+  DeliberationSource,
   DeliberationStatus,
   SystemEvent,
   TopologyConfig,
@@ -48,6 +49,29 @@ import { rateLimit } from './middleware/rateLimit.js';
 // Zod schemas
 // ---------------------------------------------------------------------------
 
+/**
+ * PAR-17 — single structured source entry on `POST /deliberate`. The shape
+ * mirrors `DeliberationSource` from the engine; we mint a separate zod
+ * schema rather than importing one from the core package because zod is
+ * already wired into the server's validation surface and the engine type is
+ * a plain interface (no runtime validator).
+ *
+ * Validation rules:
+ *   - `id`, `title`, `content` are required and non-empty (whitespace-trimmed
+ *     emptiness is rejected). The id is what the agent will quote in
+ *     `[brackets]` so a blank id would render `[]` and break citation
+ *     stability; the title is what the UI Sources panel displays; the
+ *     content is the prose the engine sees in the prompt.
+ *   - `kind` is the optional taxonomy hint — restricted to the engine's
+ *     fixed enum so the UI's chip rendering stays exhaustive.
+ */
+const DeliberationSourceSchema = z.object({
+  id: z.string().trim().min(1, 'source id must be a non-empty string'),
+  title: z.string().trim().min(1, 'source title must be a non-empty string'),
+  content: z.string().min(1, 'source content must be a non-empty string'),
+  kind: z.enum(['paper', 'memo', 'code', 'transcript', 'other']).optional(),
+});
+
 const DeliberateBodySchema = z.object({
   topic: z.string().min(1, 'topic must be a non-empty string'),
   /**
@@ -70,11 +94,24 @@ const DeliberateBodySchema = z.object({
    * as deprecated; new callers should use this field instead.
    */
   context: z.string().optional(),
+  /**
+   * Optional structured sources (PAR-17). When non-empty, the engine renders
+   * them under a stable `## Sources` heading on every non-Sentry agent's
+   * user prompt and the Empiricist activates evidence-backed claim mode.
+   * Echoed back unchanged on the response and persisted in `result_json`
+   * so `GET /deliberate/:id` round-trips them. Coexists with `context`.
+   */
+  sources: z.array(DeliberationSourceSchema).optional(),
   config: z
     .object({
       maxRounds: z.number().int().positive().optional(),
       redAgentInterval: z.number().int().positive().optional(),
       confidenceThreshold: z.number().min(0).max(1).optional(),
+      /**
+       * PAR-17 — per-source word cap. Defaults to 500 in the engine when
+       * absent. Must be a positive integer.
+       */
+      maxSourceWords: z.number().int().positive().optional(),
     })
     .optional(),
 });
@@ -174,6 +211,10 @@ function buildTopologyDeliberationConfig(
     confidenceThreshold?: number;
     /** PAR-16: optional user-supplied prose context. */
     context?: string;
+    /** PAR-17: optional structured sources forwarded from the request body. */
+    sources?: DeliberationSource[];
+    /** PAR-17: per-source word cap forwarded from the request body. */
+    maxSourceWords?: number;
   },
 ): TopologyDeliberationConfig {
   const config = loadConfig();
@@ -211,6 +252,12 @@ function buildTopologyDeliberationConfig(
   };
   if (overrides.context !== undefined) {
     out.context = overrides.context;
+  }
+  if (overrides.sources !== undefined && overrides.sources.length > 0) {
+    out.sources = overrides.sources;
+  }
+  if (overrides.maxSourceWords !== undefined) {
+    out.maxSourceWords = overrides.maxSourceWords;
   }
   return out;
 }
@@ -676,6 +723,7 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
       topic,
       preset: requestPreset,
       context: requestContext,
+      sources: requestSources,
       config: configOverrides,
     } = parsed.data;
 
@@ -720,6 +768,16 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
         // the engine prepends it to every non-Sentry agent's user prompt
         // and echoes it back unchanged on the result.
         ...(requestContext !== undefined ? { context: requestContext } : {}),
+        // PAR-17: forward the user-supplied sources (when present) so the
+        // engine renders them under `## Sources` for every non-Sentry agent
+        // and the Empiricist activates evidence-backed claim mode. Echoed
+        // back unchanged on the result.
+        ...(requestSources !== undefined && requestSources.length > 0
+          ? { sources: requestSources }
+          : {}),
+        ...(configOverrides?.maxSourceWords !== undefined
+          ? { maxSourceWords: configOverrides.maxSourceWords }
+          : {}),
       });
     } catch (err) {
       return c.json(
@@ -738,6 +796,12 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
         id,
         topic,
         ...(requestContext !== undefined ? { context: requestContext } : {}),
+        // PAR-17: persist sources onto the placeholder row so a client
+        // polling mid-run sees the same `sources` array the completed run
+        // will eventually carry.
+        ...(requestSources !== undefined && requestSources.length > 0
+          ? { sources: requestSources }
+          : {}),
         preset: resolvedTopology.activePreset.id,
       });
     } catch (err) {

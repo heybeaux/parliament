@@ -4,6 +4,7 @@ import type { DeliberationResult, Turn } from '../lib/types';
 import { TurnCard } from './TurnCard';
 import { ObservabilityPanel, ObservabilityToggle } from './ObservabilityPanel';
 import { PresetBadge } from './PresetBadge';
+import { SourcesPanel } from './SourcesPanel';
 
 interface Props {
   result: DeliberationResult | null;
@@ -208,6 +209,11 @@ export function Timeline({ result, running, elapsedSec, topic }: Props) {
           <p className="text-lg font-medium text-zinc-100">{topic}</p>
         </motion.div>
       )}
+
+      {/* PAR-17: structured sources (when present). Sits between the topic
+          hero and the live/result cards so users can inspect the evidence
+          the engine fed each agent without scrolling past the transcript. */}
+      <SourcesPanel sources={result?.sources} />
 
       {/* Running indicator */}
       <AnimatePresence>
