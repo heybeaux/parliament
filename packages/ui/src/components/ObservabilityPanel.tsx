@@ -1,5 +1,10 @@
 /**
  * PAR-5 — Observability panel surfaced from the Timeline header.
+ * PAR-27 — Disagreement-remaining bar chart now binds to the engine-supplied
+ * per-round `Turn.residue_remaining` signal (PAR-19) instead of the legacy
+ * `|convergence_delta|` proxy. Pre-PAR-19 transcripts (where no synthesizer
+ * turn carries the field) fall back to the original proxy path with its
+ * disclaimer intact, so old deliberations don't silently go blank.
  *
  * Renders three views over the engine's per-round telemetry:
  *
@@ -8,12 +13,13 @@
  *      ("convergence_delta cumulative") exposed via tooltip / aria-label.
  *
  *   2. Disagreement-remaining bar chart — per-round bars sized to the
- *      magnitude of `convergence_delta` (|delta|) for that round. The engine
- *      does not currently expose a per-round residue field — only an
- *      end-of-deliberation `residueScore` — so we proxy the per-round signal
- *      with the absolute convergence movement, which tracks how much the
- *      room is still shifting that round. Plain label "Disagreement
- *      remaining"; tooltip surfaces "residue of conflict (per-round proxy)".
+ *      synthesizer turn's `residue_remaining` for that round (bounded in
+ *      [0, 1]). Plain label "Disagreement remaining"; tooltip surfaces
+ *      "residue of conflict". When the entire transcript predates PAR-19
+ *      (every synthesizer turn lacks `residue_remaining`), the panel falls
+ *      back to the legacy `|convergence_delta|` proxy with its disclaimer
+ *      ("per-round proxy from |convergence_delta|") so old deliberations
+ *      still render a series instead of going blank.
  *
  *   3. Event list — `events[]` rendered chronologically with `round`, `kind`,
  *      `message`. Empty `events: []` renders a friendly empty state rather
@@ -75,6 +81,101 @@ export function buildRoundMetrics(turns: readonly Turn[]): RoundMetric[] {
     });
   }
   return metrics;
+}
+
+// ---------------------------------------------------------------------------
+// PAR-27 — Residue series derivation
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-round residue point for the "Disagreement remaining" bar chart. `value`
+ * is `null` when the round is missing a signal (gap in the chart) — for the
+ * real series this means the synthesizer turn for that round didn't stamp
+ * `residue_remaining` (rare; partial transcripts mid-flight). For the proxy
+ * series it means the round had no usable `convergence_delta`.
+ */
+interface ResiduePoint {
+  round: number;
+  value: number | null;
+}
+
+/**
+ * Result of `buildResidueSeries`. The `source` discriminator drives both the
+ * chart's rendering (fixed-domain [0, 1] bars vs. auto-scaled proxy bars) and
+ * the tooltip / aria copy (real residue label vs. legacy proxy disclaimer).
+ *
+ * Detection: if at least one synthesizer turn in the transcript carries
+ * `residue_remaining`, we treat the whole transcript as PAR-19+ and surface
+ * the real series (with absent values rendered as gaps). If EVERY synthesizer
+ * turn lacks the field — i.e. the transcript was recorded before PAR-19
+ * shipped — we fall back to the `|convergence_delta|` proxy that the original
+ * PAR-5 chart used, preserving the disclaimer so old deliberations don't
+ * silently change meaning.
+ */
+type ResidueSeries =
+  | { source: 'real'; points: ResiduePoint[] }
+  | { source: 'proxy'; points: ResiduePoint[] };
+
+/**
+ * Walk turns, group by round, and build the per-round residue series. Picks
+ * the synthesizer turn's `residue_remaining` when present; otherwise falls
+ * back to the legacy `|convergence_delta|` proxy if no synth turn carries the
+ * field anywhere in the transcript.
+ *
+ * Synthesizer turns are identified by `agent === 'Synthesizer'` — the engine
+ * stamps `Turn.agent` from `Agent.role`, and the synthesizer agent's role is
+ * the literal `'Synthesizer'` (see `packages/core/src/engine.ts:269`).
+ */
+export function buildResidueSeries(turns: readonly Turn[]): ResidueSeries {
+  // First pass: collect each round's representative synthesizer residue.
+  // A round may legitimately have no synthesizer turn (e.g. truncated
+  // mid-flight transcripts), in which case the round is absent from the map.
+  const synthByRound = new Map<number, number>();
+  let anySynthHasResidue = false;
+  for (const turn of turns) {
+    if (turn.agent !== 'Synthesizer') continue;
+    if (typeof turn.residue_remaining === 'number') {
+      anySynthHasResidue = true;
+      // Last writer wins — if multiple synthesizer turns share a round, the
+      // engine stamps the same value, so order doesn't matter.
+      synthByRound.set(turn.round, turn.residue_remaining);
+    }
+  }
+
+  // Round set: every round seen in the transcript, sorted ascending. Using
+  // every round (not just synth rounds) keeps the x-axis aligned with the
+  // sparkline next to it, even when a round was truncated before the synth
+  // turn landed.
+  const allRounds = new Set<number>();
+  for (const turn of turns) allRounds.add(turn.round);
+  const sortedRounds = Array.from(allRounds).sort((a, b) => a - b);
+
+  if (anySynthHasResidue) {
+    const points: ResiduePoint[] = sortedRounds.map((round) => ({
+      round,
+      value: synthByRound.has(round) ? synthByRound.get(round)! : null,
+    }));
+    return { source: 'real', points };
+  }
+
+  // Legacy fallback — pre-PAR-19 transcript. Recompute the proxy from
+  // |convergence_delta| using the same first-non-null-per-round rule the
+  // PAR-5 placeholder used (the engine attaches the same delta to every turn
+  // in a round, so any turn is representative).
+  const proxyByRound = new Map<number, number | null>();
+  for (const turn of turns) {
+    if (!proxyByRound.has(turn.round)) {
+      proxyByRound.set(turn.round, turn.convergence_delta ?? null);
+    } else if (proxyByRound.get(turn.round) === null) {
+      const delta = turn.convergence_delta ?? null;
+      if (delta !== null) proxyByRound.set(turn.round, delta);
+    }
+  }
+  const points: ResiduePoint[] = sortedRounds.map((round) => {
+    const raw = proxyByRound.get(round) ?? null;
+    return { round, value: raw === null ? 0 : Math.abs(raw) };
+  });
+  return { source: 'proxy', points };
 }
 
 // ---------------------------------------------------------------------------
@@ -169,48 +270,80 @@ function Sparkline({ metrics, width = 280, height = 56 }: SparklineProps) {
 // ---------------------------------------------------------------------------
 
 interface BarChartProps {
-  metrics: readonly RoundMetric[];
+  series: ResidueSeries;
   width?: number;
   height?: number;
 }
 
 /**
- * Inline SVG bar chart of |convergence_delta| per round. Bars share a
- * baseline; max bar reaches `height - pad`. The plain-language label
- * ("Disagreement remaining") sits above the chart; the research term
- * ("residue of conflict") is in the title/aria so screen readers + tooltips
- * surface it without cluttering the visual.
+ * Inline SVG bar chart of per-round disagreement-remaining. Bars share a
+ * baseline; max bar reaches `height - pad`.
+ *
+ * Two modes (PAR-27):
+ *   - `series.source === 'real'`: bars sized to `Turn.residue_remaining`
+ *     (PAR-19), the actual residue computed against the round-end conflict
+ *     state. Y-domain is fixed at [0, 1] so bar heights reflect absolute
+ *     residue level rather than relative-to-this-run variance. Rounds with
+ *     `value === null` (synth turn missing the field) render as gaps.
+ *
+ *   - `series.source === 'proxy'`: legacy fallback for pre-PAR-19 transcripts
+ *     (no synth turn carried `residue_remaining`). Bars sized to
+ *     `|convergence_delta|` per round and auto-scaled to the run's max,
+ *     matching the original PAR-5 placeholder. The tooltip retains the
+ *     "(per-round proxy from |convergence_delta|)" disclaimer so the chart
+ *     never silently changes meaning across schema versions.
+ *
+ * The plain-language label ("Disagreement remaining") sits above the chart;
+ * the research term ("residue of conflict") is in the title/aria so screen
+ * readers + tooltips surface it without cluttering the visual.
  */
-function DisagreementBars({ metrics, width = 280, height = 56 }: BarChartProps) {
-  if (metrics.length === 0) {
+function DisagreementBars({ series, width = 280, height = 56 }: BarChartProps) {
+  const { source, points } = series;
+  if (points.length === 0) {
     return <p className="text-2xs text-zinc-600">No rounds recorded yet.</p>;
   }
 
-  const values = metrics.map((m) => m.movement);
-  const max = Math.max(...values, 0);
   const pad = 4;
   const innerW = width - pad * 2;
-  const slot = innerW / metrics.length;
+  const slot = innerW / points.length;
   const barW = Math.max(2, slot * 0.7);
 
-  const bars = metrics.map((m, i) => {
-    const ratio = max === 0 ? 0 : m.movement / max;
+  // Real series: y-domain fixed at [0, 1] (residue_remaining is bounded).
+  // Proxy series: auto-scaled to the run's max movement, matching the
+  // original PAR-5 placeholder so legacy transcripts render unchanged.
+  const max =
+    source === 'real'
+      ? 1
+      : Math.max(...points.map((p) => p.value ?? 0), 0);
+
+  const bars = points.map((p, i) => {
+    const v = p.value;
+    const ratio = v === null || max === 0 ? 0 : v / max;
     const h = ratio * (height - pad * 2);
     const x = pad + i * slot + (slot - barW) / 2;
     const y = height - pad - h;
-    return { x, y, h, w: barW, round: m.round, movement: m.movement };
+    return { x, y, h, w: barW, round: p.round, value: v };
   });
+
+  // Tooltip + aria copy diverges by source so the disclaimer is dropped on
+  // the real signal (PAR-27 AC) and preserved on the legacy proxy path.
+  const titleText =
+    source === 'real'
+      ? 'Disagreement remaining — research term: residue of conflict'
+      : 'Disagreement remaining — research term: residue of conflict (per-round proxy from |convergence_delta|)';
+  const ariaLabel = `Disagreement remaining (residue of conflict) per round across ${points.length} round${points.length === 1 ? '' : 's'}`;
 
   return (
     <svg
       role="img"
-      aria-label={`Disagreement remaining (residue of conflict) per round across ${metrics.length} round${metrics.length === 1 ? '' : 's'}`}
+      aria-label={ariaLabel}
+      data-residue-source={source}
       width={width}
       height={height}
       viewBox={`0 0 ${width} ${height}`}
       className="block max-w-full"
     >
-      <title>Disagreement remaining — research term: residue of conflict (per-round proxy from |convergence_delta|)</title>
+      <title>{titleText}</title>
       <line
         x1={pad}
         x2={width - pad}
@@ -219,19 +352,28 @@ function DisagreementBars({ metrics, width = 280, height = 56 }: BarChartProps) 
         stroke="rgba(255,255,255,0.06)"
         strokeWidth={1}
       />
-      {bars.map((b) => (
-        <rect
-          key={b.round}
-          x={b.x}
-          y={b.y}
-          width={b.w}
-          height={b.h}
-          rx={1.5}
-          fill="rgb(251 191 36 / 0.45)"
-        >
-          <title>{`Round ${b.round}: |Δ| = ${b.movement.toFixed(3)}`}</title>
-        </rect>
-      ))}
+      {bars.map((b) => {
+        // null values render as a gap (no rect at all). The slot is still
+        // reserved by index so x-axis spacing matches the sparkline above.
+        if (b.value === null) return null;
+        const tooltip =
+          source === 'real'
+            ? `Round ${b.round}: residue = ${b.value.toFixed(3)}`
+            : `Round ${b.round}: |Δ| = ${b.value.toFixed(3)}`;
+        return (
+          <rect
+            key={b.round}
+            x={b.x}
+            y={b.y}
+            width={b.w}
+            height={b.h}
+            rx={1.5}
+            fill="rgb(251 191 36 / 0.45)"
+          >
+            <title>{tooltip}</title>
+          </rect>
+        );
+      })}
     </svg>
   );
 }
@@ -312,7 +454,18 @@ interface PanelBodyProps {
 
 function PanelBody({ result }: PanelBodyProps) {
   const metrics = useMemo(() => buildRoundMetrics(result.turns), [result.turns]);
+  const residueSeries = useMemo(
+    () => buildResidueSeries(result.turns),
+    [result.turns],
+  );
   const events = result.events ?? [];
+
+  // Header tooltip drops the "(per-round proxy)" suffix when the series is
+  // sourced from the real PAR-19 `residue_remaining` field.
+  const residueHeaderTitle =
+    residueSeries.source === 'real'
+      ? 'research metric: residue of conflict'
+      : 'research metric: residue of conflict (per-round proxy)';
 
   return (
     <div className="grid gap-4 md:grid-cols-2">
@@ -344,12 +497,12 @@ function PanelBody({ result }: PanelBodyProps) {
           </h4>
           <span
             className="font-mono text-2xs text-zinc-600"
-            title="research metric: residue of conflict (per-round proxy)"
+            title={residueHeaderTitle}
           >
             final residue {result.residueScore.toFixed(2)}
           </span>
         </header>
-        <DisagreementBars metrics={metrics} />
+        <DisagreementBars series={residueSeries} />
       </section>
 
       <section
