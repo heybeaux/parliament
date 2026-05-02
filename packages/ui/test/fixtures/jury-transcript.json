@@ -1,0 +1,91 @@
+{
+  "topic": "Should we allow autonomous AI to make irreversible decisions?",
+  "preset": "jury",
+  "turns": [
+    {
+      "agent": "Proposer",
+      "neurotype": "proposer",
+      "model": "mock-model",
+      "model_name": "mock-model-v1",
+      "neurotype_posture": "evidence-first",
+      "word_count": 24,
+      "convergence_delta": null,
+      "content": "Round 1 Juror A: irreversible AI decisions require strong governance, audit trails, and a human-in-the-loop fallback to remain trustworthy.",
+      "timestamp": "2026-05-01T12:00:00.000Z",
+      "round": 1,
+      "parallel_group": "round-1-jury"
+    },
+    {
+      "agent": "Skeptic",
+      "neurotype": "skeptic",
+      "model": "mock-model",
+      "model_name": "mock-model-v1",
+      "neurotype_posture": "adversarial",
+      "word_count": 21,
+      "convergence_delta": null,
+      "content": "Round 1 Juror B: irreversibility itself is the failure mode; even sound governance cannot recover from a single catastrophic action.",
+      "timestamp": "2026-05-01T12:00:01.000Z",
+      "round": 1,
+      "parallel_group": "round-1-jury"
+    },
+    {
+      "agent": "Synthesizer",
+      "neurotype": "synthesizer",
+      "model": "mock-model",
+      "model_name": "mock-model-v1",
+      "neurotype_posture": "reconciliation",
+      "word_count": 18,
+      "convergence_delta": 0.12,
+      "residue_remaining": 0.42,
+      "content": "Round 2 synthesis: jurors converge on guardrails, diverge on whether any irreversible action is acceptable.",
+      "timestamp": "2026-05-01T12:00:05.000Z",
+      "round": 2,
+      "parallel_group": null
+    },
+    {
+      "agent": "Proposer",
+      "neurotype": "proposer",
+      "model": "mock-model",
+      "model_name": "mock-model-v1",
+      "neurotype_posture": "evidence-first",
+      "word_count": 22,
+      "convergence_delta": 0.18,
+      "content": "Round 3 closing: bounded autonomy with explicit reversibility clauses and pre-committed rollback channels resolves most concerns.",
+      "timestamp": "2026-05-01T12:00:09.000Z",
+      "round": 3,
+      "parallel_group": null
+    },
+    {
+      "agent": "Synthesizer",
+      "neurotype": "synthesizer",
+      "model": "mock-model",
+      "model_name": "mock-model-v1",
+      "neurotype_posture": "reconciliation",
+      "word_count": 26,
+      "convergence_delta": 0.24,
+      "residue_remaining": 0.08,
+      "content": "Round 3 final synthesis: permit autonomous AI to take irreversible actions only inside pre-approved domains with mandatory human escalation for novel categories.",
+      "timestamp": "2026-05-01T12:00:11.000Z",
+      "round": 3,
+      "parallel_group": null
+    }
+  ],
+  "conflicts": [],
+  "residueScore": 0.08,
+  "resolved": true,
+  "synthesis": "Permit autonomous AI to take irreversible actions only inside pre-approved domains with mandatory human escalation for novel categories.",
+  "split": null,
+  "terminationReason": "consensus",
+  "totalRounds": 3,
+  "started_at": "2026-05-01T12:00:00.000Z",
+  "completed_at": "2026-05-01T12:00:12.000Z",
+  "events": [
+    {
+      "round": 2,
+      "kind": "red_agent.injection",
+      "message": "Devil's advocate: what if rollback channels are themselves compromised?",
+      "timestamp": "2026-05-01T12:00:06.000Z"
+    }
+  ],
+  "status": "completed"
+}
