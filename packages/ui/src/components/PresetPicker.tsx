@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getPresets } from '../lib/api';
 import type { PresetInfo } from '../lib/types';
+import { PresetBadge } from './PresetBadge';
 
 /**
  * Baked-in fallback used when `GET /presets` is unavailable.
@@ -243,13 +244,55 @@ export function PresetPicker({ value, onChange, disabled = false }: Props) {
         </svg>
       </div>
 
+      {/* PAR-20: per-preset color chips. Each available preset shows up
+          here so the user can preview the same color identity they'll
+          see on the result-view header and the deliberation list after
+          submit. Disabled (missing-neurotype) presets stay visible but
+          dimmed; clicking a chip is a one-tap shortcut to selection. */}
+      <div
+        data-testid="preset-chip-row"
+        className="flex flex-wrap items-center gap-1.5"
+      >
+        {state.presets.map((preset) => {
+          const isMissing =
+            Array.isArray(preset.missing_neurotypes) &&
+            preset.missing_neurotypes.length > 0;
+          const isSelected = preset.id === value;
+          return (
+            <button
+              key={preset.id}
+              type="button"
+              onClick={() => !isMissing && handleChange(preset.id)}
+              disabled={disabled || isMissing}
+              aria-pressed={isSelected}
+              title={
+                isMissing
+                  ? `Unavailable — missing neurotypes: ${preset.missing_neurotypes!.join(', ')}`
+                  : preset.description
+              }
+              className={`rounded-md transition-opacity ${
+                isMissing
+                  ? 'cursor-not-allowed opacity-30'
+                  : 'cursor-pointer hover:opacity-100'
+              } ${isSelected ? 'opacity-100 ring-1 ring-white/20' : 'opacity-70'}`}
+            >
+              <PresetBadge presetId={preset.id} name={preset.name} />
+            </button>
+          );
+        })}
+      </div>
+
       {selected && (
-        <p
-          className={`text-xs ${
+        <div
+          className={`flex items-center gap-2 text-xs ${
             selectedDisabled ? 'text-rose-300/80' : 'text-zinc-500'
           }`}
           data-testid="preset-best-for"
         >
+          {/* PAR-20: prominent chip echoing the selected preset's color
+              so the pre-submit picker matches the post-submit list +
+              header chip exactly. */}
+          <PresetBadge presetId={selected.id} name={selected.name} />
           {selectedDisabled ? (
             <span>
               Missing neurotypes: {selected.missing_neurotypes!.join(', ')}. Choose another preset.
@@ -259,7 +302,7 @@ export function PresetPicker({ value, onChange, disabled = false }: Props) {
               <span className="text-zinc-400">Best for:</span> {selected.best_for}
             </span>
           )}
-        </p>
+        </div>
       )}
     </div>
   );

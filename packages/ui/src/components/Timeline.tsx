@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import type { DeliberationResult, Turn } from '../lib/types';
 import { TurnCard } from './TurnCard';
 import { ObservabilityPanel, ObservabilityToggle } from './ObservabilityPanel';
+import { PresetBadge } from './PresetBadge';
 
 interface Props {
   result: DeliberationResult | null;
@@ -189,9 +190,21 @@ export function Timeline({ result, running, elapsedSec, topic }: Props) {
           transition={{ duration: 0.3 }}
           className="rounded-xl bg-white/[0.02] p-4 ring-1 ring-white/[0.06]"
         >
-          <p className="mb-1 text-2xs font-semibold uppercase tracking-widest text-zinc-500">
-            Topic
-          </p>
+          {/* PAR-20: result-view preset badge — larger size so the
+              header anchors the deliberation's identity. Renders only
+              once we have a result; legacy results without a preset id
+              render the neutral fallback chip. */}
+          <div className="mb-2 flex items-center gap-2">
+            <p className="text-2xs font-semibold uppercase tracking-widest text-zinc-500">
+              Topic
+            </p>
+            {result && (
+              <>
+                <span className="h-2.5 w-px bg-white/[0.06]" />
+                <PresetBadge presetId={result.preset} size="md" />
+              </>
+            )}
+          </div>
           <p className="text-lg font-medium text-zinc-100">{topic}</p>
         </motion.div>
       )}

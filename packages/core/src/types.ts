@@ -215,6 +215,19 @@ export interface SystemEvent {
 export interface DeliberationResult {
   topic: string;
   /**
+   * Topology preset id that produced this deliberation (e.g. `debate`,
+   * `star-chamber`, `jury`). Populated by `runTopology()` from
+   * `topology.activePreset.id` so downstream consumers can render a
+   * per-preset visual marker (PAR-20) without re-deriving the preset from
+   * the turn order.
+   *
+   * Additive: stored deliberations recorded before PAR-20 omit this field;
+   * the legacy `run()` path also leaves it absent because that pipeline
+   * predates the topology runtime. UI consumers MUST treat it as optional
+   * and fall back to a neutral badge when missing.
+   */
+  preset?: string;
+  /**
    * Optional free-form prose context the user supplied alongside the topic
    * (PAR-16). When present, the engine prepends it to every non-Sentry
    * agent's user-message turn under a `## Background` heading so each agent

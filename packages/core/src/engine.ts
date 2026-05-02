@@ -835,6 +835,14 @@ export class DeliberationEngine {
 
     return {
       topic,
+      // PAR-20: stamp the preset id that produced this deliberation so the
+      // UI can render a per-preset color/badge in the list, the result-view
+      // header, and the picker without re-deriving from turn shape. Always
+      // populated by runTopology() (every preset has an id); the legacy
+      // hardcoded `run()` pipeline above leaves it absent — that path is
+      // only reached from the byte-identical-debate regression test, which
+      // intentionally pins the pre-topology contract.
+      preset: topology.activePreset.id,
       ...(normalizedContext !== undefined ? { context: normalizedContext } : {}),
       turns: blackboard.turns,
       conflicts: blackboard.conflicts,
