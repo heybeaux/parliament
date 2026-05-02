@@ -17,6 +17,7 @@ import userEvent from '@testing-library/user-event';
 import { Timeline } from './Timeline';
 import {
   ObservabilityPanel,
+  buildResidueSeries,
   buildRoundMetrics,
 } from './ObservabilityPanel';
 import type { DeliberationResult, SystemEvent, Turn } from '../lib/types';
@@ -302,3 +303,213 @@ describe('Timeline + ObservabilityPanel integration (PAR-5)', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// PAR-27 — residue chart now binds to Turn.residue_remaining when present,
+// falls back to the |convergence_delta| proxy for pre-PAR-19 transcripts.
+// ---------------------------------------------------------------------------
+
+describe('buildResidueSeries (PAR-27)', () => {
+  it('returns the real series when at least one synth turn carries residue_remaining', () => {
+    const turns: Turn[] = [
+      makeTurn({ round: 1, agent: 'Proposer', neurotype: 'evidence-first' }),
+      makeTurn({
+        round: 1,
+        agent: 'Synthesizer',
+        neurotype: 'integrative',
+        residue_remaining: 0.7,
+      }),
+      makeTurn({ round: 2, agent: 'Proposer', neurotype: 'evidence-first' }),
+      makeTurn({
+        round: 2,
+        agent: 'Synthesizer',
+        neurotype: 'integrative',
+        residue_remaining: 0.3,
+      }),
+    ];
+
+    const series = buildResidueSeries(turns);
+    expect(series.source).toBe('real');
+    expect(series.points).toEqual([
+      { round: 1, value: 0.7 },
+      { round: 2, value: 0.3 },
+    ]);
+  });
+
+  it('renders absent residue_remaining as a gap (null) when other rounds carry it', () => {
+    // Mid-flight transcript: round 2's synthesizer hasn't landed yet, so the
+    // round is present in the transcript (Proposer fired) but lacks the
+    // synth-stamped residue. AC: gap, not crash.
+    const turns: Turn[] = [
+      makeTurn({
+        round: 1,
+        agent: 'Synthesizer',
+        neurotype: 'integrative',
+        residue_remaining: 0.5,
+      }),
+      makeTurn({ round: 2, agent: 'Proposer', neurotype: 'evidence-first' }),
+    ];
+
+    const series = buildResidueSeries(turns);
+    expect(series.source).toBe('real');
+    expect(series.points).toEqual([
+      { round: 1, value: 0.5 },
+      { round: 2, value: null },
+    ]);
+  });
+
+  it('falls back to the |convergence_delta| proxy when no synth turn carries residue_remaining', () => {
+    // Pre-PAR-19 transcript: synthesizer turns exist but lack the field.
+    const turns: Turn[] = [
+      makeTurn({
+        round: 1,
+        agent: 'Synthesizer',
+        neurotype: 'integrative',
+        convergence_delta: 0.4,
+      }),
+      makeTurn({
+        round: 2,
+        agent: 'Synthesizer',
+        neurotype: 'integrative',
+        convergence_delta: -0.2,
+      }),
+    ];
+
+    const series = buildResidueSeries(turns);
+    expect(series.source).toBe('proxy');
+    expect(series.points).toEqual([
+      { round: 1, value: 0.4 },
+      { round: 2, value: 0.2 }, // |−0.2|
+    ]);
+  });
+
+  it('treats a transcript with no synth turns at all as proxy (legacy)', () => {
+    // No synthesizer turn anywhere — clearly a partial / non-PAR-19 sample.
+    const turns: Turn[] = [
+      makeTurn({ round: 1, agent: 'Proposer', convergence_delta: 0.1 }),
+    ];
+    const series = buildResidueSeries(turns);
+    expect(series.source).toBe('proxy');
+    expect(series.points).toEqual([{ round: 1, value: 0.1 }]);
+  });
+
+  it('returns an empty proxy series for a transcript with no turns', () => {
+    expect(buildResidueSeries([])).toEqual({ source: 'proxy', points: [] });
+  });
+});
+
+describe('ObservabilityPanel residue chart binding (PAR-27)', () => {
+  it('renders the real residue series and drops the proxy disclaimer when synth turns carry residue_remaining', () => {
+    const turns: Turn[] = [
+      makeTurn({ round: 1, agent: 'Proposer', neurotype: 'evidence-first', convergence_delta: 0.4 }),
+      makeTurn({
+        round: 1,
+        agent: 'Synthesizer',
+        neurotype: 'integrative',
+        residue_remaining: 0.6,
+        convergence_delta: 0.4,
+      }),
+      makeTurn({ round: 2, agent: 'Proposer', neurotype: 'evidence-first', convergence_delta: -0.1 }),
+      makeTurn({
+        round: 2,
+        agent: 'Synthesizer',
+        neurotype: 'integrative',
+        residue_remaining: 0.2,
+        convergence_delta: -0.1,
+      }),
+    ];
+    const result = makeResult({ turns, totalRounds: 2, residueScore: 0.2 });
+
+    render(<ObservabilityPanel result={result} open />);
+
+    const bars = screen.getByRole('img', { name: /residue of conflict/i });
+    // Source flagged for downstream consumers / tests.
+    expect(bars).toHaveAttribute('data-residue-source', 'real');
+    // PAR-27 AC: tooltip text drops the "(proxy from |convergence_delta|)" suffix.
+    const titleEl = bars.querySelector('title');
+    expect(titleEl).not.toBeNull();
+    expect(titleEl!.textContent).toBe(
+      'Disagreement remaining — research term: residue of conflict',
+    );
+    expect(titleEl!.textContent).not.toMatch(/proxy/i);
+    expect(titleEl!.textContent).not.toMatch(/convergence_delta/i);
+
+    // Per-bar tooltips reflect the real residue label, not |Δ|.
+    const rectTitles = Array.from(bars.querySelectorAll('rect title')).map(
+      (n) => n.textContent ?? '',
+    );
+    expect(rectTitles).toHaveLength(2);
+    expect(rectTitles[0]).toMatch(/Round 1: residue = 0\.600/);
+    expect(rectTitles[1]).toMatch(/Round 2: residue = 0\.200/);
+  });
+
+  it('renders the legacy proxy chart with the original disclaimer for pre-PAR-19 transcripts', () => {
+    // Synthesizer turns exist but none carry residue_remaining — exactly
+    // what a stored deliberation looks like before PAR-19 shipped.
+    const turns: Turn[] = [
+      makeTurn({
+        round: 1,
+        agent: 'Synthesizer',
+        neurotype: 'integrative',
+        convergence_delta: 0.3,
+      }),
+      makeTurn({
+        round: 2,
+        agent: 'Synthesizer',
+        neurotype: 'integrative',
+        convergence_delta: -0.5,
+      }),
+    ];
+    const result = makeResult({ turns, totalRounds: 2, residueScore: 0.42 });
+
+    render(<ObservabilityPanel result={result} open />);
+
+    const bars = screen.getByRole('img', { name: /residue of conflict/i });
+    expect(bars).toHaveAttribute('data-residue-source', 'proxy');
+
+    const titleEl = bars.querySelector('title');
+    expect(titleEl).not.toBeNull();
+    // PAR-27 AC: legacy disclaimer preserved verbatim.
+    expect(titleEl!.textContent).toBe(
+      'Disagreement remaining — research term: residue of conflict (per-round proxy from |convergence_delta|)',
+    );
+
+    // Per-bar tooltips keep the original |Δ| label.
+    const rectTitles = Array.from(bars.querySelectorAll('rect title')).map(
+      (n) => n.textContent ?? '',
+    );
+    expect(rectTitles).toHaveLength(2);
+    expect(rectTitles[0]).toMatch(/Round 1: \|Δ\| = 0\.300/);
+    expect(rectTitles[1]).toMatch(/Round 2: \|Δ\| = 0\.500/);
+  });
+
+  it('keeps the y-axis fixed at [0, 1] for the real series so bars reflect absolute residue level', () => {
+    // Two rounds: 1.0 (max) and 0.5 (half). With a fixed [0, 1] domain, the
+    // 0.5 bar must be exactly half the height of the 1.0 bar — proves the
+    // chart is no longer auto-scaled to the run's max.
+    const turns: Turn[] = [
+      makeTurn({
+        round: 1,
+        agent: 'Synthesizer',
+        neurotype: 'integrative',
+        residue_remaining: 1.0,
+      }),
+      makeTurn({
+        round: 2,
+        agent: 'Synthesizer',
+        neurotype: 'integrative',
+        residue_remaining: 0.5,
+      }),
+    ];
+    const result = makeResult({ turns, totalRounds: 2, residueScore: 0.5 });
+
+    render(<ObservabilityPanel result={result} open />);
+
+    const bars = screen.getByRole('img', { name: /residue of conflict/i });
+    const rects = Array.from(bars.querySelectorAll('rect'));
+    expect(rects).toHaveLength(2);
+    const h1 = parseFloat(rects[0]!.getAttribute('height') ?? '0');
+    const h2 = parseFloat(rects[1]!.getAttribute('height') ?? '0');
+    expect(h1).toBeGreaterThan(0);
+    expect(h2).toBeCloseTo(h1 / 2, 5);
+  });
+});
