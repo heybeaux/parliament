@@ -1,6 +1,6 @@
 # Parliament
 
-Parliament is a multi-agent deliberation system. Five specialised AI agents — Proposer, Skeptic, Synthesizer, RedAgent, and Sentry — debate a topic on a shared blackboard until they either reach consensus, surface an irreconcilable split, or hit a configured round limit. The engine tracks Opinion Shift Index (OSI) per agent to detect echo loops, weights unresolved conflicts to compute a residue score, and persists every transcript via a REST API.
+Parliament is a multi-agent deliberation system. A configurable cast of AI agents — chosen from thirteen built-in **neurotypes** (Proposer, Skeptic, Empiricist, Steelmanner, Devil's Advocate, Translator, Lateralist, Historian, Forecaster, Pragmatist, plus the Synthesizer / RedAgent / Sentry infrastructure roles) — debate a topic on a shared blackboard until they either reach consensus, surface an irreconcilable split, or hit a configured round limit. The shape of each debate is set by a **topology preset** (seven built in, plus user-defined). The engine tracks Opinion Shift Index (OSI) per agent to detect echo loops, weights unresolved conflicts to compute a residue score, and persists every transcript via a REST API.
 
 ## Quick start
 
@@ -10,9 +10,22 @@ pnpm build
 
 # Run a deliberation locally (requires oMLX running at http://localhost:8080/v1)
 node packages/cli/dist/index.js deliberate "Should we adopt a four-day work week?"
+
+# Pick a different deliberation shape (a "preset") for this run:
+node packages/cli/dist/index.js deliberate --preset jury "Should we adopt a four-day work week?"
 ```
 
 The CLI is exposed as `parliament` once published; until then invoke the built entry directly.
+
+### Choosing a deliberation type
+
+Every run uses one **topology preset** — the shape of the debate (which neurotypes speak, in what order, and which run in parallel). Three places to set it:
+
+- **Web UI** — start the React dev server with `pnpm --filter @parliament/ui dev` and use the **preset picker** at the top of the New Deliberation form. Pick a preset from the dropdown (or click a color chip), enter a topic, optionally expand "Add context" to paste a brief, and submit. Live turns stream in over SSE as each agent fires; when the Synthesizer terminates the run, the completed deliberation renders in place. The picker reads `GET /presets` from the server, so any user-defined presets in `parliament.toml` show up alongside the seven built-ins.
+- **CLI** — pass `--preset <id>` to `parliament deliberate`. Example: `parliament deliberate --preset chain-of-verifiers "Is this load-shedding plan sound?"`. Unknown values exit `1` with a "did you mean …?" suggestion.
+- **`parliament.toml`** — set `[topology] active = "<id>"` to make a preset the default for every run. The CLI flag and the `POST /deliberate` `preset` field both override this per-run.
+
+Skip to the [Presets table](#presets) for the seven built-in shapes, or read **[docs/topology.md](docs/topology.md)** for the parallel-step semantics and order-bias rationale. The thirteen built-in neurotypes are catalogued in **[docs/neurotypes.md](docs/neurotypes.md)**.
 
 ## Configuration
 
@@ -26,15 +39,25 @@ red_agent_interval    = 2      # inject the disruptor every N rounds
 osi_enabled           = true   # echo-loop detection on per-role transcripts
 server_port           = 3000   # REST server port
 
+# Pick the default deliberation shape. Built-in presets:
+#   debate, star-chamber, chain-of-verifiers, socratic, long-view, reframe, jury
+# Override per-run via the CLI `--preset` flag or the POST /deliberate body.
+[topology]
+active = "jury"
+
+# Customize a built-in neurotype — here, give the Proposer a different model
+# and prompt without touching the topology. The three infrastructure roles
+# (synthesizer, redAgent, sentry) are wired by the engine and configured the
+# same way.
 [neurotypes.proposer]
 model    = "gemma-4-31b-it-8bit"
 provider = "omlx"
 system_prompt = "You are a structured reasoner. ..."
 
-# ...skeptic, synthesizer, redAgent, sentry follow the same shape
+# ...other neurotype overrides follow the same shape
 ```
 
-The five neurotype roles — `proposer`, `skeptic`, `synthesizer`, `redAgent`, `sentry` — are required. Multiple roles may share a model; the scheduler groups same-model agents into batches to minimise model swaps.
+A `[neurotypes.<id>]` block declares which model and prompt to use for that neurotype. The infrastructure roles (`synthesizer`, `redAgent`, `sentry`) are always wired by the engine. Steppable neurotypes only need a block when the active preset references them — see [the preset table below](#presets) and **[docs/neurotypes.md](docs/neurotypes.md)** for the full roster. Multiple neurotypes may share a model; the scheduler groups same-model agents into batches to minimise model swaps.
 
 Switch the LLM provider via `PARLIAMENT_PROVIDER` or per-neurotype `provider` field: `ollama`, `lm_studio`, or `omlx` (default for this config). Set `OMLX_BASE_URL` to point at your oMLX instance (default: `http://localhost:8080/v1`).
 
@@ -126,11 +149,12 @@ Built-in presets always include their full metadata (`name`, `description`, `bes
 
 ## Architecture
 
-- **`@parliament/core`** — pure TypeScript engine. Contains `DeliberationEngine`, the five agent classes, model adapters (Ollama, LM Studio, OMLX, OpenAI-compatible), the OSI calibration module, the model-aware scheduler, and the TOML config loader.
-- **`@parliament/server`** — Hono REST server backed by SQLite (better-sqlite3). Wires the engine to HTTP and persists every result.
+- **`@parliament/core`** — pure TypeScript engine. Contains `DeliberationEngine`, the thirteen built-in neurotype agent classes, the topology loader (presets, parallel-step support), model adapters (Ollama, LM Studio, OMLX, OpenAI-compatible), the OSI calibration module, the model-aware scheduler, and the TOML config loader.
+- **`@parliament/server`** — Hono REST server backed by SQLite (better-sqlite3). Wires the engine to HTTP, exposes `GET /presets` for UI pickers, and persists every result.
 - **`@parliament/cli`** — Commander-based CLI that runs deliberations locally and fetches stored ones from the server.
+- **`@parliament/ui`** — React + Vite web client. Includes the preset picker, live SSE turn stream, and observability panel.
 
-The `DeliberationEngine` runs each round as: Proposer (round 1 only) → Skeptic → Sentry → Synthesizer → Sentry → optional RedAgent. Sentry returns `COLLAPSE_DETECTED` to terminate on echo, and the Synthesizer's parsed confidence terminates on consensus.
+`DeliberationEngine` exposes two paths. The default `debate` preset uses the legacy round-shape (Proposer round 1 only → Skeptic → Sentry → Synthesizer → Sentry → optional RedAgent) for byte-identical back-compat with pre-topology runs. Every other preset routes through `runTopology`, which executes the preset's `steps` (or `parallel_steps`) per round and threads Sentry + Synthesizer through the same termination logic. In both paths Sentry returns `COLLAPSE_DETECTED` to terminate on echo, and the Synthesizer's parsed confidence terminates on consensus.
 
 ## Agents
 
