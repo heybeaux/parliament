@@ -680,6 +680,222 @@ describe('DeliberationEngine', () => {
     });
   });
 
+  // -------------------------------------------------------------------------
+  // PAR-19: per-round residue stamped on synthesizer turns
+  //
+  // The Stage 3 Observability panel binds its "Disagreement remaining" bar
+  // chart to `Turn.residue_remaining` on synthesizer turns. The engine must
+  // (1) populate that field on every synthesizer turn, (2) keep each value
+  // bounded in [0, 1], (3) preserve the end-of-run `residueScore` scalar
+  // unchanged, and (4) keep the per-round trajectory monotone with the
+  // underlying conflict-state evolution (decreasing as more conflicts get
+  // resolved, non-decreasing when nothing resolves).
+  // -------------------------------------------------------------------------
+  describe('PAR-19 per-round residue series', () => {
+    it('a 3-round Debate run produces 3 residue values, each in [0, 1]', async () => {
+      // Skeptic appends a fresh unresolved conflict each round so the residue
+      // series reflects a real (non-zero) signal. Synthesizer stays below
+      // threshold so the loop runs to maxRounds=3.
+      let callCount = 0;
+      const skepticMock: Agent = {
+        role: 'Skeptic',
+        neurotype: 'critical',
+        modelName: 'test-model',
+        generate: vi.fn().mockImplementation(async (board: Blackboard) => {
+          callCount++;
+          board.conflicts.push({
+            between: ['Skeptic', 'Proposer'],
+            description: `conflict ${callCount}`,
+            resolved: false,
+          });
+          return { content: `critique ${callCount}`, truncated: false };
+        }),
+      };
+
+      const config = makeConfig({
+        maxRounds: 3,
+        redAgentInterval: 99,
+        agents: {
+          ...makeConfig().agents,
+          skeptic: skepticMock,
+          synthesizer: makeSynthesizerAgent(0.3) as unknown as import('../agents/synthesizer.js').SynthesizerAgent,
+        },
+      });
+
+      const result = await engine.run('three-round residue', config);
+
+      const synthTurns = result.turns.filter((t) => t.agent === 'Synthesizer');
+      expect(synthTurns).toHaveLength(3);
+
+      for (const t of synthTurns) {
+        expect(typeof t.residue_remaining).toBe('number');
+        expect(t.residue_remaining).toBeGreaterThanOrEqual(0);
+        expect(t.residue_remaining).toBeLessThanOrEqual(1);
+      }
+
+      // End-of-run scalar is preserved and equals the final synthesizer
+      // turn's per-round value (no conflict mutation between the last
+      // synthesizer call and the loop exit, by construction).
+      expect(typeof result.residueScore).toBe('number');
+      expect(result.residueScore).toBe(synthTurns[synthTurns.length - 1]!.residue_remaining);
+    });
+
+    it('residue is monotonically decreasing across rounds for a converging run', async () => {
+      // Converging: each round's Skeptic appends one conflict, but it ALSO
+      // resolves the previously unresolved conflict from the prior round.
+      // Round-end residue therefore drops as resolved-fraction grows.
+      const skepticMock: Agent = {
+        role: 'Skeptic',
+        neurotype: 'critical',
+        modelName: 'test-model',
+        generate: vi.fn().mockImplementation(async (board: Blackboard) => {
+          // Resolve every prior unresolved conflict.
+          for (const c of board.conflicts) c.resolved = true;
+          // Append a fresh unresolved one for the current round.
+          board.conflicts.push({
+            between: ['Skeptic', 'Proposer'],
+            description: `round conflict`,
+            resolved: false,
+          });
+          return { content: 'narrowing critique', truncated: false };
+        }),
+      };
+
+      const config = makeConfig({
+        maxRounds: 3,
+        redAgentInterval: 99,
+        agents: {
+          ...makeConfig().agents,
+          skeptic: skepticMock,
+          synthesizer: makeSynthesizerAgent(0.3) as unknown as import('../agents/synthesizer.js').SynthesizerAgent,
+        },
+      });
+
+      const result = await engine.run('converging residue', config);
+
+      const series = result.turns
+        .filter((t) => t.agent === 'Synthesizer')
+        .map((t) => t.residue_remaining as number);
+
+      expect(series).toHaveLength(3);
+      // Strictly decreasing: round N has more resolved-weight than round N-1
+      // because every prior conflict has been marked resolved before the
+      // current synthesizer fires.
+      for (let i = 1; i < series.length; i++) {
+        expect(series[i]!).toBeLessThan(series[i - 1]!);
+      }
+      // Sanity: every value still in [0, 1].
+      for (const v of series) {
+        expect(v).toBeGreaterThanOrEqual(0);
+        expect(v).toBeLessThanOrEqual(1);
+      }
+    });
+
+    it('residue is non-decreasing across rounds for an echo-loop run', async () => {
+      // Echo loop: Skeptic appends a fresh unresolved conflict each round
+      // and never resolves anything. Per the recency-weighted scoring,
+      // residue stays at 1.0 once any unresolved conflict is present and
+      // never drops — so the series must be non-decreasing across rounds.
+      let callCount = 0;
+      const skepticMock: Agent = {
+        role: 'Skeptic',
+        neurotype: 'critical',
+        modelName: 'test-model',
+        generate: vi.fn().mockImplementation(async (board: Blackboard) => {
+          callCount++;
+          board.conflicts.push({
+            between: ['Skeptic', 'Proposer'],
+            description: `unresolved ${callCount}`,
+            resolved: false,
+          });
+          return { content: `repeat critique ${callCount}`, truncated: false };
+        }),
+      };
+
+      const config = makeConfig({
+        maxRounds: 3,
+        redAgentInterval: 99,
+        agents: {
+          ...makeConfig().agents,
+          skeptic: skepticMock,
+          synthesizer: makeSynthesizerAgent(0.3) as unknown as import('../agents/synthesizer.js').SynthesizerAgent,
+        },
+      });
+
+      const result = await engine.run('echo loop residue', config);
+
+      const series = result.turns
+        .filter((t) => t.agent === 'Synthesizer')
+        .map((t) => t.residue_remaining as number);
+
+      expect(series).toHaveLength(3);
+      for (let i = 1; i < series.length; i++) {
+        expect(series[i]!).toBeGreaterThanOrEqual(series[i - 1]!);
+      }
+    });
+
+    it('residue_remaining is populated ONLY on synthesizer turns', async () => {
+      // Non-synthesizer turns (Proposer, Skeptic, RedAgent) leave the field
+      // undefined so the UI can detect "round summary point" by presence.
+      const config = makeConfig({
+        maxRounds: 2,
+        redAgentInterval: 2, // RedAgent fires at round 2
+        agents: {
+          ...makeConfig().agents,
+          synthesizer: makeSynthesizerAgent(0.3) as unknown as import('../agents/synthesizer.js').SynthesizerAgent,
+        },
+      });
+
+      const result = await engine.run('field-presence', config);
+
+      for (const t of result.turns) {
+        if (t.agent === 'Synthesizer') {
+          expect(typeof t.residue_remaining).toBe('number');
+        } else {
+          expect(t.residue_remaining).toBeUndefined();
+        }
+      }
+    });
+
+    it('end-of-run residueScore equals the final synthesizer turn\'s residue_remaining', async () => {
+      // The end-of-run scalar uses the SAME `computeResidueScore` calculation
+      // as the per-round stamp. After the final synthesizer fires, no
+      // additional conflict mutations happen before the loop exit (Sentry
+      // does not mutate conflicts and RedAgent in this test does not fire
+      // because redAgentInterval > maxRounds), so the scalar must equal
+      // the last synthesizer turn's per-round value.
+      const unresolvedSkeptic: Agent = {
+        role: 'Skeptic',
+        neurotype: 'critical',
+        modelName: 'test-model',
+        generate: vi.fn().mockImplementation(async (board: Blackboard) => {
+          board.conflicts.push({
+            between: ['Skeptic', 'Proposer'],
+            description: 'unresolved',
+            resolved: false,
+          });
+          return { content: 'critique', truncated: false };
+        }),
+      };
+
+      const config = makeConfig({
+        maxRounds: 2,
+        redAgentInterval: 99,
+        agents: {
+          ...makeConfig().agents,
+          skeptic: unresolvedSkeptic,
+          synthesizer: makeSynthesizerAgent(0.3) as unknown as import('../agents/synthesizer.js').SynthesizerAgent,
+        },
+      });
+
+      const result = await engine.run('scalar-vs-series', config);
+
+      const synthTurns = result.turns.filter((t) => t.agent === 'Synthesizer');
+      expect(synthTurns).toHaveLength(2);
+      expect(result.residueScore).toBe(synthTurns[1]!.residue_remaining);
+    });
+  });
+
   it('split.irreconcilable is false when residueScore <= 0.5', async () => {
     // Two conflicts: one resolved, one unresolved.
     // Weights (position_from_end / total):

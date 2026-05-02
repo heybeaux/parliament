@@ -173,6 +173,32 @@ function computeResidueScore(conflicts: DeliberationResult['conflicts']): number
 }
 
 /**
+ * PAR-19 — stamps `residue_remaining` onto the most recently appended turn
+ * on the blackboard, computed against the current `blackboard.conflicts`
+ * snapshot. Used by both engine paths (`run` and `runTopology`) immediately
+ * after the synthesizer's turn is recorded so the per-round value is
+ * adjacent to the round-summary turn that produced it.
+ *
+ * Uses the same `computeResidueScore` calculation as the end-of-run
+ * `DeliberationResult.residueScore` scalar — the only difference is timing:
+ * this fires once per round (right after the synthesizer), whereas the
+ * scalar fires once at deliberation termination. The end-of-run scalar's
+ * value is therefore guaranteed to equal the final synthesizer turn's
+ * `residue_remaining` for any conflicts state that hasn't changed between
+ * that synthesizer call and the loop exit.
+ *
+ * No-op if the blackboard has no turns (defensive — should not happen
+ * because the helper is only called after `recordTurn`). Always called
+ * with the synthesizer's just-appended turn at the tail; stamps `0` when
+ * no conflicts exist (the same value `computeResidueScore` returns).
+ */
+function stampSynthResidue(blackboard: Blackboard): void {
+  const last = blackboard.turns[blackboard.turns.length - 1];
+  if (last === undefined) return;
+  last.residue_remaining = computeResidueScore(blackboard.conflicts);
+}
+
+/**
  * Builds a SplitSummary from the current blackboard when no synthesis was
  * reached. Collects the last turn from each distinct agent role, then marks
  * the split irreconcilable if residueScore > 0.5.
@@ -416,6 +442,13 @@ export class DeliberationEngine {
         synthConfidenceByRound,
         synthResult.meta,
       );
+      // PAR-19: stamp the per-round residue onto the synthesizer turn we
+      // just appended. Uses the same `computeResidueScore` calculation as
+      // the end-of-run `residueScore` scalar — evaluated against the
+      // conflicts state at the moment the synthesizer fires for this round.
+      // The Stage 3 Observability panel groups turns by round and reads
+      // this field for its "Disagreement remaining" per-round bar chart.
+      stampSynthResidue(blackboard);
       // Record the confidence the synthesizer just produced so subsequent
       // turns (and the next round) see it via `convergence_delta`.
       if (synthResult.meta !== undefined) {
@@ -806,6 +839,11 @@ export class DeliberationEngine {
         synthConfidenceByRound,
         synthResult.meta,
       );
+      // PAR-19: stamp the per-round residue onto the synthesizer turn we
+      // just appended. Mirrors the legacy `run()` path. The stamp must
+      // happen BEFORE `notifyLastTurn()` so the PAR-18 progressive-turn
+      // sink and the persisted blackboard turn agree on the field's value.
+      stampSynthResidue(blackboard);
       notifyLastTurn();
       // Record the confidence the synthesizer just produced so subsequent
       // turns (and the next round) see it via `convergence_delta`.
