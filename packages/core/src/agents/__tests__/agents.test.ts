@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { ModelAdapter } from '../../adapters/base.js';
+import { ModelConnectionError, type ModelAdapter } from '../../adapters/base.js';
 import type { Blackboard } from '../../types.js';
+import type { ProviderFailoverInfo } from '../base.js';
 import { ProposerAgent } from '../proposer.js';
 import { SkepticAgent } from '../skeptic.js';
 import { SynthesizerAgent } from '../synthesizer.js';
@@ -587,6 +588,139 @@ describe('SentryAgent', () => {
     const result = await agent.generate(board);
     expect(result.signal).toBe('collapse_detected');
     expect(result.reason).toMatch(/Echo loop/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PAR-25 — AgentBase.generateWithFailover
+// ---------------------------------------------------------------------------
+//
+// We exercise the failover plumbing through ProposerAgent because every prose
+// agent inherits the same `generateWithFailover` path from AgentBase; covering
+// it once at the seam is sufficient and matches the user's PAR-25 test plan.
+// All four matrix branches in the AgentBase JSDoc behaviour table are pinned
+// here:
+//   1. primary connection-error → fallback OK → callback fires once.
+//   2. primary AND fallback throw ModelConnectionError → fallback's error
+//      propagates (not the primary's), callback still fires exactly once.
+//   3. primary connection-error → no fallback configured → primary's error
+//      propagates and the callback never fires.
+//   4. primary throws a non-connection error → fallback is NOT tried (would
+//      mask logic bugs) and the callback never fires.
+// ---------------------------------------------------------------------------
+
+describe('AgentBase failover (PAR-25)', () => {
+  function makeFailoverAdapter(modelName: string, response: string): ModelAdapter {
+    return {
+      modelName,
+      generate: vi.fn().mockResolvedValue({ content: response }),
+    };
+  }
+
+  function makeConnectionErrorAdapter(modelName: string, message: string): ModelAdapter {
+    return {
+      modelName,
+      generate: vi.fn().mockRejectedValue(new ModelConnectionError(message)),
+    };
+  }
+
+  it('primary ModelConnectionError + fallback OK → returns fallback content and fires callback once', async () => {
+    const primary = makeConnectionErrorAdapter('primary-model', 'connection refused');
+    const fallback = makeFailoverAdapter('fallback-model', 'fallback says hi');
+    const callback = vi.fn();
+
+    const agent = new ProposerAgent(primary, {
+      fallbackAdapter: fallback,
+      onProviderFailover: callback,
+    });
+    const board = makeBlackboard();
+    const result = await agent.generate(board);
+
+    // Primary was attempted once, then fallback was retried.
+    expect((primary.generate as ReturnType<typeof vi.fn>)).toHaveBeenCalledOnce();
+    expect((fallback.generate as ReturnType<typeof vi.fn>)).toHaveBeenCalledOnce();
+    // Returned content is the fallback's response (capped + word-counted by
+    // the agent, but for a short string the content is unchanged).
+    expect(result.content).toBe('fallback says hi');
+    // Observability callback fires exactly once with the primary's error.
+    expect(callback).toHaveBeenCalledOnce();
+    const info = (callback.mock.calls[0]?.[0] as ProviderFailoverInfo);
+    expect(info.neurotype).toBe('structured');
+    expect(info.primary).toBe('primary-model');
+    expect(info.fallback).toBe('fallback-model');
+    expect(info.error).toBe('connection refused');
+  });
+
+  it('primary AND fallback throw ModelConnectionError → fallback error propagates; callback fires once', async () => {
+    const primary = makeConnectionErrorAdapter('primary-model', 'primary down');
+    const fallback = makeConnectionErrorAdapter('fallback-model', 'fallback down too');
+    const callback = vi.fn();
+
+    const agent = new ProposerAgent(primary, {
+      fallbackAdapter: fallback,
+      onProviderFailover: callback,
+    });
+    const board = makeBlackboard();
+
+    // The fallback's error wins — operators reading the rejection see the
+    // most-recent failure, which signals "both providers are simultaneously
+    // down" instead of the misleading "the primary failed and we never
+    // retried."
+    await expect(agent.generate(board)).rejects.toThrow(ModelConnectionError);
+    await expect(agent.generate(board)).rejects.toThrow('fallback down too');
+
+    // Both adapters were called twice (we awaited rejects twice). Each
+    // failover call notifies once → 2 calls total. We only care that the
+    // callback fired at least once with the primary's error message and
+    // never with the fallback's.
+    expect(callback).toHaveBeenCalled();
+    for (const [info] of callback.mock.calls) {
+      const payload = info as ProviderFailoverInfo;
+      expect(payload.error).toBe('primary down');
+      expect(payload.primary).toBe('primary-model');
+      expect(payload.fallback).toBe('fallback-model');
+    }
+  });
+
+  it('primary ModelConnectionError + no fallback configured → primary error propagates; callback never fires', async () => {
+    const primary = makeConnectionErrorAdapter('primary-model', 'primary kaput');
+    const callback = vi.fn();
+
+    // fallbackAdapter omitted on purpose — supplying only the callback is a
+    // no-op per the AgentRuntimeOptions contract.
+    const agent = new ProposerAgent(primary, { onProviderFailover: callback });
+    const board = makeBlackboard();
+
+    await expect(agent.generate(board)).rejects.toThrow(ModelConnectionError);
+    await expect(agent.generate(board)).rejects.toThrow('primary kaput');
+
+    expect(callback).not.toHaveBeenCalled();
+  });
+
+  it('primary throws non-connection error → fallback is NOT tried; callback never fires', async () => {
+    // Simulate a logic-layer error (e.g. malformed-output parse failure). The
+    // failover path MUST NOT mask this by retrying — that would hide bugs.
+    const logicError = new TypeError('unexpected token in JSON');
+    const primary: ModelAdapter = {
+      modelName: 'primary-model',
+      generate: vi.fn().mockRejectedValue(logicError),
+    };
+    const fallback = makeFailoverAdapter('fallback-model', 'should never run');
+    const callback = vi.fn();
+
+    const agent = new ProposerAgent(primary, {
+      fallbackAdapter: fallback,
+      onProviderFailover: callback,
+    });
+    const board = makeBlackboard();
+
+    // The non-connection error propagates exactly as-is.
+    await expect(agent.generate(board)).rejects.toThrow(TypeError);
+    await expect(agent.generate(board)).rejects.toThrow('unexpected token in JSON');
+
+    // Fallback was never called; callback never fired.
+    expect((fallback.generate as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(callback).not.toHaveBeenCalled();
   });
 });
 

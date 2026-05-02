@@ -1,5 +1,5 @@
 import type { ModelAdapter } from '../adapters/base.js';
-import type { Agent } from './base.js';
+import type { Agent, AgentRuntimeOptions } from './base.js';
 import { ProposerAgent } from './proposer.js';
 import { SkepticAgent } from './skeptic.js';
 import { HistorianAgent } from './historian.js';
@@ -57,7 +57,16 @@ import { TranslatorAgent } from './translator.js';
  * ----------------------------------------------------------------------------
  */
 
-export type AgentFactory = (adapter: ModelAdapter) => Agent;
+/**
+ * PAR-25 — factories accept the same `AgentRuntimeOptions` (fallback adapter
+ * + failover callback) every prose agent now takes via `AgentBase`. The
+ * second argument is optional so existing call sites (`factory(adapter)`)
+ * keep working unchanged; supplying it wires the agent for failover.
+ */
+export type AgentFactory = (
+  adapter: ModelAdapter,
+  options?: AgentRuntimeOptions,
+) => Agent;
 
 /**
  * Built-in neurotype factories keyed by their kebab-case ID. Order is
@@ -65,16 +74,16 @@ export type AgentFactory = (adapter: ModelAdapter) => Agent;
  * are the Stage 1 additions.
  */
 export const BUILTIN_AGENT_REGISTRY: Readonly<Record<string, AgentFactory>> = Object.freeze({
-  proposer: (adapter) => new ProposerAgent(adapter),
-  skeptic: (adapter) => new SkepticAgent(adapter),
-  historian: (adapter) => new HistorianAgent(adapter),
-  forecaster: (adapter) => new ForecasterAgent(adapter),
-  pragmatist: (adapter) => new PragmatistAgent(adapter),
-  empiricist: (adapter) => new EmpiricistAgent(adapter),
-  steelmanner: (adapter) => new SteelmannerAgent(adapter),
-  'devils-advocate': (adapter) => new DevilsAdvocateAgent(adapter),
-  lateralist: (adapter) => new LateralistAgent(adapter),
-  translator: (adapter) => new TranslatorAgent(adapter),
+  proposer: (adapter, options) => new ProposerAgent(adapter, options),
+  skeptic: (adapter, options) => new SkepticAgent(adapter, options),
+  historian: (adapter, options) => new HistorianAgent(adapter, options),
+  forecaster: (adapter, options) => new ForecasterAgent(adapter, options),
+  pragmatist: (adapter, options) => new PragmatistAgent(adapter, options),
+  empiricist: (adapter, options) => new EmpiricistAgent(adapter, options),
+  steelmanner: (adapter, options) => new SteelmannerAgent(adapter, options),
+  'devils-advocate': (adapter, options) => new DevilsAdvocateAgent(adapter, options),
+  lateralist: (adapter, options) => new LateralistAgent(adapter, options),
+  translator: (adapter, options) => new TranslatorAgent(adapter, options),
 });
 
 /** All known built-in neurotype IDs, in registration order. */
@@ -94,12 +103,16 @@ export function isBuiltinNeurotype(id: string): boolean {
  * user-defined neurotypes (the topology runtime) MUST consult this registry
  * first and fall back to the user-defined registry only for unknown IDs.
  */
-export function createBuiltinAgent(id: string, adapter: ModelAdapter): Agent {
+export function createBuiltinAgent(
+  id: string,
+  adapter: ModelAdapter,
+  options?: AgentRuntimeOptions,
+): Agent {
   const factory = BUILTIN_AGENT_REGISTRY[id];
   if (!factory) {
     throw new Error(
       `Unknown built-in neurotype "${id}". Known IDs: ${BUILTIN_AGENT_IDS.join(', ')}`,
     );
   }
-  return factory(adapter);
+  return factory(adapter, options);
 }

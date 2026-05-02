@@ -8,7 +8,7 @@ import type {
   Turn,
   TurnMeta,
 } from './types.js';
-import type { Agent } from './agents/base.js';
+import type { Agent, ProviderFailoverInfo } from './agents/base.js';
 import type { SynthesizerAgent, SynthesizerResult } from './agents/synthesizer.js';
 import type { SentryAgent } from './agents/sentry.js';
 import type { TopologyConfig, TopologyStep } from './topology/index.js';
@@ -73,8 +73,29 @@ export interface DeliberationConfig {
  * The resolver MUST throw a descriptive `Error` when an ID is unknown — the
  * loader has already validated that every step's neurotype is resolvable, so
  * any throw here is a bug, not user-input handling.
+ *
+ * PAR-25 — the second `context` argument is additive and optional. The
+ * engine passes its own `provider.failover` event-pushing callback here so
+ * the resolver can wire it into each agent's `AgentRuntimeOptions`. When
+ * the resolver ignores the context (or the agent is not configured for
+ * failover), behaviour is unchanged from pre-PAR-25.
  */
-export type NeurotypeResolver = (step: TopologyStep) => Agent;
+export interface NeurotypeResolverContext {
+  /**
+   * PAR-25 — push a `provider.failover` SystemEvent onto the engine's
+   * `events[]` array. Wired into `AgentRuntimeOptions.onProviderFailover`
+   * by the resolver when the neurotype's TOML config opts in via
+   * `fallback_provider`. The engine deliberately owns the event push (not
+   * the resolver) so the event ordering relative to round/synthesis
+   * markers stays consistent across all sites that fire failover.
+   */
+  onProviderFailover: (info: ProviderFailoverInfo) => void;
+}
+
+export type NeurotypeResolver = (
+  step: TopologyStep,
+  context?: NeurotypeResolverContext,
+) => Agent;
 
 /** Logger sink the topology runtime uses for non-fatal informational events. */
 export interface TopologyRuntimeLogger {
@@ -761,6 +782,11 @@ export class DeliberationEngine {
     // a stable `convergence_delta` to every fresh turn without re-walking
     // the transcript. Mirrors the `run()` method.
     const synthConfidenceByRound = new Map<number, number>();
+    // PAR-25 — tracks the round in which each step is currently executing
+    // so the failover event-push helper can stamp the right round number
+    // without re-threading it through every resolver call. Updated at the
+    // top of each round-loop iteration.
+    let currentRound = 0;
 
     // PAR-18 — fan out turns and events to caller-supplied sinks as they
     // happen. We swallow errors so a misbehaving sink (e.g. a disconnected
@@ -799,6 +825,34 @@ export class DeliberationEngine {
       }
     };
 
+    // PAR-25 — every agent the resolver constructs receives this callback as
+    // its `AgentRuntimeOptions.onProviderFailover`. When the agent retries on
+    // the configured fallback adapter, it fires the callback once; we push a
+    // `provider.failover` SystemEvent through the standard `pushEvent`
+    // pipeline so SSE subscribers and the persisted `events[]` array see the
+    // failover in the same chronological order as round/synth markers. The
+    // round is taken from `currentRound` (updated at each round-loop entry)
+    // so the event lands on the round in which the underlying adapter call
+    // actually fired, not the round when the engine started.
+    const handleProviderFailover = (info: ProviderFailoverInfo): void => {
+      pushEvent({
+        round: currentRound,
+        kind: 'provider.failover',
+        message:
+          `${info.neurotype} failover: ${info.primary} → ${info.fallback} (${info.error})`,
+        timestamp: new Date().toISOString(),
+        data: {
+          neurotype: info.neurotype,
+          primary: info.primary,
+          fallback: info.fallback,
+          error: info.error,
+        },
+      });
+    };
+    const resolverContext: NeurotypeResolverContext = {
+      onProviderFailover: handleProviderFailover,
+    };
+
     // Log every optional-flagged step exactly once at engine start so the
     // information surfaces even when we terminate before that step runs.
     for (const step of topology.activePreset.steps) {
@@ -812,6 +866,10 @@ export class DeliberationEngine {
 
     roundLoop: for (let round = 1; round <= maxRounds; round++) {
       totalRounds = round;
+      // PAR-25: keep `currentRound` aligned with the round-loop counter so
+      // the failover-event helper stamps the correct round on any
+      // `provider.failover` event the agents fire during this iteration.
+      currentRound = round;
 
       // PAR-10: round_start lifecycle marker. Emitted before any agent runs
       // so the Observability panel can render a round divider even when the
@@ -834,7 +892,11 @@ export class DeliberationEngine {
         // regression test pins.
         if (round > 1 && step.neurotype === 'proposer') continue;
 
-        const agent = resolveNeurotype(step);
+        // PAR-25: pass the resolver context so the resolver can wire the
+        // engine's `provider.failover` push fn into each agent's
+        // `AgentRuntimeOptions.onProviderFailover`. Resolvers from older
+        // call sites that ignore the second arg keep working.
+        const agent = resolveNeurotype(step, resolverContext);
         const result = await agent.generate(blackboard);
         recordTurn(
           blackboard,
@@ -876,9 +938,14 @@ export class DeliberationEngine {
           timeoutMs?: number;
           logger?: TopologyRuntimeLogger;
           synthConfidenceByRound?: ReadonlyMap<number, number>;
+          resolverContext?: NeurotypeResolverContext;
         } = {
           logger,
           synthConfidenceByRound,
+          // PAR-25: thread the resolver context through to the parallel
+          // executor so siblings constructed inside the block share the
+          // same failover wiring as sequential steps.
+          resolverContext,
         };
         if (config.parallelBlockTimeoutMs !== undefined) {
           parallelOpts.timeoutMs = config.parallelBlockTimeoutMs;

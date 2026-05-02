@@ -1,6 +1,5 @@
-import type { ModelAdapter } from '../adapters/base.js';
 import type { AdapterMeta, Blackboard, SynthesizerMeta, TurnMeta } from '../types.js';
-import type { Agent, AgentResult } from './base.js';
+import { AgentBase, type AgentResult } from './base.js';
 import { buildPromptHeader, enforceWordCap } from './utils.js';
 
 const SYSTEM_PROMPT = [
@@ -155,15 +154,10 @@ function failClosed(raw: string): ParsedSynthesizerJson {
   };
 }
 
-export class SynthesizerAgent implements Agent {
+export class SynthesizerAgent extends AgentBase {
   readonly role = 'Synthesizer';
   readonly neurotype = 'integrative';
   readonly posture = 'reconciliation';
-  readonly modelName: string;
-
-  constructor(private readonly adapter: ModelAdapter) {
-    this.modelName = adapter.modelName;
-  }
 
   async generate(blackboard: Blackboard): Promise<SynthesizerResult> {
     const recentTurns = blackboard.turns
@@ -189,8 +183,12 @@ export class SynthesizerAgent implements Agent {
     }
     userPrompt += REINFORCEMENT;
 
-    // First attempt.
-    const raw = await this.adapter.generate(userPrompt, SYSTEM_PROMPT);
+    // First attempt. PAR-25: failover-wrapped. A primary
+    // ModelConnectionError is retried once on the fallback adapter (when
+    // configured) BEFORE the synthesizer's own JSON-parse-retry path
+    // engages — failover is a connection-layer concern; JSON-parse retry
+    // is a content-layer concern, and the two compose without conflict.
+    const raw = await this.generateWithFailover(userPrompt, SYSTEM_PROMPT);
     const parsed = extractJsonObject(raw.content);
     if (parsed !== null) {
       // PAR-23: thread the adapter's reported meta from the call that
@@ -211,7 +209,10 @@ export class SynthesizerAgent implements Agent {
       RETRY_INSTRUCTION,
     ].join('\n');
 
-    const retryRaw = await this.adapter.generate(retryPrompt, SYSTEM_PROMPT);
+    // PAR-25: the JSON-parse-retry call is also failover-wrapped — a
+    // connection failure on the second adapter call deserves the same
+    // treatment as the first.
+    const retryRaw = await this.generateWithFailover(retryPrompt, SYSTEM_PROMPT);
     const retryParsed = extractJsonObject(retryRaw.content);
     if (retryParsed !== null) {
       // PAR-23: when the retry succeeds, attribute meta to the retry call

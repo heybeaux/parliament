@@ -8,6 +8,7 @@ import {
   DeliberationEngine,
   ModelConnectionError,
   TopologyValidationError,
+  buildFallbackAdapter,
   createAdapter,
   loadConfig,
   loadTopologyConfig,
@@ -21,9 +22,11 @@ import {
 } from '@parliament/core';
 import type {
   Agent,
+  AgentRuntimeOptions,
   DeliberationResult,
   DeliberationSource,
   DeliberationStatus,
+  NeurotypeResolverContext,
   SystemEvent,
   TopologyConfig,
   TopologyDeliberationConfig,
@@ -226,7 +229,17 @@ function buildTopologyDeliberationConfig(
   // Built-in neurotype IDs (proposer, skeptic, historian, ...) come from
   // BUILTIN_AGENT_REGISTRY; user-defined neurotypes fall back to
   // StubNeurotypeAgent until per-neurotype implementations land.
-  const resolveNeurotype = (step: TopologyStep): Agent => {
+  //
+  // PAR-25 — when the neurotype's TOML entry has `fallback_provider` set,
+  // we construct a fallback adapter via `buildFallbackAdapter` and forward
+  // it (plus the engine's `onProviderFailover` callback from `context`)
+  // into the agent's `AgentRuntimeOptions`. Resolvers that don't pass a
+  // context (older test fixtures) get failover-disabled agents — the
+  // primary adapter behaviour is unchanged.
+  const resolveNeurotype = (
+    step: TopologyStep,
+    context?: NeurotypeResolverContext,
+  ): Agent => {
     const neurotype = config.neurotypes[step.neurotype];
     if (!neurotype) {
       throw new Error(
@@ -234,10 +247,18 @@ function buildTopologyDeliberationConfig(
       );
     }
     const adapter = createAdapter(neurotype.model, neurotype.provider);
-    if (isBuiltinNeurotype(step.neurotype)) {
-      return createBuiltinAgent(step.neurotype, adapter);
+    const fallbackAdapter = buildFallbackAdapter(neurotype, createAdapter);
+    const options: AgentRuntimeOptions = {};
+    if (fallbackAdapter !== undefined) {
+      options.fallbackAdapter = fallbackAdapter;
     }
-    return new StubNeurotypeAgent(step.id, step.neurotype, adapter);
+    if (context?.onProviderFailover !== undefined) {
+      options.onProviderFailover = context.onProviderFailover;
+    }
+    if (isBuiltinNeurotype(step.neurotype)) {
+      return createBuiltinAgent(step.neurotype, adapter, options);
+    }
+    return new StubNeurotypeAgent(step.id, step.neurotype, adapter, options);
   };
 
   const out: TopologyDeliberationConfig = {

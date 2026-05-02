@@ -1,20 +1,14 @@
-import type { ModelAdapter } from '../adapters/base.js';
 import type { Blackboard } from '../types.js';
-import type { Agent, AgentResult } from './base.js';
+import { AgentBase, type AgentResult } from './base.js';
 import { buildPromptHeader, capWithMeta } from './utils.js';
 
 const SYSTEM_PROMPT =
   'You are a structured reasoner. Propose a clear, well-reasoned initial response to the topic. Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists.';
 
-export class ProposerAgent implements Agent {
+export class ProposerAgent extends AgentBase {
   readonly role = 'Proposer';
   readonly neurotype = 'structured';
   readonly posture = 'structured-reasoner';
-  readonly modelName: string;
-
-  constructor(private readonly adapter: ModelAdapter) {
-    this.modelName = adapter.modelName;
-  }
 
   async generate(blackboard: Blackboard): Promise<AgentResult> {
     const recentTurns = blackboard.turns
@@ -34,7 +28,10 @@ export class ProposerAgent implements Agent {
     // PAR-23: `capWithMeta` forwards adapter telemetry (latency, tokens,
     // cost, provider) onto the AgentResult so the engine can persist it
     // onto Turn.meta. The 200-word cap is applied to the prose only.
-    const raw = await this.adapter.generate(userPrompt, SYSTEM_PROMPT);
+    // PAR-25: route the call through `generateWithFailover` so a primary
+    // `ModelConnectionError` triggers a single fallback retry when the
+    // engine has wired one.
+    const raw = await this.generateWithFailover(userPrompt, SYSTEM_PROMPT);
     return capWithMeta(raw);
   }
 }

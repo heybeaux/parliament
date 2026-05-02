@@ -1,4 +1,10 @@
-export type { Agent, AgentResult } from './base.js';
+export type {
+  Agent,
+  AgentResult,
+  AgentRuntimeOptions,
+  ProviderFailoverInfo,
+} from './base.js';
+export { AgentBase } from './base.js';
 export { ProposerAgent } from './proposer.js';
 export { SkepticAgent } from './skeptic.js';
 export type { SynthesizerResult } from './synthesizer.js';

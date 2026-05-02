@@ -1,6 +1,5 @@
-import type { ModelAdapter } from '../adapters/base.js';
 import type { Blackboard } from '../types.js';
-import type { Agent, AgentResult } from './base.js';
+import { AgentBase, type AgentResult } from './base.js';
 import { buildPromptHeader, capWithMeta } from './utils.js';
 
 export const STEELMANNER_SYSTEM_PROMPT =
@@ -11,15 +10,10 @@ export const STEELMANNER_SYSTEM_PROMPT =
   'Begin your turn with the literal phrase "the strongest opposing case is" so the position you are constructing is unambiguous in the transcript. ' +
   'Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists.';
 
-export class SteelmannerAgent implements Agent {
+export class SteelmannerAgent extends AgentBase {
   readonly role = 'Steelmanner';
   readonly neurotype = 'steelmanner';
   readonly posture = 'charitable';
-  readonly modelName: string;
-
-  constructor(private readonly adapter: ModelAdapter) {
-    this.modelName = adapter.modelName;
-  }
 
   async generate(blackboard: Blackboard): Promise<AgentResult> {
     const recentTurns = blackboard.turns
@@ -37,7 +31,8 @@ export class SteelmannerAgent implements Agent {
       : header;
 
     // PAR-23: forward adapter telemetry onto the returned AgentResult.
-    const raw = await this.adapter.generate(userPrompt, STEELMANNER_SYSTEM_PROMPT);
+    // PAR-25: failover-wrapped call.
+    const raw = await this.generateWithFailover(userPrompt, STEELMANNER_SYSTEM_PROMPT);
     return capWithMeta(raw);
   }
 }

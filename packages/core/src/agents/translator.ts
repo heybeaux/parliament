@@ -1,6 +1,5 @@
-import type { ModelAdapter } from '../adapters/base.js';
 import type { Blackboard } from '../types.js';
-import type { Agent, AgentResult } from './base.js';
+import { AgentBase, type AgentResult } from './base.js';
 import { buildPromptHeader, capWithMeta } from './utils.js';
 
 export const TRANSLATOR_SYSTEM_PROMPT =
@@ -11,15 +10,10 @@ export const TRANSLATOR_SYSTEM_PROMPT =
   'If the recent discussion genuinely contains no obvious implicit assumptions — for example, a single neutral procedural statement — open instead with "in plain language" and deliver only the compression. ' +
   'Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists.';
 
-export class TranslatorAgent implements Agent {
+export class TranslatorAgent extends AgentBase {
   readonly role = 'Translator';
   readonly neurotype = 'translator';
   readonly posture = 'assumption-surfacing';
-  readonly modelName: string;
-
-  constructor(private readonly adapter: ModelAdapter) {
-    this.modelName = adapter.modelName;
-  }
 
   async generate(blackboard: Blackboard): Promise<AgentResult> {
     const recentTurns = blackboard.turns
@@ -37,7 +31,8 @@ export class TranslatorAgent implements Agent {
       : header;
 
     // PAR-23: forward adapter telemetry onto the returned AgentResult.
-    const raw = await this.adapter.generate(userPrompt, TRANSLATOR_SYSTEM_PROMPT);
+    // PAR-25: failover-wrapped call.
+    const raw = await this.generateWithFailover(userPrompt, TRANSLATOR_SYSTEM_PROMPT);
     return capWithMeta(raw);
   }
 }

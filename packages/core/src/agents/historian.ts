@@ -1,6 +1,5 @@
-import type { ModelAdapter } from '../adapters/base.js';
 import type { Blackboard } from '../types.js';
-import type { Agent, AgentResult } from './base.js';
+import { AgentBase, type AgentResult } from './base.js';
 import { buildPromptHeader, capWithMeta } from './utils.js';
 
 export const HISTORIAN_SYSTEM_PROMPT =
@@ -9,15 +8,10 @@ export const HISTORIAN_SYSTEM_PROMPT =
   'If you genuinely cannot identify a relevant historical analogue, say so explicitly with the words "no clear historical precedent" rather than inventing one. ' +
   'Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists.';
 
-export class HistorianAgent implements Agent {
+export class HistorianAgent extends AgentBase {
   readonly role = 'Historian';
   readonly neurotype = 'historian';
   readonly posture = 'precedent-first';
-  readonly modelName: string;
-
-  constructor(private readonly adapter: ModelAdapter) {
-    this.modelName = adapter.modelName;
-  }
 
   async generate(blackboard: Blackboard): Promise<AgentResult> {
     const recentTurns = blackboard.turns
@@ -35,7 +29,8 @@ export class HistorianAgent implements Agent {
       : header;
 
     // PAR-23: forward adapter telemetry onto the returned AgentResult.
-    const raw = await this.adapter.generate(userPrompt, HISTORIAN_SYSTEM_PROMPT);
+    // PAR-25: failover-wrapped call.
+    const raw = await this.generateWithFailover(userPrompt, HISTORIAN_SYSTEM_PROMPT);
     return capWithMeta(raw);
   }
 }

@@ -1,6 +1,5 @@
-import type { ModelAdapter } from '../adapters/base.js';
 import type { Blackboard } from '../types.js';
-import type { Agent, AgentResult } from './base.js';
+import { AgentBase, type AgentResult } from './base.js';
 import { buildPromptHeader, capWithMeta } from './utils.js';
 
 export const EMPIRICIST_SYSTEM_PROMPT =
@@ -22,15 +21,10 @@ export const EMPIRICIST_SYSTEM_PROMPT =
 export const EMPIRICIST_SOURCES_MODE_PREFIX =
   'Evidence-backed claim mode: structured sources are attached. When an empirical claim has support in those sources, cite the relevant source id in `[brackets]` rather than issuing a "demand evidence" call; reserve "demand evidence" for empirical claims the supplied sources do NOT cover.';
 
-export class EmpiricistAgent implements Agent {
+export class EmpiricistAgent extends AgentBase {
   readonly role = 'Empiricist';
   readonly neurotype = 'empiricist';
   readonly posture = 'evidence-first';
-  readonly modelName: string;
-
-  constructor(private readonly adapter: ModelAdapter) {
-    this.modelName = adapter.modelName;
-  }
 
   async generate(blackboard: Blackboard): Promise<AgentResult> {
     const recentTurns = blackboard.turns
@@ -58,7 +52,8 @@ export class EmpiricistAgent implements Agent {
       : EMPIRICIST_SYSTEM_PROMPT;
 
     // PAR-23: forward adapter telemetry onto the returned AgentResult.
-    const raw = await this.adapter.generate(userPrompt, systemPrompt);
+    // PAR-25: failover-wrapped call.
+    const raw = await this.generateWithFailover(userPrompt, systemPrompt);
     return capWithMeta(raw);
   }
 }

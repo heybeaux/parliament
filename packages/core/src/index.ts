@@ -37,6 +37,7 @@ export {
   getNeurotype,
   resetConfigCache,
   buildAgentsFromConfig,
+  buildFallbackAdapter,
   DEFAULT_PARLIAMENT_DEFAULTS,
 } from './config.js';
 
@@ -52,7 +53,15 @@ export {
 export type { AgentDefinition, DebateOptions } from './debate.js';
 export { runDebate } from './debate.js';
 
-export type { Agent, AgentResult, SynthesizerResult, SentryResult } from './agents/index.js';
+export type {
+  Agent,
+  AgentResult,
+  AgentRuntimeOptions,
+  ProviderFailoverInfo,
+  SynthesizerResult,
+  SentryResult,
+} from './agents/index.js';
+export { AgentBase } from './agents/index.js';
 export {
   ProposerAgent,
   SkepticAgent,
@@ -78,6 +87,7 @@ export type {
   DeliberationConfig,
   TopologyDeliberationConfig,
   NeurotypeResolver,
+  NeurotypeResolverContext,
   TopologyRuntimeLogger,
 } from './engine.js';
 export { DeliberationEngine } from './engine.js';

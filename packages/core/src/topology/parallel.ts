@@ -27,7 +27,11 @@
 import { randomUUID } from 'node:crypto';
 import type { Agent } from '../agents/base.js';
 import type { AdapterMeta, Blackboard, Conflict, Turn } from '../types.js';
-import type { NeurotypeResolver, TopologyRuntimeLogger } from '../engine.js';
+import type {
+  NeurotypeResolver,
+  NeurotypeResolverContext,
+  TopologyRuntimeLogger,
+} from '../engine.js';
 import type { TopologyStep } from './types.js';
 
 /** Result of executing a parallel block. The caller appends these in order. */
@@ -57,6 +61,15 @@ export interface ExecuteParallelBlockOptions {
    * with existing tests that don't exercise the field.
    */
   synthConfidenceByRound?: ReadonlyMap<number, number>;
+  /**
+   * PAR-25 — opaque resolver context the engine passes through to the
+   * caller-supplied `NeurotypeResolver`. Carries the engine's
+   * `provider.failover` event push fn so siblings constructed inside the
+   * parallel block share the same observability wire as sequential steps.
+   * Optional / additive — parallel-only tests that don't exercise failover
+   * pass nothing and behaviour is unchanged.
+   */
+  resolverContext?: NeurotypeResolverContext;
 }
 
 /**
@@ -136,6 +149,7 @@ async function runSibling(
   step: TopologyStep,
   snapshot: Blackboard,
   resolveNeurotype: NeurotypeResolver,
+  resolverContext: NeurotypeResolverContext | undefined,
 ): Promise<{
   step: TopologyStep;
   agent: Agent;
@@ -151,7 +165,11 @@ async function runSibling(
   // re-clone here to keep the invariant unconditional.
   const ownView = snapshotBlackboard(snapshot);
   const startedAt = Date.now();
-  const agent = resolveNeurotype(step);
+  // PAR-25: forward the resolver context (carrying the engine's
+  // `provider.failover` push fn) so siblings constructed inside the block
+  // see the same wiring as sequential steps. Resolvers that ignore the
+  // second arg behave exactly as before.
+  const agent = resolveNeurotype(step, resolverContext);
   const result = await agent.generate(ownView);
   const elapsedMs = Date.now() - startedAt;
 
@@ -192,7 +210,7 @@ export async function executeParallelBlock(
   round: number,
   options: ExecuteParallelBlockOptions = {},
 ): Promise<ParallelBlockResult> {
-  const { timeoutMs, logger, synthConfidenceByRound } = options;
+  const { timeoutMs, logger, synthConfidenceByRound, resolverContext } = options;
   const parallelGroup = randomUUID();
 
   if (steps.length === 0) {
@@ -206,7 +224,7 @@ export async function executeParallelBlock(
   // Track per-step settlement so that on timeout we can name the offenders.
   const settled = new Set<string>();
   const tasks = steps.map((step) =>
-    runSibling(step, snapshot, resolveNeurotype).then(
+    runSibling(step, snapshot, resolveNeurotype, resolverContext).then(
       (res) => {
         settled.add(step.id);
         return { kind: 'ok' as const, value: res };
