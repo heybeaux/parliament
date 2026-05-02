@@ -29,6 +29,46 @@ function groupIntoRounds(turns: Turn[]): RoundGroup[] {
     .map(([round, ts]) => ({ round, turns: ts }));
 }
 
+/**
+ * A contiguous run of turns within a single round. Either:
+ *  - `parallel_group === null` — sequential turns, rendered in the existing
+ *    responsive grid. A round with no parallel siblings collapses to a single
+ *    sequential segment so legacy transcripts render byte-identically to the
+ *    pre-PAR-4 layout.
+ *  - `parallel_group === <string>` — siblings produced inside the same
+ *    `parallel_steps` block (Stage 4 / Jury preset). Rendered side-by-side as a
+ *    horizontal flex row so the parallelism is visually apparent.
+ */
+interface TurnSegment {
+  parallel_group: string | null;
+  turns: Turn[];
+}
+
+/**
+ * Walk a single round's turns and split them into segments by `parallel_group`.
+ * Consecutive turns that share the same non-null `parallel_group` collapse
+ * into one parallel segment; everything else accumulates into sequential
+ * segments. Order is preserved verbatim — the runtime guarantees siblings
+ * are recorded in registration order, and we never sort.
+ */
+function segmentRoundTurns(turns: Turn[]): TurnSegment[] {
+  const segments: TurnSegment[] = [];
+  for (const t of turns) {
+    const group = t.parallel_group ?? null;
+    const last = segments[segments.length - 1];
+    if (group !== null && last && last.parallel_group === group) {
+      last.turns.push(t);
+      continue;
+    }
+    if (group === null && last && last.parallel_group === null) {
+      last.turns.push(t);
+      continue;
+    }
+    segments.push({ parallel_group: group, turns: [t] });
+  }
+  return segments;
+}
+
 function formatElapsed(sec: number): string {
   const m = Math.floor(sec / 60);
   const s = sec % 60;
@@ -248,29 +288,87 @@ export function Timeline({ result, running, elapsedSec, topic }: Props) {
 
       {/* Rounds */}
       <div className="space-y-8">
-        {rounds.map((group, idx) => (
-          <motion.div
-            key={group.round}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: idx * 0.1 }}
-          >
-            {/* Round header */}
-            <div className="mb-4 flex items-center gap-3">
-              <span className="flex h-6 items-center rounded-md bg-white/[0.04] px-2.5 font-mono text-2xs font-semibold uppercase tracking-widest text-zinc-500 ring-1 ring-white/[0.06]">
-                Round {group.round}
-              </span>
-              <div className="h-px flex-1 bg-gradient-to-r from-white/[0.06] to-transparent" />
-            </div>
+        {rounds.map((group, idx) => {
+          const segments = segmentRoundTurns(group.turns);
+          // Legacy / sequential rounds: single sequential segment. Render with
+          // the existing responsive grid so transcripts that pre-date Stage 4
+          // (or any preset that never declares `parallel_steps`) look exactly
+          // like before.
+          const hasParallel = segments.some((s) => s.parallel_group !== null);
 
-            {/* Turn cards grid */}
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {group.turns.map((t, i) => (
-                <TurnCard key={`${group.round}-${i}`} turn={t} index={i} />
-              ))}
-            </div>
-          </motion.div>
-        ))}
+          return (
+            <motion.div
+              key={group.round}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: idx * 0.1 }}
+            >
+              {/* Round header */}
+              <div className="mb-4 flex items-center gap-3">
+                <span className="flex h-6 items-center rounded-md bg-white/[0.04] px-2.5 font-mono text-2xs font-semibold uppercase tracking-widest text-zinc-500 ring-1 ring-white/[0.06]">
+                  Round {group.round}
+                </span>
+                <div className="h-px flex-1 bg-gradient-to-r from-white/[0.06] to-transparent" />
+              </div>
+
+              {!hasParallel ? (
+                // Pre-PAR-4 layout — preserved verbatim.
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {group.turns.map((t, i) => (
+                    <TurnCard key={`${group.round}-${i}`} turn={t} index={i} />
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  {segments.map((segment, segIdx) => {
+                    if (segment.parallel_group === null) {
+                      return (
+                        <div
+                          key={`seq-${group.round}-${segIdx}`}
+                          className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"
+                        >
+                          {segment.turns.map((t, i) => (
+                            <TurnCard
+                              key={`${group.round}-${segIdx}-${i}`}
+                              turn={t}
+                              index={i}
+                            />
+                          ))}
+                        </div>
+                      );
+                    }
+                    return (
+                      <div
+                        key={`par-${group.round}-${segment.parallel_group}`}
+                        data-testid="parallel-row"
+                        data-parallel-group={segment.parallel_group}
+                        className="rounded-xl bg-white/[0.015] p-3 ring-1 ring-white/[0.04]"
+                      >
+                        <div className="mb-2 flex items-center gap-2 px-1">
+                          <span className="rounded-md bg-violet-500/10 px-2 py-0.5 text-2xs font-semibold uppercase tracking-widest text-violet-300/90 ring-1 ring-violet-400/20">
+                            Parallel block
+                          </span>
+                          <span className="text-2xs text-zinc-500">
+                            {segment.turns.length} siblings
+                          </span>
+                        </div>
+                        <div className="flex flex-col gap-4 md:flex-row md:items-stretch md:[&>*]:flex-1">
+                          {segment.turns.map((t, i) => (
+                            <TurnCard
+                              key={`${group.round}-${segment.parallel_group}-${i}`}
+                              turn={t}
+                              index={i}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </motion.div>
+          );
+        })}
       </div>
 
       {/* Conflicts */}

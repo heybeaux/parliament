@@ -42,6 +42,15 @@ export interface Turn {
    * may omit the field entirely (the badge hides in that case).
    */
   convergence_delta?: number | null;
+  /**
+   * Group identifier shared by all sibling turns produced inside the same
+   * `parallel_steps` block (Stage 4 — Jury preset). Sequential turns either
+   * omit this field or set it to `null`. Mirrors the engine `Turn` type in
+   * `packages/core/src/types.ts`. The Timeline groups consecutive turns that
+   * share this id into a single sibling row. Optional / additive — pre-Stage-4
+   * transcripts omit it and continue rendering as a vertical stack.
+   */
+  parallel_group?: string | null;
 }
 
 export interface Conflict {
