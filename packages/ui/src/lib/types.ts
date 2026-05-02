@@ -28,6 +28,14 @@ export interface SplitSummary {
 
 export interface DeliberationResult {
   topic: string;
+  /**
+   * Optional free-form prose context the user supplied alongside the topic
+   * (PAR-16). Echoed back unchanged on `POST /deliberate` and persisted on
+   * the deliberation record so `GET /deliberate/:id` round-trips it.
+   * Old server builds omit this field; UI consumers should treat it as
+   * optional and render only when present.
+   */
+  context?: string;
   turns: Turn[];
   conflicts: Conflict[];
   residueScore: number;

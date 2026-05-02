@@ -3,7 +3,14 @@ import { motion } from 'framer-motion';
 import { PresetPicker, FALLBACK_DEFAULT } from './PresetPicker';
 
 interface Props {
-  onSubmit: (topic: string, preset: string) => void;
+  /**
+   * Submit callback. The third argument is the optional PAR-16 prose context
+   * — `undefined` when the textarea is empty (or never expanded), otherwise
+   * the trimmed contents. Older callers that only handle (topic, preset)
+   * keep working unchanged because the parameter is optional in the
+   * function-type sense (extra args are ignored in JS).
+   */
+  onSubmit: (topic: string, preset: string, context?: string) => void;
   disabled: boolean;
 }
 
@@ -11,13 +18,26 @@ export function NewDeliberation({ onSubmit, disabled }: Props) {
   const [topic, setTopic] = useState('');
   const [preset, setPreset] = useState<string>(FALLBACK_DEFAULT);
   const [focused, setFocused] = useState(false);
+  // PAR-16: optional prose context. Mirrors the PresetPicker pattern —
+  // collapsible-by-default, controlled, empty-string when unused. We model
+  // both an `expanded` flag and a `context` string so re-collapsing the
+  // panel does not nuke whatever the user has typed.
+  const [contextExpanded, setContextExpanded] = useState(false);
+  const [context, setContext] = useState('');
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = topic.trim();
     if (!trimmed || disabled) return;
-    onSubmit(trimmed, preset);
+    const trimmedContext = context.trim();
+    onSubmit(
+      trimmed,
+      preset,
+      trimmedContext.length > 0 ? trimmedContext : undefined,
+    );
     setTopic('');
+    setContext('');
+    setContextExpanded(false);
   }
 
   return (
@@ -63,6 +83,7 @@ export function NewDeliberation({ onSubmit, disabled }: Props) {
                 className="w-full rounded-xl border-0 bg-white/[0.03] px-4 py-3 text-sm text-zinc-100 placeholder-zinc-500/70 outline-none transition-colors focus:bg-white/[0.05] disabled:opacity-40"
               />
             </div>
+            {/* PAR-16: collapsible context disclosure handled below. */}
 
             <button
               type="submit"
@@ -92,6 +113,69 @@ export function NewDeliberation({ onSubmit, disabled }: Props) {
                 )}
               </span>
             </button>
+          </div>
+
+          {/*
+            PAR-16: optional collapsible context.
+
+            Mirrors the PresetPicker pattern (controlled component, included
+            in submit when non-empty). Default collapsed so the form stays
+            uncluttered for the simple-question case; users with a real brief
+            click "Add context" and paste it into the textarea. The trimmed
+            contents are forwarded verbatim by `handleSubmit` to the engine.
+          */}
+          <div className="mt-3">
+            {!contextExpanded ? (
+              <button
+                type="button"
+                onClick={() => setContextExpanded(true)}
+                disabled={disabled}
+                aria-expanded={false}
+                aria-controls="deliberation-context"
+                className="flex items-center gap-2 rounded-lg px-2 py-1 text-xs font-medium uppercase tracking-widest text-zinc-400 transition-colors hover:text-zinc-200 disabled:opacity-40"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round"/>
+                </svg>
+                Add context
+              </button>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <label
+                    htmlFor="deliberation-context"
+                    className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-zinc-400"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="text-parliament-400" aria-hidden="true">
+                      <path d="M4 6h16M4 12h10M4 18h7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                    </svg>
+                    Context
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setContextExpanded(false)}
+                    aria-expanded={true}
+                    aria-controls="deliberation-context"
+                    className="text-2xs uppercase tracking-wider text-zinc-500 transition-colors hover:text-zinc-200"
+                  >
+                    Hide
+                  </button>
+                </div>
+                <textarea
+                  id="deliberation-context"
+                  aria-label="Deliberation context"
+                  value={context}
+                  onChange={(e) => setContext(e.target.value)}
+                  disabled={disabled}
+                  rows={5}
+                  placeholder="Paste a background brief, design doc excerpt, or system description here. Each agent sees it under a stable '## Background' heading."
+                  className="w-full resize-y rounded-xl border-0 bg-white/[0.03] px-4 py-3 text-sm text-zinc-100 placeholder-zinc-500/70 outline-none ring-1 ring-white/[0.06] transition-colors focus:bg-white/[0.05] focus:ring-parliament-400/30 disabled:opacity-40"
+                />
+                <p className="text-2xs text-zinc-500">
+                  Optional. The legacy inline <code>CONTEXT:</code> marker in the topic still works but is deprecated.
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>

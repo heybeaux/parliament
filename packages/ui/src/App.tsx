@@ -35,13 +35,15 @@ export default function App() {
     };
   }, [running]);
 
-  async function handleSubmit(t: string, preset: string) {
+  async function handleSubmit(t: string, preset: string, context?: string) {
     setError(null);
     setResult(null);
     setTopic(t);
     setRunning(true);
     try {
-      const r = await startDeliberation(t, { preset });
+      // PAR-16: forward optional prose context. `startDeliberation` strips
+      // empty / whitespace-only values so we don't have to here.
+      const r = await startDeliberation(t, { preset, context });
       setResult(r);
       setRefreshKey((k) => k + 1);
     } catch (err) {
