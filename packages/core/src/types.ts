@@ -103,6 +103,25 @@ export interface Turn {
   /** Populated by SynthesizerAgent only — structured signals next to the prose. */
   meta?: SynthesizerMeta;
   /**
+   * PAR-19 — per-round residue value, populated ONLY on synthesizer turns at
+   * the end of each round. Carries the same weighted-fraction-of-unresolved-
+   * conflicts signal as `DeliberationResult.residueScore`, but evaluated
+   * against the blackboard's conflicts state immediately after the
+   * synthesizer fires for that round. Always in `[0, 1]`.
+   *
+   * The Stage 3 Observability panel binds its "Disagreement remaining"
+   * per-round bar chart directly to this field (grouping turns by round and
+   * reading the synthesizer turn's value), replacing the PAR-5 placeholder
+   * that derived a proxy from `|convergence_delta|`.
+   *
+   * Optional / additive: only synthesizer turns populate it; all other turn
+   * types leave it `undefined`. Pre-PAR-19 stored transcripts also omit it
+   * — UI consumers must fall back to the legacy proxy in that case so old
+   * deliberations keep rendering. The end-of-run scalar `residueScore` on
+   * `DeliberationResult` is preserved unchanged.
+   */
+  residue_remaining?: number;
+  /**
    * Group identifier shared by all sibling turns produced inside the same
    * `parallel_steps` block. Sequential turns either omit this field or set it
    * to `null`. Stage 4 (add-jury-parallel) — see

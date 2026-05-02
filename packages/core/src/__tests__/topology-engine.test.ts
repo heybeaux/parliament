@@ -862,3 +862,68 @@ active = "debate"
     expect(termination.data).toMatchObject({ reason: 'consensus' });
   });
 });
+
+// ---------------------------------------------------------------------------
+// PAR-19 — per-round residue series on the topology path.
+//
+// Mirrors the engine.test.ts coverage for the topology runtime: every
+// synthesizer turn must carry a `residue_remaining` value bounded in [0, 1]
+// and the end-of-run scalar must equal the final synthesizer turn's value.
+// ---------------------------------------------------------------------------
+
+describe('runTopology — PAR-19 per-round residue', () => {
+  it('stamps residue_remaining on every synthesizer turn (Debate preset)', async () => {
+    const topology = buildTopology(`
+[topology]
+active = "debate"
+`);
+    // Skeptic appends a fresh unresolved conflict each round so the residue
+    // series carries a non-zero signal.
+    let callCount = 0;
+    const skeptic: Agent = {
+      role: 'Skeptic',
+      neurotype: 'skeptic',
+      modelName: 'mock-skeptic',
+      generate: vi.fn().mockImplementation(async (board: Blackboard) => {
+        callCount++;
+        board.conflicts.push({
+          between: ['Skeptic', 'Proposer'],
+          description: `conflict ${callCount}`,
+          resolved: false,
+        });
+        return { content: `critique ${callCount}`, truncated: false };
+      }),
+    };
+    const proposer = makeAgent('Proposer', 'proposer', 'opening pitch');
+
+    const config = makeBaseConfig(
+      topology,
+      { proposer, skeptic },
+      {
+        maxRounds: 3,
+        // Below threshold so loop exhausts max_rounds and we get a 3-round
+        // residue series.
+        synthesizer: makeSynth(0.3, 'still working it out', { consensus: false }),
+      },
+    );
+
+    const engine = new DeliberationEngine();
+    const result = await engine.runTopology('topology residue', config);
+
+    const synthTurns = result.turns.filter((t) => t.agent === 'Synthesizer');
+    expect(synthTurns).toHaveLength(3);
+    for (const t of synthTurns) {
+      expect(typeof t.residue_remaining).toBe('number');
+      expect(t.residue_remaining).toBeGreaterThanOrEqual(0);
+      expect(t.residue_remaining).toBeLessThanOrEqual(1);
+    }
+
+    // End-of-run scalar matches the last synthesizer turn's per-round value.
+    expect(result.residueScore).toBe(synthTurns[synthTurns.length - 1]!.residue_remaining);
+
+    // Non-synthesizer turns leave the field undefined.
+    for (const t of result.turns.filter((t) => t.agent !== 'Synthesizer')) {
+      expect(t.residue_remaining).toBeUndefined();
+    }
+  });
+});

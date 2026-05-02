@@ -63,6 +63,21 @@ export interface Turn {
    * transcripts omit it and continue rendering as a vertical stack.
    */
   parallel_group?: string | null;
+  /**
+   * PAR-19 — per-round residue value, populated ONLY on synthesizer turns at
+   * the end of each round. Mirrors the engine `Turn.residue_remaining` field
+   * in `packages/core/src/types.ts`. Always in `[0, 1]`.
+   *
+   * The Stage 3 Observability panel's "Disagreement remaining" per-round bar
+   * chart binds to this field (grouping turns by round and reading the
+   * synthesizer turn's value), replacing the PAR-5 placeholder that derived
+   * a proxy from `|convergence_delta|`.
+   *
+   * Optional / additive — pre-PAR-19 stored transcripts (and non-synthesizer
+   * turns) omit this field; UI consumers must fall back to the legacy proxy
+   * when the entire transcript lacks the signal.
+   */
+  residue_remaining?: number;
 }
 
 /**

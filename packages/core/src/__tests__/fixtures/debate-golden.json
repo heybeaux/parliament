@@ -10,7 +10,7 @@
       "round preserved (load-bearing — round-1-only Proposer, per-round Skeptic/Synthesizer)",
       "model preserved (assertion includes per-turn metadata)"
     ],
-    "what_this_pins": "DeliberationEngine.runTopology() with [topology].active = 'debate' MUST produce a Turn[] equal to this fixture (after the same timestamp normalization). The fixture is the regression contract for the Debate preset across the topology refactor. PAR-10: each turn additionally carries model_name (echo of model), neurotype_posture (posture or neurotype fallback), and convergence_delta (synth(R-1) - synth(R-2), 0 when not measurable). The legacy `model`, `neurotype`, and pre-PAR-10 fields are preserved unchanged."
+    "what_this_pins": "DeliberationEngine.runTopology() with [topology].active = 'debate' MUST produce a Turn[] equal to this fixture (after the same timestamp normalization). The fixture is the regression contract for the Debate preset across the topology refactor. PAR-10: each turn additionally carries model_name (echo of model), neurotype_posture (posture or neurotype fallback), and convergence_delta (synth(R-1) - synth(R-2), 0 when not measurable). PAR-19: synthesizer turns additionally carry residue_remaining (per-round residue at end of round, in [0, 1]) — the deterministic stubs in this test don't push any conflicts onto the blackboard, so both synthesizer turns record 0 here. The legacy `model`, `neurotype`, and pre-PAR-10 fields are preserved unchanged."
   },
   "topic": "Should the team adopt feature flags for every new endpoint?",
   "turns": [
@@ -54,7 +54,8 @@
         "consensus": false,
         "agreed": ["flags help risky rollouts"],
         "unresolved": ["scope: every endpoint vs subset"]
-      }
+      },
+      "residue_remaining": 0
     },
     {
       "agent": "Skeptic",
@@ -84,7 +85,8 @@
         "consensus": false,
         "agreed": ["flags help risky rollouts"],
         "unresolved": ["scope: every endpoint vs subset"]
-      }
+      },
+      "residue_remaining": 0
     }
   ]
 }
