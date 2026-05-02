@@ -214,6 +214,19 @@ export interface SystemEvent {
 /** Result produced by DeliberationEngine.run(). */
 export interface DeliberationResult {
   topic: string;
+  /**
+   * Optional free-form prose context the user supplied alongside the topic
+   * (PAR-16). When present, the engine prepends it to every non-Sentry
+   * agent's user-message turn under a `## Background` heading so each agent
+   * starts with the same brief. Echoed back verbatim on `POST /deliberate`
+   * and persisted on the deliberation record so `GET /deliberate/:id`
+   * round-trips it unchanged.
+   *
+   * Additive: stored deliberations recorded before PAR-16 omit this field;
+   * old client builds keep parsing because no existing field is renamed
+   * or removed.
+   */
+  context?: string;
   turns: Turn[];
   conflicts: Conflict[];
   /** Weighted fraction of unresolved conflicts, 0–1. 0 = all resolved. */
@@ -239,6 +252,18 @@ export interface DeliberationResult {
 
 export interface Blackboard {
   topic: string;
+  /**
+   * Optional free-form prose context (PAR-16). The engine writes the
+   * deliberation's user-supplied `context` here at run start so every
+   * non-Sentry agent's prompt builder can prepend it to its user message
+   * via `buildPromptHeader`. Carried separately from `metadata` to keep
+   * the type strongly typed and to keep the back-compat surface narrow —
+   * agents that ignore it continue working unchanged.
+   *
+   * Optional for back-compat with existing test mocks that construct
+   * `Blackboard` literals without context.
+   */
+  context?: string;
   turns: Turn[];
   conflicts: Conflict[];
   metadata: Record<string, unknown>;

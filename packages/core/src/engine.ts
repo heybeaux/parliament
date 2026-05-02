@@ -20,6 +20,17 @@ export interface DeliberationConfig {
   redAgentInterval: number;
   /** Synthesizer confidence threshold to declare consensus. Default: 0.7. */
   confidenceThreshold: number;
+  /**
+   * Optional free-form prose context (PAR-16). When set, the engine writes
+   * this onto the blackboard at run start so every non-Sentry agent's
+   * `buildPromptHeader` call prepends it under a stable `## Background`
+   * heading. Echoed back unchanged on the result so the server response
+   * round-trips it.
+   *
+   * Optional and additive — existing callers that omit it see no behaviour
+   * change.
+   */
+  context?: string;
   agents: {
     proposer: Agent;
     skeptic: Agent;
@@ -98,6 +109,17 @@ export interface TopologyDeliberationConfig {
    * blocks run without a timeout.
    */
   parallelBlockTimeoutMs?: number;
+  /**
+   * Optional free-form prose context (PAR-16). When set, the engine writes
+   * this onto the blackboard at run start so every non-Sentry agent's
+   * `buildPromptHeader` call prepends it under a stable `## Background`
+   * heading. Echoed back unchanged on the result so the server response
+   * round-trips it.
+   *
+   * Optional and additive — existing callers that omit it see no behaviour
+   * change.
+   */
+  context?: string;
 }
 
 
@@ -290,11 +312,22 @@ export class DeliberationEngine {
 
     const startedAt = new Date().toISOString();
 
+    // PAR-16: Normalise context to a trimmed string (or undefined). Empty /
+    // whitespace-only input is treated as absent so the result echoes back a
+    // missing field rather than a blank string and the prompt builder skips
+    // the heading entirely.
+    const trimmedContext = config.context?.trim();
+    const normalizedContext =
+      trimmedContext !== undefined && trimmedContext.length > 0
+        ? trimmedContext
+        : undefined;
+
     const blackboard: Blackboard = {
       topic,
       turns: [],
       conflicts: [],
       metadata: {},
+      ...(normalizedContext !== undefined ? { context: normalizedContext } : {}),
     };
 
     let terminationReason: TerminationReason = 'max_rounds';
@@ -472,6 +505,7 @@ export class DeliberationEngine {
 
     return {
       topic,
+      ...(normalizedContext !== undefined ? { context: normalizedContext } : {}),
       turns: blackboard.turns,
       conflicts: blackboard.conflicts,
       residueScore,
@@ -531,6 +565,13 @@ export class DeliberationEngine {
 
     const startedAt = new Date().toISOString();
 
+    // PAR-16: see `run()` above — same normalization rule.
+    const trimmedContext = config.context?.trim();
+    const normalizedContext =
+      trimmedContext !== undefined && trimmedContext.length > 0
+        ? trimmedContext
+        : undefined;
+
     const blackboard: Blackboard = {
       topic,
       turns: [],
@@ -538,6 +579,7 @@ export class DeliberationEngine {
       metadata: {
         active_preset: topology.activePreset.id,
       },
+      ...(normalizedContext !== undefined ? { context: normalizedContext } : {}),
     };
 
     let terminationReason: TerminationReason = 'max_rounds';
@@ -793,6 +835,7 @@ export class DeliberationEngine {
 
     return {
       topic,
+      ...(normalizedContext !== undefined ? { context: normalizedContext } : {}),
       turns: blackboard.turns,
       conflicts: blackboard.conflicts,
       residueScore,
