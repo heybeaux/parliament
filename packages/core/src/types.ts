@@ -7,6 +7,20 @@ export type TerminationReason =
 export type SentrySignal = 'ok' | 'specialist_needed' | 'collapse_detected';
 
 /**
+ * Lifecycle status of a deliberation row as observed by callers reading
+ * `GET /deliberate/:id` (PAR-18). The synchronous `runTopology()` path keeps
+ * returning a fully-populated `DeliberationResult`; the server layer mints
+ * an id on submit, persists a placeholder row with `status: 'in_flight'`,
+ * appends turns progressively, and flips the row to `completed` (or
+ * `failed`) once the engine terminates.
+ *
+ * Additive: pre-PAR-18 stored deliberations and old client builds that lack
+ * any awareness of `status` continue to render `completed` runs unchanged
+ * because every existing field stays populated.
+ */
+export type DeliberationStatus = 'in_flight' | 'completed' | 'failed';
+
+/**
  * Structured signal emitted by the SynthesizerAgent alongside its prose summary.
  * Carries the model's calibrated certainty (`confidence`), its own self-reported
  * judgement on whether the debate has resolved (`consensus`), and short
@@ -261,6 +275,27 @@ export interface DeliberationResult {
    * recorded kinds. Stage 3 Observability UI consumes this directly.
    */
   events: SystemEvent[];
+  /**
+   * PAR-18 — lifecycle status surfaced on `GET /deliberate/:id`. Set by the
+   * server (not the engine) so the engine return shape stays a snapshot of a
+   * single completed run; the server layer flips a placeholder row from
+   * `in_flight` to `completed` once `runTopology()` resolves and to `failed`
+   * if it throws. The engine itself populates this as `completed` on its own
+   * return value so a direct caller (CLI, tests) reading the result still
+   * sees a coherent status.
+   *
+   * Optional / additive — pre-PAR-18 stored deliberations and old client
+   * builds without status awareness continue parsing because no existing
+   * field is renamed or removed; consumers that don't read `status` keep
+   * rendering completed runs from the existing fields.
+   */
+  status?: DeliberationStatus;
+  /**
+   * PAR-18 — error message captured when a background `runTopology()` run
+   * throws. Only populated alongside `status: 'failed'`. Pre-PAR-18 rows
+   * lack this field; consumers must treat it as optional.
+   */
+  error?: string;
 }
 
 export interface Blackboard {

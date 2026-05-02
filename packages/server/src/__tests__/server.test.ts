@@ -106,15 +106,34 @@ vi.mock('@parliament/core', async (importOriginal) => {
 });
 
 // ---------------------------------------------------------------------------
-// Mock the db module so no real SQLite file is needed
+// Mock the db module so no real SQLite file is needed.
+//
+// PAR-18 — the POST handler is now fire-and-forget: it inserts a placeholder
+// row via `createDeliberationRow`, returns 202 immediately, and the engine
+// runs in the background calling `appendTurn` / `appendEvent` / `markCompleted`
+// (or `markFailed`). The test mocks expose hooks for each so unit tests can
+// assert on the mint-on-submit AC without waiting for the background
+// promise to settle.
 // ---------------------------------------------------------------------------
 const mockSaveDeliberation = vi.fn();
 const mockGetDeliberation = vi.fn();
+const mockCreateDeliberationRow = vi.fn();
+const mockAppendTurn = vi.fn();
+const mockAppendEvent = vi.fn();
+const mockMarkCompleted = vi.fn();
+const mockMarkFailed = vi.fn();
+const mockListDeliberations = vi.fn().mockReturnValue([]);
 
 vi.mock('../db.js', () => ({
   initDb: vi.fn().mockReturnValue({}),
   saveDeliberation: (...args: unknown[]) => mockSaveDeliberation(...args),
   getDeliberation: (...args: unknown[]) => mockGetDeliberation(...args),
+  createDeliberationRow: (...args: unknown[]) => mockCreateDeliberationRow(...args),
+  appendTurn: (...args: unknown[]) => mockAppendTurn(...args),
+  appendEvent: (...args: unknown[]) => mockAppendEvent(...args),
+  markCompleted: (...args: unknown[]) => mockMarkCompleted(...args),
+  markFailed: (...args: unknown[]) => mockMarkFailed(...args),
+  listDeliberations: (...args: unknown[]) => mockListDeliberations(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -163,9 +182,19 @@ describe('POST /deliberate', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockSaveDeliberation.mockReturnValue(undefined);
+    mockCreateDeliberationRow.mockReturnValue(undefined);
+    mockAppendTurn.mockReturnValue(undefined);
+    mockAppendEvent.mockReturnValue(undefined);
+    mockMarkCompleted.mockReturnValue(undefined);
+    mockMarkFailed.mockReturnValue(undefined);
   });
 
-  it('returns 200 with result shape on valid request', async () => {
+  // PAR-18 — POST is now fire-and-forget: returns 202 with `{id, status}`
+  // before the engine completes. The previous behavior (full result body
+  // on the POST response) is replaced; the test below confirms the new
+  // mint-on-submit shape, while the integration tests verify the
+  // background runner persists the full result.
+  it('returns 202 with mint-on-submit shape (id + in_flight status)', async () => {
     const app = makeApp();
 
     const res = await app.request('/deliberate', {
@@ -174,19 +203,19 @@ describe('POST /deliberate', () => {
       body: JSON.stringify({ topic: 'test topic' }),
     });
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(202);
 
     const body = await res.json() as Record<string, unknown>;
     expect(typeof body['id']).toBe('string');
-    expect(body['topic']).toBe('test topic');
-    expect(body['resolved']).toBe(true);
-    expect(body['terminationReason']).toBe('consensus');
-    expect(Array.isArray(body['turns'])).toBe(true);
-    expect(Array.isArray(body['conflicts'])).toBe(true);
-    expect(typeof body['residueScore']).toBe('number');
+    expect((body['id'] as string).length).toBeGreaterThan(0);
+    expect(body['status']).toBe('in_flight');
+
+    // Old client builds that read the id and ignore status keep working.
+    // The full result lands on `GET /deliberate/:id` after the engine
+    // completes, exercised by the integration tests.
   });
 
-  it('returns 200 and persists result with an id', async () => {
+  it('persists a placeholder row immediately on submit', async () => {
     const app = makeApp();
 
     const res = await app.request('/deliberate', {
@@ -195,13 +224,19 @@ describe('POST /deliberate', () => {
       body: JSON.stringify({ topic: 'persistence test' }),
     });
 
-    expect(res.status).toBe(200);
-    expect(mockSaveDeliberation).toHaveBeenCalledOnce();
+    expect(res.status).toBe(202);
+    // Placeholder row must be inserted BEFORE the response returns so a
+    // client that immediately polls `GET /deliberate/:id` does not race
+    // a 404.
+    expect(mockCreateDeliberationRow).toHaveBeenCalledOnce();
 
-    const [, savedId, savedTopic] = mockSaveDeliberation.mock.calls[0] as [unknown, string, string];
-    expect(typeof savedId).toBe('string');
-    expect(savedId.length).toBeGreaterThan(0);
-    expect(savedTopic).toBe('persistence test');
+    const [, args] = mockCreateDeliberationRow.mock.calls[0] as [
+      unknown,
+      { id: string; topic: string },
+    ];
+    expect(typeof args.id).toBe('string');
+    expect(args.id.length).toBeGreaterThan(0);
+    expect(args.topic).toBe('persistence test');
   });
 
   it('returns 400 with Zod error when topic is missing', async () => {
@@ -247,36 +282,20 @@ describe('POST /deliberate', () => {
       }),
     });
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(202);
   });
 
-  it('forwards optional context to runTopology and echoes it on the response (PAR-16)', async () => {
+  it('forwards optional context to runTopology (PAR-16)', async () => {
     const { DeliberationEngine } = await import('@parliament/core');
     const EngineMock = vi.mocked(DeliberationEngine);
 
     const context = 'A multi-paragraph background brief about the system at hand.';
 
-    // Drive the engine mock so its returned result carries the context the
-    // server forwarded, mirroring real engine behaviour.
-    EngineMock.mockImplementationOnce(() => ({
-      run: vi.fn(),
-      runTopology: vi.fn(async (_topic: string, cfg: { context?: string }) => ({
-        topic: 'context test',
-        ...(cfg.context !== undefined ? { context: cfg.context } : {}),
-        turns: [],
-        conflicts: [],
-        residueScore: 0,
-        resolved: true,
-        synthesis: 'final',
-        split: null,
-        terminationReason: 'consensus',
-        totalRounds: 1,
-        started_at: '2026-01-01T00:00:00.000Z',
-        completed_at: '2026-01-01T00:00:30.000Z',
-        events: [],
-      })),
-    }) as unknown as InstanceType<typeof DeliberationEngine>);
-
+    // PAR-18: the POST response no longer carries the full result, but the
+    // context still flows into the engine via the runTopology config. We
+    // assert the call args directly because the engine mock is awaited
+    // inside the background runner — we let the microtask queue drain
+    // before inspecting.
     const app = makeApp();
 
     const res = await app.request('/deliberate', {
@@ -285,11 +304,13 @@ describe('POST /deliberate', () => {
       body: JSON.stringify({ topic: 'context test', context }),
     });
 
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(body['context']).toBe(context);
+    expect(res.status).toBe(202);
+    // Drain the fire-and-forget microtask queue: the route awaits
+    // `c.req.json()` and `loadTopologyConfig` before kicking the
+    // background runner, so a single tick is enough to land the
+    // synchronous portion of the IIFE on the engine mock.
+    await new Promise((r) => setImmediate(r));
 
-    // The engine instance received the context on its runTopology config.
     const lastInstance = EngineMock.mock.results.at(-1)!.value as {
       runTopology: ReturnType<typeof vi.fn>;
     };
@@ -309,7 +330,8 @@ describe('POST /deliberate', () => {
       body: JSON.stringify({ topic: 'no context here' }),
     });
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(202);
+    await new Promise((r) => setImmediate(r));
     const lastInstance = EngineMock.mock.results.at(-1)!.value as {
       runTopology: ReturnType<typeof vi.fn>;
     };
@@ -418,6 +440,9 @@ describe('POST /deliberate — preset override (AC: precedence)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockSaveDeliberation.mockReturnValue(undefined);
+    mockCreateDeliberationRow.mockReturnValue(undefined);
+    mockMarkCompleted.mockReturnValue(undefined);
+    mockMarkFailed.mockReturnValue(undefined);
   });
 
   it('routes through runTopology when a request preset is supplied', async () => {
@@ -431,7 +456,8 @@ describe('POST /deliberate — preset override (AC: precedence)', () => {
       body: JSON.stringify({ topic: 'preset override', preset: 'star-chamber' }),
     });
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(202);
+    await new Promise((r) => setImmediate(r));
     // The mock's most recent engine instance must have had runTopology
     // invoked, NOT run, because the request specified a non-default preset.
     const lastInstance = EngineMock.mock.results.at(-1)!.value as {
@@ -457,7 +483,8 @@ describe('POST /deliberate — preset override (AC: precedence)', () => {
       body: JSON.stringify({ topic: 'default debate path' }),
     });
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(202);
+    await new Promise((r) => setImmediate(r));
     const lastInstance = EngineMock.mock.results.at(-1)!.value as {
       run: ReturnType<typeof vi.fn>;
       runTopology: ReturnType<typeof vi.fn>;
@@ -483,7 +510,8 @@ describe('POST /deliberate — preset override (AC: precedence)', () => {
       body: JSON.stringify({ topic: 'socratic happy path', preset: 'socratic' }),
     });
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(202);
+    await new Promise((r) => setImmediate(r));
     const lastInstance = EngineMock.mock.results.at(-1)!.value as {
       run: ReturnType<typeof vi.fn>;
       runTopology: ReturnType<typeof vi.fn>;

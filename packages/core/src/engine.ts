@@ -120,6 +120,26 @@ export interface TopologyDeliberationConfig {
    * change.
    */
   context?: string;
+  /**
+   * PAR-18 — invoked synchronously after the engine appends each fresh `Turn`
+   * to the blackboard. The server layer uses this to persist turns
+   * progressively (so `GET /deliberate/:id` returns partial state during a
+   * long run) and to fan out a server-sent-events stream.
+   *
+   * Optional and additive: existing callers that omit it observe no
+   * behaviour change. Callbacks MUST be fast and non-throwing — the engine
+   * does not await them and silently swallows callback errors so a flaky
+   * sink (e.g. a closed SSE client) cannot crash a deliberation mid-run.
+   */
+  onTurn?: (turn: Turn) => void;
+  /**
+   * PAR-18 — invoked synchronously after the engine emits each
+   * `SystemEvent` (round_start, sentry.echo, parallel_block_*,
+   * synthesis_attempt, consensus_reached, termination, ...). Same fault
+   * tolerance as `onTurn`: errors thrown from the callback are swallowed
+   * so a misbehaving sink cannot interrupt the deliberation.
+   */
+  onEvent?: (event: SystemEvent) => void;
 }
 
 
@@ -517,6 +537,11 @@ export class DeliberationEngine {
       started_at: startedAt,
       completed_at: completedAt,
       events,
+      // PAR-18 — direct callers of the legacy run() pipeline see a coherent
+      // terminal status (only the topology runtime is wired to the server's
+      // background runner; this stays additive for the byte-identical
+      // regression test, which only inspects `turns`).
+      status: 'completed',
     };
   }
 
@@ -591,6 +616,43 @@ export class DeliberationEngine {
     // the transcript. Mirrors the `run()` method.
     const synthConfidenceByRound = new Map<number, number>();
 
+    // PAR-18 — fan out turns and events to caller-supplied sinks as they
+    // happen. We swallow errors so a misbehaving sink (e.g. a disconnected
+    // SSE client) cannot interrupt the deliberation. The wrappers fire only
+    // when the caller wires a callback; the empty-callback path is a tight
+    // loop with no per-turn overhead.
+    const onTurn = config.onTurn;
+    const onEvent = config.onEvent;
+    const notifyLastTurn = (): void => {
+      if (onTurn === undefined) return;
+      const last = blackboard.turns[blackboard.turns.length - 1];
+      if (last === undefined) return;
+      try {
+        onTurn(last);
+      } catch {
+        // intentionally silent — see PAR-18 callback contract on
+        // `TopologyDeliberationConfig.onTurn`.
+      }
+    };
+    const notifyTurn = (turn: Turn): void => {
+      if (onTurn === undefined) return;
+      try {
+        onTurn(turn);
+      } catch {
+        // intentionally silent — see PAR-18 callback contract.
+      }
+    };
+    const pushEvent = (event: SystemEvent): void => {
+      events.push(event);
+      if (onEvent === undefined) return;
+      try {
+        onEvent(event);
+      } catch {
+        // intentionally silent — see PAR-18 callback contract on
+        // `TopologyDeliberationConfig.onEvent`.
+      }
+    };
+
     // Log every optional-flagged step exactly once at engine start so the
     // information surfaces even when we terminate before that step runs.
     for (const step of topology.activePreset.steps) {
@@ -608,7 +670,7 @@ export class DeliberationEngine {
       // PAR-10: round_start lifecycle marker. Emitted before any agent runs
       // so the Observability panel can render a round divider even when the
       // round terminates early via Sentry collapse.
-      events.push({
+      pushEvent({
         round,
         kind: 'round_start',
         message: `Round ${round} started.`,
@@ -629,13 +691,14 @@ export class DeliberationEngine {
         const agent = resolveNeurotype(step);
         const result = await agent.generate(blackboard);
         recordTurn(blackboard, agent, result.content, round, synthConfidenceByRound);
+        notifyLastTurn();
 
         // Out-of-band Sentry after every step. The loader has already
         // forbidden Sentry from appearing in steps, so this is the ONLY
         // place Sentry runs during the step phase.
         const sentryStepResult = await sentry.generate(blackboard);
         if (sentryStepResult.signal === 'collapse_detected') {
-          events.push({
+          pushEvent({
             round,
             kind: 'sentry.echo',
             message: `Sentry detected echo collapse after step "${step.id}"; deliberation terminated.`,
@@ -678,7 +741,7 @@ export class DeliberationEngine {
         // PAR-10: parallel_block_start marker. We emit AFTER the executor
         // returns so the event payload can carry the actual `parallel_group`
         // UUID minted by the executor — UI consumers correlate on this id.
-        events.push({
+        pushEvent({
           round,
           kind: 'parallel_block_start',
           message: `Parallel block started in round ${round} with ${parallelSteps.length} sibling(s).`,
@@ -695,8 +758,15 @@ export class DeliberationEngine {
         // fully-formed `Turn` records (with `parallel_group` set).
         blackboard.turns.push(...parallelResult.turns);
         blackboard.conflicts.push(...parallelResult.conflicts);
+        // PAR-18: fan out each merged sibling turn to the caller's onTurn
+        // sink. The executor produced fully-formed records but the engine
+        // is the single point where they become observable to subscribers
+        // — emit in registration order to mirror the visible blackboard.
+        for (const siblingTurn of parallelResult.turns) {
+          notifyTurn(siblingTurn);
+        }
 
-        events.push({
+        pushEvent({
           round,
           kind: 'parallel_block_end',
           message: `Parallel block ended in round ${round}.`,
@@ -713,7 +783,7 @@ export class DeliberationEngine {
         // logical step in the preset's contract.
         const sentryParallelResult = await sentry.generate(blackboard);
         if (sentryParallelResult.signal === 'collapse_detected') {
-          events.push({
+          pushEvent({
             round,
             kind: 'sentry.echo',
             message: 'Sentry detected echo collapse after parallel block; deliberation terminated.',
@@ -736,12 +806,13 @@ export class DeliberationEngine {
         synthConfidenceByRound,
         synthResult.meta,
       );
+      notifyLastTurn();
       // Record the confidence the synthesizer just produced so subsequent
       // turns (and the next round) see it via `convergence_delta`.
       if (synthResult.meta !== undefined) {
         synthConfidenceByRound.set(round, synthResult.meta.confidence);
       }
-      events.push({
+      pushEvent({
         round,
         kind: 'synthesis_attempt',
         message: `Synthesizer attempted reconciliation in round ${round}.`,
@@ -758,7 +829,7 @@ export class DeliberationEngine {
       if (shouldTerminateOnConsensus(synthResult, confidenceThreshold)) {
         synthesis = synthResult.content;
         terminationReason = 'consensus';
-        events.push({
+        pushEvent({
           round,
           kind: 'consensus_reached',
           message: `Consensus reached in round ${round}.`,
@@ -767,7 +838,7 @@ export class DeliberationEngine {
             ? { confidence: synthResult.meta.confidence }
             : undefined,
         });
-        events.push({
+        pushEvent({
           round,
           kind: 'round_end',
           message: `Round ${round} ended (consensus).`,
@@ -779,7 +850,7 @@ export class DeliberationEngine {
       // Out-of-band Sentry after synthesizer.
       const sentryPostSynthResult = await sentry.generate(blackboard);
       if (sentryPostSynthResult.signal === 'collapse_detected') {
-        events.push({
+        pushEvent({
           round,
           kind: 'sentry.echo',
           message: 'Sentry detected echo collapse after synthesizer; deliberation terminated.',
@@ -795,7 +866,8 @@ export class DeliberationEngine {
       if (round % redAgentInterval === 0) {
         const redResult = await redAgent.generate(blackboard);
         recordTurn(blackboard, redAgent, redResult.content, round, synthConfidenceByRound);
-        events.push({
+        notifyLastTurn();
+        pushEvent({
           round,
           kind: 'red_agent.injection',
           message: redResult.content,
@@ -804,7 +876,7 @@ export class DeliberationEngine {
       }
 
       // PAR-10: round_end lifecycle marker for a complete round iteration.
-      events.push({
+      pushEvent({
         round,
         kind: 'round_end',
         message: `Round ${round} ended.`,
@@ -823,7 +895,7 @@ export class DeliberationEngine {
 
     // PAR-10: termination lifecycle marker. Always emitted, regardless of
     // why the loop exited.
-    events.push({
+    pushEvent({
       round: totalRounds,
       kind: 'termination',
       message: `Deliberation terminated after round ${totalRounds} (${terminationReason}).`,
@@ -855,6 +927,11 @@ export class DeliberationEngine {
       started_at: startedAt,
       completed_at: completedAt,
       events,
+      // PAR-18 — direct callers (tests, CLI) reading `runTopology()`'s
+      // resolved value see a coherent terminal status. The server's
+      // background runner ignores this and writes its own status onto the
+      // persisted row when the engine resolves vs. throws.
+      status: 'completed',
     };
   }
 }
