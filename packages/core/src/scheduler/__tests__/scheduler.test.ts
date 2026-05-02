@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Agent } from '../../agents/base.js';
-import type { Blackboard } from '../../types.js';
 import {
   buildBatchSchedule,
   countModelSwaps,

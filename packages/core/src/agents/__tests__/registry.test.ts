@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { ModelAdapter } from '../../adapters/base.js';
-import type { Blackboard } from '../../types.js';
 import {
   BUILTIN_AGENT_REGISTRY,
   BUILTIN_AGENT_IDS,
@@ -23,10 +22,6 @@ const STAGE_1_NEUROTYPES = [
 
 function makeAdapter(): ModelAdapter {
   return { modelName: 'test-model', generate: vi.fn().mockResolvedValue('') };
-}
-
-function makeBlackboard(): Blackboard {
-  return { topic: 'unused', turns: [], conflicts: [], metadata: {} };
 }
 
 describe('built-in agent registry', () => {

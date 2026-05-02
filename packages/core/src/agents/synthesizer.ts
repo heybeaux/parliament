@@ -207,7 +207,6 @@ export class SynthesizerAgent implements Agent {
 
     // Both attempts failed — fail closed and warn. Match the existing
     // console-based logging used elsewhere in the package.
-    // eslint-disable-next-line no-console
     console.warn(
       '[SynthesizerAgent] failed to parse JSON after 1 retry; falling back to fail-closed result',
       { firstAttemptLength: raw.length, retryLength: retryRaw.length },
