@@ -12,6 +12,7 @@ export const FORECASTER_SYSTEM_PROMPT =
 export class ForecasterAgent implements Agent {
   readonly role = 'Forecaster';
   readonly neurotype = 'forecaster';
+  readonly posture = 'forward-projection';
   readonly modelName: string;
 
   constructor(private readonly adapter: ModelAdapter) {

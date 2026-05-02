@@ -9,6 +9,7 @@ const SYSTEM_PROMPT =
 export class RedAgent implements Agent {
   readonly role = 'RedAgent';
   readonly neurotype = 'disruptive';
+  readonly posture = 'disruptor';
   readonly modelName: string;
 
   constructor(private readonly adapter: ModelAdapter) {

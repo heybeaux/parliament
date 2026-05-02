@@ -171,14 +171,32 @@ function countWords(content: string): number {
  * (`agent` → role label, `neurotype` → posture, `model` → model name,
  * `word_count` → whitespace-delimited count). Synthesizer turns also carry
  * structured `meta` (confidence, consensus, agreed[], unresolved[]).
+ *
+ * PAR-10 enrichment (additive): every freshly recorded turn carries
+ * `model_name` (echo of `model`), `neurotype_posture` (the agent's
+ * declared posture, falling back to `neurotype` when the agent does not
+ * expose one), and `convergence_delta`. Convergence delta is the change
+ * between the two prior synthesizer-confidence values — round 1 turns
+ * always get 0 because no prior synth exists; later rounds get the signed
+ * delta. The server response layer may translate 0 → null for the Stage 3
+ * "no movement yet" rendering.
  */
 function recordTurn(
   blackboard: Blackboard,
   agent: Agent | SentryAgent | SynthesizerAgent,
   content: string,
   round: number,
+  synthConfidenceByRound: ReadonlyMap<number, number>,
   meta?: SynthesizerMeta,
 ): void {
+  // Posture defaults to the agent's neurotype id when the class does not
+  // declare a plain-language posture. Keeps the wire field always populated
+  // without forcing every test mock to set it.
+  const posture =
+    'posture' in agent && typeof agent.posture === 'string'
+      ? agent.posture
+      : agent.neurotype;
+
   const turn: Turn = {
     agent: agent.role,
     neurotype: agent.neurotype,
@@ -187,11 +205,45 @@ function recordTurn(
     timestamp: new Date().toISOString(),
     round,
     word_count: countWords(content),
+    model_name: agent.modelName,
+    neurotype_posture: posture,
+    convergence_delta: computeConvergenceDelta(round, synthConfidenceByRound),
   };
   if (meta !== undefined) {
     turn.meta = meta;
   }
   blackboard.turns.push(turn);
+}
+
+/**
+ * Per-turn convergence delta. Mirrors the server-side computation in
+ * `packages/server/src/routes.ts#computeConvergenceDelta`, but with a 0
+ * sentinel for the "not measurable" case (round 1, or any round whose prior
+ * synth-confidence cannot be located). The server response layer translates
+ * 0 → null for round-1 turns when the Stage 3 UI needs the explicit
+ * "no movement yet" rendering.
+ *
+ * Definition: how the synthesizer's confidence shifted going INTO this round.
+ *   delta(R) = synth_confidence(R-1) - synth_confidence(R-2)
+ *
+ * R = 1 → 0 (no prior synth to compare).
+ * R = 2 → synth(R-1) - 0 = synth(R-1).
+ * R > 2 → synth(R-1) - synth(R-2).
+ *
+ * Returns 0 if `synth(R-1)` is not present (e.g. early termination via
+ * Sentry collapse before the synthesizer ran). The 4-decimal rounding
+ * matches the server-side formatting so a turn travelling through
+ * `enrichResult` keeps the same numeric value.
+ */
+function computeConvergenceDelta(
+  round: number,
+  synthByRound: ReadonlyMap<number, number>,
+): number {
+  if (round <= 1) return 0;
+  const prior = synthByRound.get(round - 1);
+  if (prior === undefined) return 0;
+  const before = synthByRound.get(round - 2) ?? 0;
+  return Number((prior - before).toFixed(4));
 }
 
 /**
@@ -249,16 +301,30 @@ export class DeliberationEngine {
     let synthesis: string | null = null;
     let totalRounds = 0;
     const events: SystemEvent[] = [];
+    // Tracks each round's synthesizer confidence so `recordTurn` can attach
+    // a stable `convergence_delta` to every fresh turn without re-walking
+    // the transcript.
+    const synthConfidenceByRound = new Map<number, number>();
 
     for (let round = 1; round <= maxRounds; round++) {
       totalRounds = round;
+
+      // PAR-10: round_start lifecycle marker. Emitted before any agent runs
+      // so the Observability panel can render a round divider even when the
+      // round terminates early via Sentry collapse.
+      events.push({
+        round,
+        kind: 'round_start',
+        message: `Round ${round} started.`,
+        timestamp: new Date().toISOString(),
+      });
 
       // ------------------------------------------------------------------ //
       // Step 1: Proposer (round 1 only)
       // ------------------------------------------------------------------ //
       if (round === 1) {
         const proposerResult = await proposer.generate(blackboard);
-        recordTurn(blackboard, proposer, proposerResult.content, round);
+        recordTurn(blackboard, proposer, proposerResult.content, round, synthConfidenceByRound);
       }
 
       // ------------------------------------------------------------------ //
@@ -267,7 +333,7 @@ export class DeliberationEngine {
       //  call generate to drive that side-effect and record the turn.)
       // ------------------------------------------------------------------ //
       const skepticResult = await skeptic.generate(blackboard);
-      recordTurn(blackboard, skeptic, skepticResult.content, round);
+      recordTurn(blackboard, skeptic, skepticResult.content, round, synthConfidenceByRound);
 
       // ------------------------------------------------------------------ //
       // Step 3: Sentry check — terminate on collapse_detected
@@ -278,6 +344,7 @@ export class DeliberationEngine {
           round,
           kind: 'sentry.echo',
           message: 'Sentry detected echo collapse after critic phase; deliberation terminated.',
+          timestamp: new Date().toISOString(),
         });
         terminationReason = 'echo_loop';
         break;
@@ -288,11 +355,51 @@ export class DeliberationEngine {
       // consensus AND its calibrated confidence clears the threshold.
       // ------------------------------------------------------------------ //
       const synthResult = await synthesizer.generate(blackboard);
-      recordTurn(blackboard, synthesizer, synthResult.content, round, synthResult.meta);
+      recordTurn(
+        blackboard,
+        synthesizer,
+        synthResult.content,
+        round,
+        synthConfidenceByRound,
+        synthResult.meta,
+      );
+      // Record the confidence the synthesizer just produced so subsequent
+      // turns (and the next round) see it via `convergence_delta`.
+      if (synthResult.meta !== undefined) {
+        synthConfidenceByRound.set(round, synthResult.meta.confidence);
+      }
+      events.push({
+        round,
+        kind: 'synthesis_attempt',
+        message: `Synthesizer attempted reconciliation in round ${round}.`,
+        timestamp: new Date().toISOString(),
+        data:
+          synthResult.meta !== undefined
+            ? {
+                confidence: synthResult.meta.confidence,
+                consensus: synthResult.meta.consensus,
+              }
+            : undefined,
+      });
 
       if (shouldTerminateOnConsensus(synthResult, confidenceThreshold)) {
         synthesis = synthResult.content;
         terminationReason = 'consensus';
+        events.push({
+          round,
+          kind: 'consensus_reached',
+          message: `Consensus reached in round ${round}.`,
+          timestamp: new Date().toISOString(),
+          data: synthResult.meta !== undefined
+            ? { confidence: synthResult.meta.confidence }
+            : undefined,
+        });
+        events.push({
+          round,
+          kind: 'round_end',
+          message: `Round ${round} ended (consensus).`,
+          timestamp: new Date().toISOString(),
+        });
         break;
       }
 
@@ -305,6 +412,7 @@ export class DeliberationEngine {
           round,
           kind: 'sentry.echo',
           message: 'Sentry detected echo collapse after synthesizer; deliberation terminated.',
+          timestamp: new Date().toISOString(),
         });
         terminationReason = 'echo_loop';
         break;
@@ -315,13 +423,25 @@ export class DeliberationEngine {
       // ------------------------------------------------------------------ //
       if (round % redAgentInterval === 0) {
         const redResult = await redAgent.generate(blackboard);
-        recordTurn(blackboard, redAgent, redResult.content, round);
+        recordTurn(blackboard, redAgent, redResult.content, round, synthConfidenceByRound);
         events.push({
           round,
           kind: 'red_agent.injection',
           message: redResult.content,
+          timestamp: new Date().toISOString(),
         });
       }
+
+      // PAR-10: round_end lifecycle marker. Emitted only when the round
+      // completes its full step sequence — if Sentry collapse or consensus
+      // terminates the round early, we already emitted the appropriate
+      // event above and broke out of the loop.
+      events.push({
+        round,
+        kind: 'round_end',
+        message: `Round ${round} ended.`,
+        timestamp: new Date().toISOString(),
+      });
     }
 
     // -------------------------------------------------------------------- //
@@ -335,6 +455,18 @@ export class DeliberationEngine {
       synthesis === null
         ? buildSplitSummary(blackboard.turns, residueScore)
         : null;
+
+    // PAR-10: termination lifecycle marker. Always emitted, regardless of
+    // why the loop exited, so the Observability panel can render a final
+    // "ended at round N — reason" entry without inspecting the result
+    // fields.
+    events.push({
+      round: totalRounds,
+      kind: 'termination',
+      message: `Deliberation terminated after round ${totalRounds} (${terminationReason}).`,
+      timestamp: new Date().toISOString(),
+      data: { reason: terminationReason, totalRounds },
+    });
 
     const completedAt = new Date().toISOString();
 
@@ -412,6 +544,10 @@ export class DeliberationEngine {
     let synthesis: string | null = null;
     let totalRounds = 0;
     const events: SystemEvent[] = [];
+    // Tracks each round's synthesizer confidence so `recordTurn` can attach
+    // a stable `convergence_delta` to every fresh turn without re-walking
+    // the transcript. Mirrors the `run()` method.
+    const synthConfidenceByRound = new Map<number, number>();
 
     // Log every optional-flagged step exactly once at engine start so the
     // information surfaces even when we terminate before that step runs.
@@ -427,6 +563,16 @@ export class DeliberationEngine {
     roundLoop: for (let round = 1; round <= maxRounds; round++) {
       totalRounds = round;
 
+      // PAR-10: round_start lifecycle marker. Emitted before any agent runs
+      // so the Observability panel can render a round divider even when the
+      // round terminates early via Sentry collapse.
+      events.push({
+        round,
+        kind: 'round_start',
+        message: `Round ${round} started.`,
+        timestamp: new Date().toISOString(),
+      });
+
       // ------------------------------------------------------------------ //
       // Step phase: walk the preset's declared step list in order.
       // ------------------------------------------------------------------ //
@@ -440,7 +586,7 @@ export class DeliberationEngine {
 
         const agent = resolveNeurotype(step);
         const result = await agent.generate(blackboard);
-        recordTurn(blackboard, agent, result.content, round);
+        recordTurn(blackboard, agent, result.content, round, synthConfidenceByRound);
 
         // Out-of-band Sentry after every step. The loader has already
         // forbidden Sentry from appearing in steps, so this is the ONLY
@@ -451,6 +597,7 @@ export class DeliberationEngine {
             round,
             kind: 'sentry.echo',
             message: `Sentry detected echo collapse after step "${step.id}"; deliberation terminated.`,
+            timestamp: new Date().toISOString(),
           });
           terminationReason = 'echo_loop';
           break roundLoop;
@@ -467,8 +614,13 @@ export class DeliberationEngine {
       // ------------------------------------------------------------------ //
       const parallelSteps = topology.activePreset.parallel_steps;
       if (parallelSteps !== undefined && parallelSteps.length > 0) {
-        const parallelOpts: { timeoutMs?: number; logger?: TopologyRuntimeLogger } = {
+        const parallelOpts: {
+          timeoutMs?: number;
+          logger?: TopologyRuntimeLogger;
+          synthConfidenceByRound?: ReadonlyMap<number, number>;
+        } = {
           logger,
+          synthConfidenceByRound,
         };
         if (config.parallelBlockTimeoutMs !== undefined) {
           parallelOpts.timeoutMs = config.parallelBlockTimeoutMs;
@@ -480,12 +632,39 @@ export class DeliberationEngine {
           round,
           parallelOpts,
         );
+
+        // PAR-10: parallel_block_start marker. We emit AFTER the executor
+        // returns so the event payload can carry the actual `parallel_group`
+        // UUID minted by the executor — UI consumers correlate on this id.
+        events.push({
+          round,
+          kind: 'parallel_block_start',
+          message: `Parallel block started in round ${round} with ${parallelSteps.length} sibling(s).`,
+          timestamp: new Date().toISOString(),
+          data: {
+            parallel_group: parallelResult.parallelGroup,
+            siblingCount: parallelSteps.length,
+          },
+        });
+
         // Append turns + new conflicts in registration order. We push
         // straight onto the live blackboard rather than calling
         // `recordTurn` because the parallel executor already produced
         // fully-formed `Turn` records (with `parallel_group` set).
         blackboard.turns.push(...parallelResult.turns);
         blackboard.conflicts.push(...parallelResult.conflicts);
+
+        events.push({
+          round,
+          kind: 'parallel_block_end',
+          message: `Parallel block ended in round ${round}.`,
+          timestamp: new Date().toISOString(),
+          data: {
+            parallel_group: parallelResult.parallelGroup,
+            turnCount: parallelResult.turns.length,
+            conflictCount: parallelResult.conflicts.length,
+          },
+        });
 
         // Out-of-band Sentry once after the parallel block. We check ONCE
         // after the merge, not per-sibling, because the block is a single
@@ -496,6 +675,7 @@ export class DeliberationEngine {
             round,
             kind: 'sentry.echo',
             message: 'Sentry detected echo collapse after parallel block; deliberation terminated.',
+            timestamp: new Date().toISOString(),
           });
           terminationReason = 'echo_loop';
           break roundLoop;
@@ -506,11 +686,51 @@ export class DeliberationEngine {
       // Synthesizer (structural infrastructure — not a step).
       // ------------------------------------------------------------------ //
       const synthResult = await synthesizer.generate(blackboard);
-      recordTurn(blackboard, synthesizer, synthResult.content, round, synthResult.meta);
+      recordTurn(
+        blackboard,
+        synthesizer,
+        synthResult.content,
+        round,
+        synthConfidenceByRound,
+        synthResult.meta,
+      );
+      // Record the confidence the synthesizer just produced so subsequent
+      // turns (and the next round) see it via `convergence_delta`.
+      if (synthResult.meta !== undefined) {
+        synthConfidenceByRound.set(round, synthResult.meta.confidence);
+      }
+      events.push({
+        round,
+        kind: 'synthesis_attempt',
+        message: `Synthesizer attempted reconciliation in round ${round}.`,
+        timestamp: new Date().toISOString(),
+        data:
+          synthResult.meta !== undefined
+            ? {
+                confidence: synthResult.meta.confidence,
+                consensus: synthResult.meta.consensus,
+              }
+            : undefined,
+      });
 
       if (shouldTerminateOnConsensus(synthResult, confidenceThreshold)) {
         synthesis = synthResult.content;
         terminationReason = 'consensus';
+        events.push({
+          round,
+          kind: 'consensus_reached',
+          message: `Consensus reached in round ${round}.`,
+          timestamp: new Date().toISOString(),
+          data: synthResult.meta !== undefined
+            ? { confidence: synthResult.meta.confidence }
+            : undefined,
+        });
+        events.push({
+          round,
+          kind: 'round_end',
+          message: `Round ${round} ended (consensus).`,
+          timestamp: new Date().toISOString(),
+        });
         break;
       }
 
@@ -521,6 +741,7 @@ export class DeliberationEngine {
           round,
           kind: 'sentry.echo',
           message: 'Sentry detected echo collapse after synthesizer; deliberation terminated.',
+          timestamp: new Date().toISOString(),
         });
         terminationReason = 'echo_loop';
         break;
@@ -531,13 +752,22 @@ export class DeliberationEngine {
       // ------------------------------------------------------------------ //
       if (round % redAgentInterval === 0) {
         const redResult = await redAgent.generate(blackboard);
-        recordTurn(blackboard, redAgent, redResult.content, round);
+        recordTurn(blackboard, redAgent, redResult.content, round, synthConfidenceByRound);
         events.push({
           round,
           kind: 'red_agent.injection',
           message: redResult.content,
+          timestamp: new Date().toISOString(),
         });
       }
+
+      // PAR-10: round_end lifecycle marker for a complete round iteration.
+      events.push({
+        round,
+        kind: 'round_end',
+        message: `Round ${round} ended.`,
+        timestamp: new Date().toISOString(),
+      });
     }
 
     const residueScore = computeResidueScore(blackboard.conflicts);
@@ -548,6 +778,16 @@ export class DeliberationEngine {
       synthesis === null
         ? buildSplitSummary(blackboard.turns, residueScore)
         : null;
+
+    // PAR-10: termination lifecycle marker. Always emitted, regardless of
+    // why the loop exited.
+    events.push({
+      round: totalRounds,
+      kind: 'termination',
+      message: `Deliberation terminated after round ${totalRounds} (${terminationReason}).`,
+      timestamp: new Date().toISOString(),
+      data: { reason: terminationReason, totalRounds },
+    });
 
     const completedAt = new Date().toISOString();
 

@@ -568,6 +568,118 @@ describe('DeliberationEngine', () => {
     expect(result.split?.irreconcilable).toBe(true);
   });
 
+  // -------------------------------------------------------------------- //
+  // PAR-10: per-turn enrichment fields and lifecycle events.
+  //
+  // The legacy `run()` path is the simplest place to assert these because the
+  // pipeline is fixed (Proposer/Skeptic/Synthesizer per round, no parallel
+  // siblings). The topology path has its own tests in topology-engine.test.ts
+  // covering parallel_group plumbing.
+  // -------------------------------------------------------------------- //
+  describe('PAR-10 turn enrichment + deliberation events', () => {
+    it('populates model_name, neurotype_posture, word_count, and convergence_delta on every fresh turn', async () => {
+      const config = makeConfig({
+        maxRounds: 2,
+        redAgentInterval: 99,
+        // Stay below threshold so the loop exhausts max_rounds and we get
+        // turns from both rounds 1 and 2 (the round-2 delta should be
+        // computable).
+        agents: {
+          ...makeConfig().agents,
+          synthesizer: makeSynthesizerAgent(0.3, 'Synth round') as unknown as import('../agents/synthesizer.js').SynthesizerAgent,
+        },
+      });
+
+      const result = await engine.run('enrichment topic', config);
+
+      // Every turn must carry the four PAR-10 enrichment fields. The local
+      // mock synthesizer factory in this file doesn't set `modelName`, so we
+      // assert `model_name` mirrors `model` rather than asserting either is a
+      // string outright.
+      for (const t of result.turns) {
+        expect(t.model_name).toBe(t.model);
+        expect(typeof t.neurotype_posture).toBe('string');
+        // Mocks don't declare posture, so the engine falls back to neurotype.
+        expect(t.neurotype_posture).toBe(t.neurotype);
+        expect(typeof t.word_count).toBe('number');
+        expect(t.word_count).toBeGreaterThan(0);
+        expect(typeof t.convergence_delta).toBe('number');
+      }
+
+      // Non-synthesizer agents in the local mocks DO set modelName, so those
+      // turns must carry a string-valued model_name.
+      const nonSynth = result.turns.filter((t) => t.agent !== 'Synthesizer');
+      for (const t of nonSynth) {
+        expect(typeof t.model_name).toBe('string');
+        expect((t.model_name as string).length).toBeGreaterThan(0);
+      }
+
+      // Round-1 turns: convergence_delta = 0 (no prior synth).
+      const round1 = result.turns.filter((t) => t.round === 1);
+      for (const t of round1) {
+        expect(t.convergence_delta).toBe(0);
+      }
+
+      // Round-2 turns: synth(R-1) - synth(R-2 default 0) = 0.3 - 0 = 0.3.
+      const round2 = result.turns.filter((t) => t.round === 2);
+      expect(round2.length).toBeGreaterThan(0);
+      for (const t of round2) {
+        expect(t.convergence_delta).toBe(0.3);
+      }
+    });
+
+    it('emits round_start, synthesis_attempt, round_end, and termination events', async () => {
+      const config = makeConfig({ maxRounds: 2, redAgentInterval: 99 });
+      const result = await engine.run('lifecycle topic', config);
+
+      const kinds = result.events.map((e) => e.kind);
+
+      // Two rounds → two round_starts, two round_ends, two synthesis_attempts.
+      expect(kinds.filter((k) => k === 'round_start')).toHaveLength(2);
+      expect(kinds.filter((k) => k === 'round_end')).toHaveLength(2);
+      expect(kinds.filter((k) => k === 'synthesis_attempt')).toHaveLength(2);
+
+      // Termination always fires exactly once at the end.
+      expect(kinds.filter((k) => k === 'termination')).toHaveLength(1);
+      const termination = result.events[result.events.length - 1]!;
+      expect(termination.kind).toBe('termination');
+      expect(termination.data).toMatchObject({
+        reason: 'max_rounds',
+        totalRounds: 2,
+      });
+
+      // Every event carries a timestamp (PAR-10 requirement).
+      for (const e of result.events) {
+        expect(typeof e.timestamp).toBe('string');
+        expect(e.timestamp!.length).toBeGreaterThan(0);
+      }
+    });
+
+    it('emits consensus_reached when the synthesizer crosses the threshold', async () => {
+      // 0.9 confidence with consensus=true (default) terminates round 1.
+      const config = makeConfig({
+        maxRounds: 5,
+        redAgentInterval: 99,
+        agents: {
+          ...makeConfig().agents,
+          synthesizer: makeSynthesizerAgent(0.9) as unknown as import('../agents/synthesizer.js').SynthesizerAgent,
+        },
+      });
+
+      const result = await engine.run('consensus topic', config);
+
+      expect(result.terminationReason).toBe('consensus');
+
+      const kinds = result.events.map((e) => e.kind);
+      expect(kinds).toContain('consensus_reached');
+      expect(kinds).toContain('termination');
+
+      // Termination event records the reason.
+      const termination = result.events.find((e) => e.kind === 'termination')!;
+      expect(termination.data).toMatchObject({ reason: 'consensus' });
+    });
+  });
+
   it('split.irreconcilable is false when residueScore <= 0.5', async () => {
     // Two conflicts: one resolved, one unresolved.
     // Weights (position_from_end / total):

@@ -45,6 +45,7 @@ export interface SentryOptions {
 export class SentryAgent {
   readonly role = 'Sentry';
   readonly neurotype = 'monitoring';
+  readonly posture = 'monitor';
   readonly modelName: string;
   private readonly osiEnabled: boolean;
   private readonly osiDistanceThreshold: number;

@@ -667,3 +667,198 @@ parallel_steps = [
     expect((sentry.generate as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// PAR-10 — turn enrichment + deliberation events on the topology path.
+// ---------------------------------------------------------------------------
+
+describe('runTopology — PAR-10 turn enrichment + lifecycle events', () => {
+  it('populates model_name, neurotype_posture, word_count, convergence_delta on every fresh turn (Debate preset)', async () => {
+    const topology = buildTopology(`
+[topology]
+active = "debate"
+`);
+    const proposer = makeAgent('Proposer', 'proposer', 'Proposer says X clearly today', 'mock-proposer-model');
+    const skeptic = makeAgent('Skeptic', 'skeptic', 'Skeptic counters succinctly here', 'mock-skeptic-model');
+    const config = makeBaseConfig(
+      topology,
+      { proposer, skeptic },
+      {
+        maxRounds: 2,
+        // 0.4 confidence → no consensus, loop exhausts max_rounds so we get
+        // turns from both rounds (round 2 has a measurable delta).
+        synthesizer: makeSynth(0.4, 'Synthesizer reconciles the two', { consensus: false }),
+      },
+    );
+
+    const engine = new DeliberationEngine();
+    const result = await engine.runTopology('enrichment topic', config);
+
+    expect(result.totalRounds).toBe(2);
+
+    for (const t of result.turns) {
+      expect(typeof t.model_name).toBe('string');
+      expect(t.model_name).toBe(t.model);
+      expect(typeof t.neurotype_posture).toBe('string');
+      expect(t.neurotype_posture).toBe(t.neurotype);
+      expect(typeof t.word_count).toBe('number');
+      expect(t.word_count).toBeGreaterThan(0);
+      expect(typeof t.convergence_delta).toBe('number');
+    }
+
+    // Round 1 → 0; round 2 → synth(R-1) - synth(R-2 default 0) = 0.4.
+    for (const t of result.turns.filter((t) => t.round === 1)) {
+      expect(t.convergence_delta).toBe(0);
+    }
+    for (const t of result.turns.filter((t) => t.round === 2)) {
+      expect(t.convergence_delta).toBe(0.4);
+    }
+  });
+
+  it('parallel_group is set on every Jury-style sibling and undefined on sequential turns', async () => {
+    const topology = buildTopology(`
+[topology]
+active = "par10-jury"
+
+[topology.presets.par10-jury]
+name = "PAR-10 Jury"
+description = "Mini Jury preset for PAR-10 enrichment test."
+best_for = "Multi-perspective parallel critique."
+steps = [
+  { id = "open", neurotype = "proposer" },
+]
+parallel_steps = [
+  { id = "skep", neurotype = "skeptic" },
+  { id = "emp", neurotype = "empiricist" },
+  { id = "steel", neurotype = "steelmanner" },
+]
+`);
+
+    const proposer = makeAgent('Proposer', 'proposer', 'proposal');
+    const skeptic = makeAgent('Skeptic', 'skeptic', 'critique');
+    const empiricist = makeAgent('Empiricist', 'empiricist', 'evidence here');
+    const steelmanner = makeAgent('Steelmanner', 'steelmanner', 'best case');
+
+    const config = makeBaseConfig(
+      topology,
+      { open: proposer, skep: skeptic, emp: empiricist, steel: steelmanner },
+      { maxRounds: 1 },
+    );
+
+    const engine = new DeliberationEngine();
+    const result = await engine.runTopology('jury enrichment topic', config);
+
+    // Parallel siblings share a single parallel_group UUID.
+    const siblings = result.turns.filter((t) =>
+      ['Skeptic', 'Empiricist', 'Steelmanner'].includes(t.agent),
+    );
+    expect(siblings).toHaveLength(3);
+    const groups = new Set(siblings.map((t) => t.parallel_group));
+    expect(groups.size).toBe(1);
+    const groupUuid = siblings[0]!.parallel_group;
+    expect(typeof groupUuid).toBe('string');
+    expect((groupUuid as string).length).toBeGreaterThan(0);
+
+    // Sequential turns (Proposer, Synthesizer) have no parallel_group.
+    const sequential = result.turns.filter(
+      (t) => t.agent === 'Proposer' || t.agent === 'Synthesizer',
+    );
+    for (const t of sequential) {
+      expect(t.parallel_group ?? null).toBeNull();
+    }
+
+    // Every sibling also carries the new enrichment fields.
+    for (const t of siblings) {
+      expect(typeof t.model_name).toBe('string');
+      expect(typeof t.neurotype_posture).toBe('string');
+      expect(typeof t.word_count).toBe('number');
+      expect(typeof t.convergence_delta).toBe('number');
+    }
+  });
+
+  it('emits round_start, parallel_block_start/end, synthesis_attempt, round_end, and termination events', async () => {
+    const topology = buildTopology(`
+[topology]
+active = "par10-events"
+
+[topology.presets.par10-events]
+name = "PAR-10 Events"
+description = "Lifecycle event coverage."
+best_for = "PAR-10 events test."
+steps = [
+  { id = "open", neurotype = "proposer" },
+]
+parallel_steps = [
+  { id = "skep", neurotype = "skeptic" },
+  { id = "emp", neurotype = "empiricist" },
+]
+`);
+
+    const proposer = makeAgent('Proposer', 'proposer', 'p');
+    const skeptic = makeAgent('Skeptic', 'skeptic', 's');
+    const empiricist = makeAgent('Empiricist', 'empiricist', 'e');
+    const config = makeBaseConfig(
+      topology,
+      { open: proposer, skep: skeptic, emp: empiricist },
+      { maxRounds: 1 },
+    );
+
+    const engine = new DeliberationEngine();
+    const result = await engine.runTopology('events topic', config);
+
+    const kinds = result.events.map((e) => e.kind);
+
+    expect(kinds).toContain('round_start');
+    expect(kinds).toContain('parallel_block_start');
+    expect(kinds).toContain('parallel_block_end');
+    expect(kinds).toContain('synthesis_attempt');
+    expect(kinds).toContain('round_end');
+    expect(kinds).toContain('termination');
+
+    // The parallel block events carry the parallel_group UUID in their data.
+    const blockStart = result.events.find((e) => e.kind === 'parallel_block_start')!;
+    const blockEnd = result.events.find((e) => e.kind === 'parallel_block_end')!;
+    const startData = blockStart.data as { parallel_group?: string } | undefined;
+    const endData = blockEnd.data as { parallel_group?: string } | undefined;
+    expect(typeof startData?.parallel_group).toBe('string');
+    expect(startData?.parallel_group).toBe(endData?.parallel_group);
+
+    // Termination is always last.
+    const last = result.events[result.events.length - 1]!;
+    expect(last.kind).toBe('termination');
+    expect(last.data).toMatchObject({ reason: 'max_rounds', totalRounds: 1 });
+
+    // Every event carries a timestamp.
+    for (const e of result.events) {
+      expect(typeof e.timestamp).toBe('string');
+    }
+  });
+
+  it('emits consensus_reached + termination(reason=consensus) when synthesizer crosses threshold', async () => {
+    const topology = buildTopology(`
+[topology]
+active = "debate"
+`);
+    const proposer = makeAgent('Proposer', 'proposer', 'p');
+    const skeptic = makeAgent('Skeptic', 'skeptic', 's');
+    const config = makeBaseConfig(
+      topology,
+      { proposer, skeptic },
+      {
+        synthesizer: makeSynth(0.95, 'Strong synthesis', { consensus: true }),
+      },
+    );
+
+    const engine = new DeliberationEngine();
+    const result = await engine.runTopology('consensus topic', config);
+
+    expect(result.terminationReason).toBe('consensus');
+
+    const kinds = result.events.map((e) => e.kind);
+    expect(kinds).toContain('consensus_reached');
+    expect(kinds).toContain('termination');
+
+    const termination = result.events.find((e) => e.kind === 'termination')!;
+    expect(termination.data).toMatchObject({ reason: 'consensus' });
+  });
+});

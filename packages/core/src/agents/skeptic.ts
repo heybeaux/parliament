@@ -39,6 +39,7 @@ export function containsDisagreement(text: string): boolean {
 export class SkepticAgent implements Agent {
   readonly role = 'Skeptic';
   readonly neurotype = 'critical';
+  readonly posture = 'adversarial';
   readonly modelName: string;
 
   constructor(private readonly adapter: ModelAdapter) {

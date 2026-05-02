@@ -9,6 +9,7 @@ const SYSTEM_PROMPT =
 export class ProposerAgent implements Agent {
   readonly role = 'Proposer';
   readonly neurotype = 'structured';
+  readonly posture = 'structured-reasoner';
   readonly modelName: string;
 
   constructor(private readonly adapter: ModelAdapter) {
