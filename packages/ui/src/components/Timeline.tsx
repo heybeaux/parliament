@@ -217,6 +217,7 @@ export function Timeline({ result, running, elapsedSec, topic }: Props) {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
             className="relative overflow-hidden rounded-xl bg-blue-500/[0.05] p-4 ring-1 ring-blue-400/15"
+            data-testid="in-progress-card"
           >
             {/* Animated shimmer */}
             <div className="absolute inset-0 animate-shimmer bg-shimmer bg-[length:200%_100%]" />
@@ -232,7 +233,12 @@ export function Timeline({ result, running, elapsedSec, topic }: Props) {
                 <div>
                   <p className="text-sm font-medium text-blue-200">Agents deliberating</p>
                   <p className="text-2xs text-blue-300/50">
-                    Awaiting full result from server
+                    {/* PAR-26: turns now stream in over SSE — copy reflects
+                        the live render rather than the legacy "awaiting full
+                        result" wait. */}
+                    {result && result.turns.length > 0
+                      ? `${result.turns.length} turn${result.turns.length === 1 ? '' : 's'} so far`
+                      : 'Streaming live turns'}
                   </p>
                 </div>
               </div>
@@ -246,8 +252,46 @@ export function Timeline({ result, running, elapsedSec, topic }: Props) {
         )}
       </AnimatePresence>
 
-      {/* Result banner */}
-      {result && <ResultBanner result={result} />}
+      {/* PAR-26: failed-deliberation surface. Pre-PAR-26 the in-progress
+          card silently disappeared on a failure and the user was left
+          staring at a half-rendered transcript. We now flip the card to
+          an error state showing `result.error` from the canonical
+          snapshot so the failure is visible. */}
+      <AnimatePresence>
+        {result && !running && result.status === 'failed' && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            className="relative overflow-hidden rounded-xl bg-rose-500/[0.05] p-4 ring-1 ring-rose-400/20"
+            role="alert"
+            data-testid="deliberation-failed-card"
+          >
+            <div className="relative flex items-start gap-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-500/10">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="text-rose-400">
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5"/>
+                  <path d="M12 8v4m0 4h.01" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                </svg>
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-rose-200">
+                  Deliberation failed
+                </p>
+                <p className="mt-0.5 break-words text-2xs text-rose-300/70">
+                  {result.error ?? 'The engine returned an error before producing a final result.'}
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Result banner — suppressed for failed/in-flight runs since their
+          dedicated cards above own the lifecycle messaging (PAR-26). */}
+      {result && result.status !== 'failed' && result.status !== 'in_flight' && (
+        <ResultBanner result={result} />
+      )}
 
       {/* Synthesis */}
       <AnimatePresence>

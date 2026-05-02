@@ -192,10 +192,6 @@ export interface DeliberationAccepted {
   status: DeliberationStatus;
 }
 
-export interface DeliberationCreated extends DeliberationResult {
-  id: string;
-}
-
 export interface DeliberationSummary {
   id: string;
   topic: string;

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { NewDeliberation } from './components/NewDeliberation';
 import { Timeline } from './components/Timeline';
@@ -10,17 +10,58 @@ import {
   getActiveDeliberationId,
   setActiveDeliberationId,
 } from './lib/activeDeliberation';
+import { useDeliberationStream } from './lib/useDeliberationStream';
 import type { DeliberationResult } from './lib/types';
 
 export default function App() {
-  const [running, setRunning] = useState(false);
   const [topic, setTopic] = useState<string | null>(null);
-  const [result, setResult] = useState<DeliberationResult | null>(null);
+  // `staticResult` holds anything that ISN'T live-streaming: a completed
+  // deliberation loaded from the sidebar, a transcript loaded from disk,
+  // or a rehydrated terminal `GET /deliberate/:id` result. When the user
+  // submits a new run (or rehydrates an in-flight one) we hand the id to
+  // `useDeliberationStream` and read its `result` instead — the hook
+  // owns the in-progress state until a terminal status lands.
+  const [staticResult, setStaticResult] = useState<DeliberationResult | null>(
+    null,
+  );
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [streamSeed, setStreamSeed] = useState<DeliberationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const timerRef = useRef<number | null>(null);
+
+  // PAR-26: when a deliberation reaches its terminal status the hook
+  // surfaces the canonical snapshot via its `result`. This callback is
+  // the App-level cleanup — drop the localStorage rehydrate key so a
+  // second refresh lands on a clean home view, and bump the transcript
+  // list refresh key so the new row shows up in the sidebar.
+  const handleTerminal = useCallback((final: DeliberationResult) => {
+    clearActiveDeliberationId();
+    setRefreshKey((k) => k + 1);
+    if (final.topic) {
+      setTopic(final.topic);
+    }
+  }, []);
+
+  const stream = useDeliberationStream({
+    id: activeId,
+    initialResult: streamSeed,
+    onTerminal: handleTerminal,
+  });
+
+  // Effective result: while the hook owns an active id, prefer its
+  // (possibly partial) result. Otherwise fall back to whatever was loaded
+  // from the sidebar / transcript / direct GET.
+  const result: DeliberationResult | null =
+    activeId !== null ? stream.result : staticResult;
+  const running = stream.running;
+
+  // Surface the hook's error to the existing banner. Submit-path errors
+  // (POST failure) live in `error` independently because the hook never
+  // saw the id in that case.
+  const banner = error ?? stream.error;
 
   useEffect(() => {
     if (!running) {
@@ -40,30 +81,45 @@ export default function App() {
     };
   }, [running]);
 
-  // PAR-1: rehydrate from a persisted in-flight deliberation id on mount.
+  // PAR-1 + PAR-26: rehydrate from a persisted in-flight deliberation id
+  // on mount.
   //
   // If a previous tab wrote `parliament:active_deliberation_id` to
   // localStorage and the user hard-refreshed, we re-fetch via
   // `GET /deliberate/:id` so the in-progress / final card re-appears
-  // instead of a blank home view. We only run this once on mount and bail
-  // cleanly on every error path (404, network, parse) by dropping the key
-  // so the next refresh shows a clean state.
+  // instead of a blank home view. PAR-26 layers SSE on top: when the GET
+  // tells us the run is still `in_flight`, we hand the id to
+  // `useDeliberationStream` so the UI continues to render live turns
+  // instead of poll batches. Terminal results render directly and we
+  // drop the localStorage key.
   useEffect(() => {
     const persistedId = getActiveDeliberationId();
     if (!persistedId) return;
 
     let cancelled = false;
-    setRunning(true);
 
     (async () => {
       try {
         const r = await getDeliberation(persistedId);
         if (cancelled) return;
-        setResult(r);
         setTopic(r.topic);
-        // Server-stored deliberations are always terminal — `saveDeliberation`
-        // is only called once the engine returns. Clear the key so a second
-        // refresh after the result is on screen lands on the clean home view.
+        const status = r.status ?? 'completed';
+        if (status === 'in_flight') {
+          // PAR-26: hand off to the streaming hook. The hook resets
+          // `turns/events` to [] and rebuilds them from the SSE replay,
+          // so the GET's accumulated turns are intentionally discarded
+          // (see "Dedupe strategy" in `useDeliberationStream.ts`). The
+          // seed carries topic + preset so the topic hero renders
+          // immediately while the stream is connecting.
+          setStreamSeed({ ...r, turns: [], events: [] });
+          setActiveId(persistedId);
+          return;
+        }
+        // Terminal — render directly, no stream needed.
+        setStaticResult(r);
+        if (status === 'failed') {
+          setError(r.error ?? 'Deliberation failed.');
+        }
         clearActiveDeliberationId();
       } catch (err) {
         if (cancelled) return;
@@ -77,8 +133,6 @@ export default function App() {
         if (!/HTTP 404/i.test(message)) {
           setError(message);
         }
-      } finally {
-        if (!cancelled) setRunning(false);
       }
     })();
 
@@ -89,41 +143,59 @@ export default function App() {
 
   async function handleSubmit(t: string, preset: string, context?: string) {
     setError(null);
-    setResult(null);
+    setStaticResult(null);
     setTopic(t);
-    setRunning(true);
+    // Tear down any previous stream synchronously by clearing the id;
+    // the hook's cleanup closes the EventSource before we install a new id.
+    setActiveId(null);
     try {
       // PAR-16: forward optional prose context. `startDeliberation` strips
       // empty / whitespace-only values so we don't have to here.
-      const r = await startDeliberation(t, { preset, context });
+      const accepted = await startDeliberation(t, { preset, context });
       // PAR-1: persist the returned id so a hard refresh while the result
       // is on screen rehydrates from `GET /deliberate/:id` instead of
-      // dropping the user back to an empty home view. The mount effect
-      // takes ownership of clearing the key once it has rendered the
-      // rehydrated result; explicit user navigation (sidebar click, new
-      // submit) also clears via the matching handlers below.
-      setActiveDeliberationId(r.id);
-      setResult(r);
+      // dropping the user back to an empty home view. The terminal handler
+      // (and explicit navigation handlers below) own clearing the key.
+      setActiveDeliberationId(accepted.id);
+      // PAR-26: seed the hook with topic so the topic hero renders before
+      // the first SSE turn lands. The hook itself opens the stream.
+      setStreamSeed({
+        topic: t,
+        turns: [],
+        conflicts: [],
+        residueScore: 0,
+        resolved: false,
+        synthesis: null,
+        split: null,
+        terminationReason: 'max_rounds',
+        totalRounds: 0,
+        started_at: new Date().toISOString(),
+        completed_at: '',
+        events: [],
+        status: 'in_flight',
+        preset,
+        ...(context ? { context } : {}),
+      });
+      setActiveId(accepted.id);
       setRefreshKey((k) => k + 1);
     } catch (err) {
       // The POST never returned a usable id; nothing to persist. Make sure
       // we don't leave a stale id from a previous run lying around.
       clearActiveDeliberationId();
       setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setRunning(false);
     }
   }
 
   async function handleLoadDeliberation(id: string) {
     setError(null);
-    setRunning(false);
     // User explicitly navigated away from any in-flight resume — drop the
-    // key so the next refresh starts clean.
+    // key so the next refresh starts clean and tear down any open stream.
     clearActiveDeliberationId();
+    setActiveId(null);
+    setStreamSeed(null);
     try {
       const r = await getDeliberation(id);
-      setResult(r);
+      setStaticResult(r);
       setTopic(r.topic);
       setSidebarOpen(false);
     } catch (err) {
@@ -133,11 +205,12 @@ export default function App() {
 
   async function handleLoadTranscript(file: string) {
     setError(null);
-    setRunning(false);
     clearActiveDeliberationId();
+    setActiveId(null);
+    setStreamSeed(null);
     try {
       const r = await getTranscript(file);
-      setResult(r);
+      setStaticResult(r);
       setTopic(r.topic);
       setSidebarOpen(false);
     } catch (err) {
@@ -201,18 +274,20 @@ export default function App() {
             <NewDeliberation onSubmit={handleSubmit} disabled={running} />
 
             <AnimatePresence mode="wait">
-              {error && (
+              {banner && (
                 <motion.div
                   initial={{ opacity: 0, y: -8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -8 }}
                   className="flex items-start gap-3 rounded-xl border border-rose-500/20 bg-rose-500/5 px-4 py-3"
+                  role="alert"
+                  data-testid="deliberation-error-banner"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="mt-0.5 shrink-0 text-rose-400">
                     <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5"/>
                     <path d="M12 8v4m0 4h.01" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
                   </svg>
-                  <p className="text-sm text-rose-200/90">{error}</p>
+                  <p className="text-sm text-rose-200/90">{banner}</p>
                 </motion.div>
               )}
             </AnimatePresence>
