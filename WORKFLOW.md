@@ -1,7 +1,7 @@
 ---
 tracker:
   kind: linear
-  team_key: PAR
+  project_slug: c2f6ea5f493e
   active_states:
     - Todo
     - In Progress
