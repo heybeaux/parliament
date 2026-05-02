@@ -12,14 +12,25 @@ import type { DeliberationResult } from '@parliament/core';
  *   AC3 — `events[]` is populated from RedAgent + Sentry events.
  *   AC4 — Backward compat: an old client schema (no awareness of the new
  *         fields) parses a new response without error.
+ *
+ * PAR-18 — `POST /deliberate` no longer returns the enriched body inline;
+ * the route mints an id, persists a placeholder row with `status: 'in_flight'`,
+ * and returns `{id, status}` in 202. Enrichment runs on the GET path
+ * (`GET /deliberate/:id`). This suite drives the GET path directly: we set
+ * `mockGetDeliberation` to return a fully-formed result and assert that the
+ * router enriches it into the expected wire shape.
  */
 
 // `vi.hoisted` guarantees these refs exist before vi.mock factories run.
 const hoisted = vi.hoisted(() => ({
-  currentMockResult: { value: null as DeliberationResult | null },
   mockSaveDeliberation: vi.fn(),
   mockGetDeliberation: vi.fn(),
   mockListDeliberations: vi.fn().mockReturnValue([]),
+  mockCreateDeliberationRow: vi.fn(),
+  mockAppendTurn: vi.fn(),
+  mockAppendEvent: vi.fn(),
+  mockMarkCompleted: vi.fn(),
+  mockMarkFailed: vi.fn(),
 }));
 
 vi.mock('../db.js', () => ({
@@ -27,14 +38,22 @@ vi.mock('../db.js', () => ({
   saveDeliberation: (...args: unknown[]) => hoisted.mockSaveDeliberation(...args),
   getDeliberation: (...args: unknown[]) => hoisted.mockGetDeliberation(...args),
   listDeliberations: (...args: unknown[]) => hoisted.mockListDeliberations(...args),
+  createDeliberationRow: (...args: unknown[]) => hoisted.mockCreateDeliberationRow(...args),
+  appendTurn: (...args: unknown[]) => hoisted.mockAppendTurn(...args),
+  appendEvent: (...args: unknown[]) => hoisted.mockAppendEvent(...args),
+  markCompleted: (...args: unknown[]) => hoisted.mockMarkCompleted(...args),
+  markFailed: (...args: unknown[]) => hoisted.mockMarkFailed(...args),
 }));
 
 vi.mock('@parliament/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@parliament/core')>();
 
+  // Engine isn't directly used by the GET path, but we keep the mock so any
+  // POST-path test (or future addition) doesn't accidentally hit a real
+  // adapter.
   const MockDeliberationEngine = vi.fn().mockImplementation(() => ({
-    run: vi.fn().mockImplementation(() => Promise.resolve(hoisted.currentMockResult.value)),
-    runTopology: vi.fn().mockImplementation(() => Promise.resolve(hoisted.currentMockResult.value)),
+    run: vi.fn().mockResolvedValue(null),
+    runTopology: vi.fn().mockResolvedValue(null),
   }));
 
   const baseTopology = {
@@ -123,6 +142,7 @@ function baseResult(over: Partial<DeliberationResult>): DeliberationResult {
     started_at: '2026-01-01T00:00:00.000Z',
     completed_at: '2026-01-01T00:00:30.000Z',
     events: [],
+    status: 'completed',
     ...over,
   };
 }
@@ -137,26 +157,24 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('AC1 — turn record schema includes the four enrichment fields', () => {
-  it('every POST /deliberate turn carries model_name, neurotype_posture, word_count, convergence_delta', async () => {
-    hoisted.currentMockResult.value = baseResult({
-      turns: [
-        turn({
-          agent: 'Proposer',
-          neurotype: 'epistemic/evidence-first',
-          model: 'qwen3:8b',
-          content: 'one two three four',
-          round: 1,
-          word_count: 4,
-        }),
-      ],
-    });
+  it('every GET /deliberate/:id turn carries model_name, neurotype_posture, word_count, convergence_delta', async () => {
+    hoisted.mockGetDeliberation.mockReturnValue(
+      baseResult({
+        turns: [
+          turn({
+            agent: 'Proposer',
+            neurotype: 'epistemic/evidence-first',
+            model: 'qwen3:8b',
+            content: 'one two three four',
+            round: 1,
+            word_count: 4,
+          }),
+        ],
+      }),
+    );
 
     const app = makeApp();
-    const res = await app.request('/deliberate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ topic: 'test' }),
-    });
+    const res = await app.request('/deliberate/some-id');
     expect(res.status).toBe(200);
 
     const body = (await res.json()) as { turns: Array<Record<string, unknown>> };
@@ -177,25 +195,24 @@ describe('AC1 — turn record schema includes the four enrichment fields', () =>
   });
 
   it('falls back to recomputing word_count when the stored turn predates Stage 3', async () => {
-    hoisted.currentMockResult.value = baseResult({
-      turns: [
-        turn({
-          agent: 'Proposer',
-          neurotype: 'structured',
-          model: 'm',
-          content: 'alpha beta gamma',
-          round: 1,
-          // word_count intentionally omitted — older transcripts
-        }),
-      ],
-    });
+    hoisted.mockGetDeliberation.mockReturnValue(
+      baseResult({
+        turns: [
+          turn({
+            agent: 'Proposer',
+            neurotype: 'structured',
+            model: 'm',
+            content: 'alpha beta gamma',
+            round: 1,
+            // word_count intentionally omitted — older transcripts
+          }),
+        ],
+      }),
+    );
 
     const app = makeApp();
-    const res = await app.request('/deliberate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ topic: 'test' }),
-    });
+    const res = await app.request('/deliberate/some-id');
+    expect(res.status).toBe(200);
 
     const body = (await res.json()) as { turns: Array<{ word_count: number }> };
     expect(body.turns[0]!.word_count).toBe(3);
@@ -208,55 +225,53 @@ describe('AC1 — turn record schema includes the four enrichment fields', () =>
 
 describe('AC2 — convergence_delta is null on round 1, numeric on round > 1', () => {
   it('round-1 turn → convergence_delta is null', async () => {
-    hoisted.currentMockResult.value = baseResult({
-      turns: [
-        turn({ agent: 'Proposer', neurotype: 'p', model: 'm', content: 'x', round: 1 }),
-      ],
-    });
+    hoisted.mockGetDeliberation.mockReturnValue(
+      baseResult({
+        turns: [
+          turn({ agent: 'Proposer', neurotype: 'p', model: 'm', content: 'x', round: 1 }),
+        ],
+      }),
+    );
 
     const app = makeApp();
-    const res = await app.request('/deliberate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ topic: 'test' }),
-    });
+    const res = await app.request('/deliberate/some-id');
+    expect(res.status).toBe(200);
 
     const body = (await res.json()) as { turns: Array<{ convergence_delta: number | null }> };
     expect(body.turns[0]!.convergence_delta).toBeNull();
   });
 
   it('round-2+ turns → numeric convergence_delta computed from prior synth confidence', async () => {
-    hoisted.currentMockResult.value = baseResult({
-      totalRounds: 3,
-      turns: [
-        turn({ agent: 'Skeptic', neurotype: 'critical', model: 'm', content: 'a', round: 1 }),
-        turn({
-          agent: 'Synthesizer',
-          neurotype: 'integrative',
-          model: 'm',
-          content: 's1',
-          round: 1,
-          meta: { confidence: 0.4, consensus: false, agreed: [], unresolved: [] },
-        }),
-        turn({ agent: 'Skeptic', neurotype: 'critical', model: 'm', content: 'b', round: 2 }),
-        turn({
-          agent: 'Synthesizer',
-          neurotype: 'integrative',
-          model: 'm',
-          content: 's2',
-          round: 2,
-          meta: { confidence: 0.7, consensus: false, agreed: [], unresolved: [] },
-        }),
-        turn({ agent: 'Skeptic', neurotype: 'critical', model: 'm', content: 'c', round: 3 }),
-      ],
-    });
+    hoisted.mockGetDeliberation.mockReturnValue(
+      baseResult({
+        totalRounds: 3,
+        turns: [
+          turn({ agent: 'Skeptic', neurotype: 'critical', model: 'm', content: 'a', round: 1 }),
+          turn({
+            agent: 'Synthesizer',
+            neurotype: 'integrative',
+            model: 'm',
+            content: 's1',
+            round: 1,
+            meta: { confidence: 0.4, consensus: false, agreed: [], unresolved: [] },
+          }),
+          turn({ agent: 'Skeptic', neurotype: 'critical', model: 'm', content: 'b', round: 2 }),
+          turn({
+            agent: 'Synthesizer',
+            neurotype: 'integrative',
+            model: 'm',
+            content: 's2',
+            round: 2,
+            meta: { confidence: 0.7, consensus: false, agreed: [], unresolved: [] },
+          }),
+          turn({ agent: 'Skeptic', neurotype: 'critical', model: 'm', content: 'c', round: 3 }),
+        ],
+      }),
+    );
 
     const app = makeApp();
-    const res = await app.request('/deliberate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ topic: 'test' }),
-    });
+    const res = await app.request('/deliberate/some-id');
+    expect(res.status).toBe(200);
 
     const body = (await res.json()) as {
       turns: Array<{ round: number; agent: string; convergence_delta: number | null }>;
@@ -281,20 +296,19 @@ describe('AC2 — convergence_delta is null on round 1, numeric on round > 1', (
 // ---------------------------------------------------------------------------
 
 describe('AC3 — events[] surfaces RedAgent injections and Sentry warnings', () => {
-  it('passes through engine-emitted events on POST /deliberate', async () => {
-    hoisted.currentMockResult.value = baseResult({
-      events: [
-        { round: 3, kind: 'red_agent.injection', message: 'a disruptive thought' },
-        { round: 4, kind: 'sentry.echo', message: 'echo collapse detected' },
-      ],
-    });
+  it('passes through stored events on GET /deliberate/:id', async () => {
+    hoisted.mockGetDeliberation.mockReturnValue(
+      baseResult({
+        events: [
+          { round: 3, kind: 'red_agent.injection', message: 'a disruptive thought' },
+          { round: 4, kind: 'sentry.echo', message: 'echo collapse detected' },
+        ],
+      }),
+    );
 
     const app = makeApp();
-    const res = await app.request('/deliberate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ topic: 'test' }),
-    });
+    const res = await app.request('/deliberate/some-id');
+    expect(res.status).toBe(200);
 
     const body = (await res.json()) as { events: Array<{ round: number; kind: string; message: string }> };
     expect(body.events).toHaveLength(2);
@@ -311,37 +325,15 @@ describe('AC3 — events[] surfaces RedAgent injections and Sentry warnings', ()
   });
 
   it('returns events: [] when no events fired', async () => {
-    hoisted.currentMockResult.value = baseResult({ events: [] });
-
-    const app = makeApp();
-    const res = await app.request('/deliberate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ topic: 'test' }),
-    });
-
-    const body = (await res.json()) as { events: unknown[] };
-    expect(Array.isArray(body.events)).toBe(true);
-    expect(body.events).toHaveLength(0);
-  });
-
-  it('GET /deliberate/:id also returns events on stored rows', async () => {
-    hoisted.mockGetDeliberation.mockReturnValue(
-      baseResult({
-        events: [
-          { round: 2, kind: 'red_agent.injection', message: 'mid-run inject' },
-        ],
-      }),
-    );
+    hoisted.mockGetDeliberation.mockReturnValue(baseResult({ events: [] }));
 
     const app = makeApp();
     const res = await app.request('/deliberate/some-id');
     expect(res.status).toBe(200);
 
-    const body = (await res.json()) as { events: Array<{ round: number; kind: string; message: string }> };
-    expect(body.events).toEqual([
-      { round: 2, kind: 'red_agent.injection', message: 'mid-run inject' },
-    ]);
+    const body = (await res.json()) as { events: unknown[] };
+    expect(Array.isArray(body.events)).toBe(true);
+    expect(body.events).toHaveLength(0);
   });
 
   it('GET /deliberate/:id tolerates legacy stored rows that lack events', async () => {
@@ -366,18 +358,16 @@ describe('AC3 — events[] surfaces RedAgent injections and Sentry warnings', ()
 
 describe('AC4 — old client schemas parse new responses', () => {
   it('a legacy client that only knows about agent/neurotype/model/content/round still parses cleanly', async () => {
-    hoisted.currentMockResult.value = baseResult({
-      turns: [
-        turn({ agent: 'Proposer', neurotype: 'p', model: 'm', content: 'hi', round: 1 }),
-      ],
-    });
+    hoisted.mockGetDeliberation.mockReturnValue(
+      baseResult({
+        turns: [
+          turn({ agent: 'Proposer', neurotype: 'p', model: 'm', content: 'hi', round: 1 }),
+        ],
+      }),
+    );
 
     const app = makeApp();
-    const res = await app.request('/deliberate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ topic: 'test' }),
-    });
+    const res = await app.request('/deliberate/some-id');
     expect(res.status).toBe(200);
 
     const body = await res.json();

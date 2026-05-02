@@ -4,6 +4,17 @@ export type TerminationReason =
   | 'max_rounds'
   | 'red_agent_triggered';
 
+/**
+ * PAR-18 — lifecycle status of a deliberation row, mirrored from
+ * `@parliament/core`. `POST /deliberate` returns `{id, status: 'in_flight'}`
+ * before the engine runs; `GET /deliberate/:id` flips to `completed`
+ * (or `failed` with `error: <message>`) once the engine terminates. The
+ * UI uses this to drive the polling/streaming decision and to render an
+ * in-progress card during a live run. Old client builds without this
+ * field continue to render `completed` runs unchanged.
+ */
+export type DeliberationStatus = 'in_flight' | 'completed' | 'failed';
+
 export interface Turn {
   agent: string;
   neurotype: string;
@@ -131,6 +142,39 @@ export interface DeliberationResult {
    * landed; UI consumers should treat an absent field as `[]`.
    */
   events?: SystemEvent[];
+  /**
+   * PAR-18 — lifecycle status. Set to `'in_flight'` while the engine is
+   * still running (server returns partial state with whatever turns have
+   * landed so far), `'completed'` once the synthesizer's final turn is
+   * persisted, or `'failed'` if the engine throws. Optional for old
+   * server builds that predate PAR-18; the UI treats an absent value as
+   * `'completed'` (the legacy synchronous behavior).
+   */
+  status?: DeliberationStatus;
+  /**
+   * PAR-18 — error message captured when a background `runTopology()` run
+   * throws. Only populated alongside `status: 'failed'`. Optional and
+   * additive.
+   */
+  error?: string;
+}
+
+/**
+ * PAR-18 — minimal response shape returned by the new fire-and-forget
+ * `POST /deliberate`. The server mints a UUID, persists a placeholder
+ * row with `status: 'in_flight'`, kicks off the engine in the background,
+ * and returns this body inside ~1s. The UI then polls
+ * `GET /deliberate/:id` (or opens the SSE stream) to observe progress.
+ *
+ * Pre-PAR-18 server builds returned a fully-populated `DeliberationResult`
+ * directly; this lighter shape stays compatible because the existing
+ * caller path (`POST` → read `id` → store in localStorage) works the
+ * same — only the surrounding fields disappeared, and the legacy `id`
+ * inclusion is preserved.
+ */
+export interface DeliberationAccepted {
+  id: string;
+  status: DeliberationStatus;
 }
 
 export interface DeliberationCreated extends DeliberationResult {
@@ -144,6 +188,14 @@ export interface DeliberationSummary {
   resolved: number;
   total_rounds: number;
   termination_reason: string;
+  /**
+   * PAR-18 — lifecycle status surfaced on the list so an in-flight
+   * deliberation appears with a "running…" affordance instead of the
+   * neutral completed badge. Optional / additive — old server builds
+   * surface this as `'completed'` when populated, and consumers should
+   * treat an absent value as `'completed'`.
+   */
+  status?: DeliberationStatus;
   /**
    * PAR-20: topology preset id (e.g. `debate`, `star-chamber`, `jury`) that
    * produced this deliberation. Drives the per-preset color/badge in the

@@ -4,6 +4,7 @@ export type {
   Blackboard,
   DebateResult,
   DeliberationResult,
+  DeliberationStatus,
   SplitSummary,
   SystemEvent,
   TerminationReason,

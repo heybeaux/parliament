@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { Hono } from 'hono';
+import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 import type { Database } from 'better-sqlite3';
 import {
@@ -21,13 +22,23 @@ import {
 import type {
   Agent,
   DeliberationResult,
+  DeliberationStatus,
   SystemEvent,
   TopologyConfig,
   TopologyDeliberationConfig,
   TopologyStep,
   Turn,
 } from '@parliament/core';
-import { saveDeliberation, getDeliberation, listDeliberations } from './db.js';
+import {
+  getDeliberation,
+  listDeliberations,
+  createDeliberationRow,
+  appendTurn,
+  appendEvent,
+  markCompleted,
+  markFailed,
+} from './db.js';
+import { inflightBroker, type InflightEvent } from './inflight.js';
 import { loadServerConfig, type ServerConfig } from './config.js';
 import { corsMiddleware } from './middleware/cors.js';
 import { bearerAuth, API_KEY_ENV_VAR } from './middleware/auth.js';
@@ -237,6 +248,17 @@ interface EnrichedTurn extends Turn {
 interface EnrichedDeliberationResult extends Omit<DeliberationResult, 'turns'> {
   turns: EnrichedTurn[];
   events: SystemEvent[];
+  /**
+   * PAR-18 — lifecycle status surfaced on every GET. Always populated so
+   * `in_flight` / `completed` / `failed` is observable without parsing
+   * lower-level fields. Pre-PAR-18 stored rows surface `'completed'` (the
+   * legacy default applied by `getDeliberation`).
+   */
+  status: DeliberationStatus;
+  /**
+   * PAR-18 — only present when `status === 'failed'`.
+   */
+  error?: string;
 }
 
 /**
@@ -304,11 +326,23 @@ function enrichResult(result: DeliberationResult): EnrichedDeliberationResult {
     };
   });
 
-  return {
+  // PAR-18: surface a coherent status on every response. `getDeliberation`
+  // already maps NULL columns to `'completed'` for pre-PAR-18 rows; we
+  // just defend in depth here so any caller who hands us a result without
+  // status (e.g. tests that build the value inline) still gets a sane
+  // default.
+  const status: DeliberationStatus = result.status ?? 'completed';
+
+  const enriched: EnrichedDeliberationResult = {
     ...result,
     turns,
     events: result.events ?? [],
+    status,
   };
+  if (result.error !== undefined) {
+    enriched.error = result.error;
+  }
+  return enriched;
 }
 
 // ---------------------------------------------------------------------------
@@ -595,7 +629,7 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
   });
 
   // -------------------------------------------------------------------------
-  // POST /deliberate
+  // POST /deliberate (PAR-18 — fire-and-forget)
   //
   // Preset precedence (per Stage 1 elaboration decision):
   //   request.preset > [topology].active in parliament.toml > Debate fallback.
@@ -604,6 +638,26 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
   // `runTopology()`. The legacy hardcoded five-agent `run()` path is gone;
   // `runTopology(active=debate)` is byte-identical to the pre-refactor Debate
   // pipeline (pinned by the engine's `byte-identical-debate.test.ts`).
+  //
+  // PAR-18 wire-shape change:
+  //   The handler validates the request, mints a UUID, persists a placeholder
+  //   row with `status: 'in_flight'`, and returns HTTP 202 with
+  //   `{ id, status: 'in_flight' }` immediately — BEFORE the engine has done
+  //   any work. The actual `runTopology()` call runs in the background and
+  //   appends turns/events to the row as they land via the engine's
+  //   `onTurn` / `onEvent` callbacks. The row flips to `completed` (or
+  //   `failed` with `error: <message>`) when the engine resolves or throws.
+  //
+  //   Polling clients reach `GET /deliberate/:id` on a ~2s interval; SSE
+  //   clients open `GET /deliberate/:id/stream` and receive each turn as
+  //   it lands plus a final `status` event when the run terminates.
+  //
+  // Old client builds that don't know about `status` continue to work:
+  //   - For completed runs they GET the full `DeliberationResult` shape
+  //     and ignore the new `status` field.
+  //   - For in-flight runs they see a partially-populated result with
+  //     `turns: []` initially and growing — the existing UI rehydrate
+  //     path (PAR-1) reads through this transparently.
   // -------------------------------------------------------------------------
   app.post('/deliberate', async (c) => {
     let body: unknown;
@@ -652,10 +706,13 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
       );
     }
 
-    const engine = new DeliberationEngine();
-    let result;
+    // Build the topology config eagerly so any structural-config error
+    // (missing neurotype block, etc.) surfaces synchronously — that's a
+    // 500-class server problem the client should know about before we
+    // mint the placeholder row.
+    let topologyConfig: TopologyDeliberationConfig;
     try {
-      const topologyConfig = buildTopologyDeliberationConfig(resolvedTopology, {
+      topologyConfig = buildTopologyDeliberationConfig(resolvedTopology, {
         maxRounds: configOverrides?.maxRounds,
         redAgentInterval: configOverrides?.redAgentInterval,
         confidenceThreshold: configOverrides?.confidenceThreshold,
@@ -664,26 +721,106 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
         // and echoes it back unchanged on the result.
         ...(requestContext !== undefined ? { context: requestContext } : {}),
       });
-      result = await engine.runTopology(topic, topologyConfig);
     } catch (err) {
       return c.json(
-        { error: `Deliberation failed: ${err instanceof Error ? err.message : String(err)}` },
+        { error: `Failed to build topology config: ${err instanceof Error ? err.message : String(err)}` },
         500,
       );
     }
 
     const id = crypto.randomUUID();
 
+    // Persist the placeholder row BEFORE returning so a client that
+    // immediately polls `GET /deliberate/:id` sees `status: 'in_flight'`
+    // and an empty turns array — never a 404 race.
     try {
-      saveDeliberation(db, id, topic, result);
+      createDeliberationRow(db, {
+        id,
+        topic,
+        ...(requestContext !== undefined ? { context: requestContext } : {}),
+        preset: resolvedTopology.activePreset.id,
+      });
     } catch (err) {
       return c.json(
-        { error: `Failed to persist result: ${err instanceof Error ? err.message : String(err)}` },
+        { error: `Failed to persist placeholder: ${err instanceof Error ? err.message : String(err)}` },
         500,
       );
     }
 
-    return c.json({ id, ...enrichResult(result) }, 200);
+    // Wire the engine's turn/event callbacks so each fresh record lands
+    // on the persisted row AND fans out to any SSE subscriber. Errors in
+    // the persistence path are swallowed — losing one append is far less
+    // bad than aborting a 9-minute run mid-flight; the run still
+    // completes via `markCompleted` which writes the full snapshot.
+    const onTurn = (turn: Turn): void => {
+      try {
+        appendTurn(db, id, turn);
+      } catch (persistErr) {
+        console.error(
+          `Parliament: failed to persist turn for deliberation ${id}:`,
+          persistErr,
+        );
+      }
+      inflightBroker.publish(id, { type: 'turn', turn });
+    };
+    const onEvent = (event: SystemEvent): void => {
+      try {
+        appendEvent(db, id, event);
+      } catch (persistErr) {
+        console.error(
+          `Parliament: failed to persist event for deliberation ${id}:`,
+          persistErr,
+        );
+      }
+      inflightBroker.publish(id, { type: 'event', event });
+    };
+
+    // Kick off the engine in the background. We deliberately do NOT
+    // `await` this in the request handler — the whole point of PAR-18 is
+    // that long Star Chamber-class runs don't block the POST response.
+    // Errors must be caught here (not on the request promise) because
+    // the request has already returned by the time the engine resolves.
+    const engine = new DeliberationEngine();
+    void (async () => {
+      try {
+        const result = await engine.runTopology(topic, {
+          ...topologyConfig,
+          onTurn,
+          onEvent,
+        });
+        try {
+          markCompleted(db, id, result);
+        } catch (persistErr) {
+          console.error(
+            `Parliament: failed to mark deliberation ${id} completed:`,
+            persistErr,
+          );
+        }
+        inflightBroker.publish(id, { type: 'status', status: 'completed' });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        try {
+          markFailed(db, id, message);
+        } catch (persistErr) {
+          console.error(
+            `Parliament: failed to mark deliberation ${id} failed:`,
+            persistErr,
+          );
+        }
+        inflightBroker.publish(id, {
+          type: 'status',
+          status: 'failed',
+          error: message,
+        });
+      }
+    })();
+
+    // 202 Accepted — the standard "your request is being processed" code.
+    // The body carries the minimal pair the UI needs to start rehydrating
+    // (id) and the lifecycle marker that drives the polling/SSE decision
+    // (status). Old client builds that ignore `status` see only the id
+    // and continue to GET it as before.
+    return c.json({ id, status: 'in_flight' satisfies DeliberationStatus }, 202);
   });
 
   // -------------------------------------------------------------------------
@@ -753,7 +890,14 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
   });
 
   // -------------------------------------------------------------------------
-  // GET /deliberate/:id
+  // GET /deliberate/:id (PAR-18 — surfaces partial state during a live run)
+  //
+  // Returns whatever has been persisted so far: while the engine is running,
+  // the response carries `status: 'in_flight'` plus the turns/events that
+  // have landed up to this read. When the run reaches a terminal state the
+  // response carries `status: 'completed'` (or `'failed'` with an `error`
+  // field). Pre-PAR-18 clients that don't read `status` continue to see
+  // the same enriched shape as before for completed runs.
   // -------------------------------------------------------------------------
   app.get('/deliberate/:id', (c) => {
     const { id } = c.req.param();
@@ -773,6 +917,178 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
     }
 
     return c.json(enrichResult(result), 200);
+  });
+
+  // -------------------------------------------------------------------------
+  // GET /deliberate/:id/stream (PAR-18 — Server-Sent Events)
+  //
+  // SSE endpoint that streams turn/event updates as they land plus a final
+  // `status` event when the run terminates. On connect we replay whatever
+  // turns/events have already been persisted so a late subscriber doesn't
+  // miss the round-1 prologue, then subscribe to the in-flight broker for
+  // anything that lands afterward.
+  //
+  // Wire format (SSE):
+  //   event: turn          \n data: <Turn JSON>          \n\n
+  //   event: system_event  \n data: <SystemEvent JSON>   \n\n
+  //   event: status        \n data: {"status": "completed"} \n\n   (terminal)
+  //
+  // Deliberations that have already terminated by the time we connect:
+  //   we replay the persisted turns/events and emit one terminal `status`
+  //   event, then close. Clients can rely on always receiving a terminal
+  //   `status` event before the stream ends.
+  // -------------------------------------------------------------------------
+  app.get('/deliberate/:id/stream', (c) => {
+    const { id } = c.req.param();
+
+    return streamSSE(c, async (stream) => {
+      const initial = getDeliberation(db, id);
+      if (initial === null) {
+        await stream.writeSSE({
+          event: 'error',
+          data: JSON.stringify({ error: `Deliberation "${id}" not found` }),
+        });
+        return;
+      }
+
+      // Track the cursor into the deliberation's turn/event arrays so a
+      // race between "publish to broker" and "replay from DB" cannot
+      // emit the same record twice. We replay everything currently
+      // persisted, then forward only broker events whose turn/event we
+      // haven't already emitted.
+      let replayedTurns = initial.turns.length;
+      let replayedEvents = (initial.events ?? []).length;
+
+      // Replay persisted turns first — clients that connect mid-run
+      // need the full transcript so far.
+      for (const turn of initial.turns) {
+        await stream.writeSSE({
+          event: 'turn',
+          data: JSON.stringify(turn),
+        });
+      }
+      for (const event of initial.events ?? []) {
+        await stream.writeSSE({
+          event: 'system_event',
+          data: JSON.stringify(event),
+        });
+      }
+
+      // If the run has already terminated, emit the final status and
+      // close. No subscription needed — the broker will have already
+      // dropped the topic.
+      const initialStatus: DeliberationStatus = initial.status ?? 'completed';
+      if (initialStatus !== 'in_flight') {
+        const payload: Record<string, unknown> = { status: initialStatus };
+        if (initial.error !== undefined) {
+          payload['error'] = initial.error;
+        }
+        await stream.writeSSE({
+          event: 'status',
+          data: JSON.stringify(payload),
+        });
+        return;
+      }
+
+      // Bridge broker pushes onto the SSE stream. We use a simple async
+      // queue so the stream's awaited writes can drain naturally without
+      // dropping events under back-pressure.
+      const pending: InflightEvent[] = [];
+      let resumeWaiter: (() => void) | null = null;
+      let done = false;
+      let terminalEvent: InflightEvent | null = null;
+
+      const handler = (event: InflightEvent): void => {
+        // Keep the cursor moving so we don't re-emit a turn the broker
+        // sends right after we replayed it from the DB. The broker fires
+        // synchronously from the engine's onTurn/onEvent, which means
+        // any record visible in `initial.turns` will also surface from
+        // the broker exactly once — so we always advance the cursor.
+        if (event.type === 'turn') {
+          replayedTurns += 1;
+        } else if (event.type === 'event') {
+          replayedEvents += 1;
+        }
+        pending.push(event);
+        if (event.type === 'status') {
+          terminalEvent = event;
+        }
+        const resume = resumeWaiter;
+        if (resume !== null) {
+          resumeWaiter = null;
+          resume();
+        }
+      };
+
+      const unsubscribe = inflightBroker.subscribe(id, handler);
+
+      // Re-read the row AFTER subscribing to close the race window:
+      // if the deliberation completed between our initial read and
+      // subscribe call, the broker won't push a status (it's already
+      // dropped the topic). Re-checking the DB catches that case.
+      const recheck = getDeliberation(db, id);
+      if (recheck !== null && recheck.status !== 'in_flight') {
+        // Replay any new turns/events that landed in the gap.
+        const newTurns = recheck.turns.slice(replayedTurns);
+        for (const turn of newTurns) {
+          await stream.writeSSE({ event: 'turn', data: JSON.stringify(turn) });
+        }
+        const allEvents = recheck.events ?? [];
+        const newEvents = allEvents.slice(replayedEvents);
+        for (const event of newEvents) {
+          await stream.writeSSE({ event: 'system_event', data: JSON.stringify(event) });
+        }
+        const finalStatus: DeliberationStatus = recheck.status ?? 'completed';
+        const payload: Record<string, unknown> = { status: finalStatus };
+        if (recheck.error !== undefined) {
+          payload['error'] = recheck.error;
+        }
+        await stream.writeSSE({ event: 'status', data: JSON.stringify(payload) });
+        unsubscribe();
+        return;
+      }
+
+      // Drain the broker queue until the deliberation reaches a
+      // terminal status. The await on `new Promise<void>` is what
+      // yields control back to Node so the engine can run.
+      try {
+        while (!done) {
+          if (pending.length === 0) {
+            await new Promise<void>((resolve) => {
+              resumeWaiter = resolve;
+            });
+            continue;
+          }
+          const next = pending.shift()!;
+          if (next.type === 'turn') {
+            await stream.writeSSE({
+              event: 'turn',
+              data: JSON.stringify(next.turn),
+            });
+          } else if (next.type === 'event') {
+            await stream.writeSSE({
+              event: 'system_event',
+              data: JSON.stringify(next.event),
+            });
+          } else {
+            const payload: Record<string, unknown> = { status: next.status };
+            if (next.error !== undefined) {
+              payload['error'] = next.error;
+            }
+            await stream.writeSSE({
+              event: 'status',
+              data: JSON.stringify(payload),
+            });
+            done = true;
+          }
+          if (terminalEvent !== null && pending.length === 0) {
+            done = true;
+          }
+        }
+      } finally {
+        unsubscribe();
+      }
+    });
   });
 
   return app;

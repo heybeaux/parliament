@@ -267,7 +267,7 @@ describe('REST API end-to-end (real engine + in-memory SQLite)', () => {
     app = createRouter(db);
   });
 
-  it('POST /deliberate runs a real engine and persists the result', async () => {
+  it('POST /deliberate runs a real engine in the background and persists the result (PAR-18)', async () => {
     const res = await app.request('/deliberate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -277,19 +277,46 @@ describe('REST API end-to-end (real engine + in-memory SQLite)', () => {
       }),
     });
 
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(typeof body['id']).toBe('string');
-    expect(body['topic']).toBe('Should we adopt remote-first culture?');
-    expect(Array.isArray(body['turns'])).toBe(true);
-    expect((body['turns'] as unknown[]).length).toBeGreaterThan(0);
-    expect(body['terminationReason']).toBe('consensus');
+    // PAR-18: POST returns 202 + {id, status: 'in_flight'} immediately;
+    // the engine runs in the background and writes turns/events
+    // progressively. We then poll GET /deliberate/:id until the row
+    // flips to `completed` (this is what a polling client does in
+    // production today).
+    expect(res.status).toBe(202);
+    const accepted = (await res.json()) as Record<string, unknown>;
+    expect(typeof accepted['id']).toBe('string');
+    expect(accepted['status']).toBe('in_flight');
 
-    // Row landed in SQLite via real saveDeliberation/getDeliberation.
-    const id = body['id'] as string;
+    const id = accepted['id'] as string;
+
+    // Poll until terminal — at most ~2s; the mocked engine in this test
+    // resolves on the next microtask so a tight loop is sufficient.
+    const deadline = Date.now() + 5000;
+    let final: Record<string, unknown> | null = null;
+    while (Date.now() < deadline) {
+      const get = await app.request(`/deliberate/${id}`);
+      expect(get.status).toBe(200);
+      const body = (await get.json()) as Record<string, unknown>;
+      if (body['status'] === 'completed' || body['status'] === 'failed') {
+        final = body;
+        break;
+      }
+      // tiny delay so the background promise can settle.
+      await new Promise((r) => setImmediate(r));
+    }
+
+    expect(final).not.toBeNull();
+    expect(final!['status']).toBe('completed');
+    expect(final!['topic']).toBe('Should we adopt remote-first culture?');
+    expect(Array.isArray(final!['turns'])).toBe(true);
+    expect((final!['turns'] as unknown[]).length).toBeGreaterThan(0);
+    expect(final!['terminationReason']).toBe('consensus');
+
+    // Row landed in SQLite via real createDeliberationRow + markCompleted.
     const stored = getDeliberation(db, id);
     expect(stored).not.toBeNull();
     expect(stored?.topic).toBe('Should we adopt remote-first culture?');
+    expect(stored?.status).toBe('completed');
   });
 
   it('GET /deliberate/:id returns a previously saved result', async () => {
@@ -334,7 +361,7 @@ describe('REST API end-to-end (real engine + in-memory SQLite)', () => {
   // -------------------------------------------------------------------------
   // PAR-16: deliberation context — POST + GET round-trip + persistence
   // -------------------------------------------------------------------------
-  it('POST /deliberate accepts context, echoes it, persists it, and GET round-trips it', async () => {
+  it('POST /deliberate accepts context, persists it via the placeholder + completion path, and GET round-trips it (PAR-16 + PAR-18)', async () => {
     const context =
       'Endeavour is a single-model reasoning pipeline. ' +
       'Parliament is a multi-agent deliberation engine. ' +
@@ -351,30 +378,50 @@ describe('REST API end-to-end (real engine + in-memory SQLite)', () => {
       }),
     });
 
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, unknown>;
+    // PAR-18 — 202 with mint-on-submit shape; the actual context echo is
+    // observed via the persisted row, not the POST body. A pre-PAR-18
+    // client that read `context` off the POST response now reads it off
+    // the GET /deliberate/:id response (which is the same persisted row).
+    expect(res.status).toBe(202);
+    const accepted = (await res.json()) as Record<string, unknown>;
+    expect(typeof accepted['id']).toBe('string');
+    expect(accepted['status']).toBe('in_flight');
+    const id = accepted['id'] as string;
 
-    // POST response echoes the context unchanged.
-    expect(body['context']).toBe(context);
-    expect(body['topic']).toBe('Should Endeavour integrate Parliament?');
-    const id = body['id'] as string;
-    expect(typeof id).toBe('string');
+    // The placeholder row is inserted synchronously with the context
+    // column populated, so the column reads even before the engine
+    // finishes.
+    const placeholder = getDeliberation(db, id);
+    expect(placeholder).not.toBeNull();
+    expect(placeholder?.context).toBe(context);
+
+    // Poll until completion.
+    const deadline = Date.now() + 5000;
+    let final: Record<string, unknown> | null = null;
+    while (Date.now() < deadline) {
+      const get = await app.request(`/deliberate/${id}`);
+      const body = (await get.json()) as Record<string, unknown>;
+      if (body['status'] === 'completed' || body['status'] === 'failed') {
+        final = body;
+        break;
+      }
+      await new Promise((r) => setImmediate(r));
+    }
+    expect(final).not.toBeNull();
 
     // SQLite row carries the context — the dedicated column survives the
     // round-trip even when the JSON blob is stripped.
     const stored = getDeliberation(db, id);
     expect(stored).not.toBeNull();
     expect(stored?.context).toBe(context);
+    expect(stored?.status).toBe('completed');
 
     // GET /deliberate/:id round-trips the context verbatim.
-    const fetched = await app.request(`/deliberate/${id}`);
-    expect(fetched.status).toBe(200);
-    const fetchedBody = (await fetched.json()) as Record<string, unknown>;
-    expect(fetchedBody['context']).toBe(context);
-    expect(fetchedBody['topic']).toBe('Should Endeavour integrate Parliament?');
+    expect(final!['context']).toBe(context);
+    expect(final!['topic']).toBe('Should Endeavour integrate Parliament?');
   });
 
-  it('POST /deliberate without context omits the field on the response', async () => {
+  it('POST /deliberate without context: persisted row omits the context field (PAR-18)', async () => {
     const res = await app.request('/deliberate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -384,8 +431,23 @@ describe('REST API end-to-end (real engine + in-memory SQLite)', () => {
       }),
     });
 
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(body['context']).toBeUndefined();
+    expect(res.status).toBe(202);
+    const accepted = (await res.json()) as Record<string, unknown>;
+    const id = accepted['id'] as string;
+
+    // Poll until terminal, then check the GET shape.
+    const deadline = Date.now() + 5000;
+    let final: Record<string, unknown> | null = null;
+    while (Date.now() < deadline) {
+      const get = await app.request(`/deliberate/${id}`);
+      const body = (await get.json()) as Record<string, unknown>;
+      if (body['status'] === 'completed' || body['status'] === 'failed') {
+        final = body;
+        break;
+      }
+      await new Promise((r) => setImmediate(r));
+    }
+    expect(final).not.toBeNull();
+    expect(final!['context']).toBeUndefined();
   });
 });
