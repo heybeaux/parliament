@@ -13,6 +13,35 @@ export interface Turn {
   /** 1-indexed round number assigned by the engine when this turn was recorded. */
   round: number;
   osi_score?: number;
+  /**
+   * PAR-10 enrichment — wire-stable echo of the model identifier surfaced
+   * by the Stage 3 Timeline turn-card model badge. Pre-Stage-3 transcripts
+   * may omit this field; consumers must fall back to `model` (or hide the
+   * badge) when absent. Kept additive — `model` is NOT renamed.
+   */
+  model_name?: string;
+  /**
+   * PAR-10 enrichment — short plain-language posture label for the agent
+   * (e.g. "evidence-first", "adversarial", "reconciliation"). Surfaced on
+   * the turn-card secondary line. Pre-Stage-3 transcripts may omit this
+   * field; consumers must hide the chip when absent.
+   */
+  neurotype_posture?: string;
+  /**
+   * PAR-10 enrichment — whitespace-delimited word count of `content`,
+   * trusted as engine-supplied. Pre-Stage-3 transcripts may omit this
+   * field; the turn-card hides the badge in that case rather than
+   * recomputing.
+   */
+  word_count?: number;
+  /**
+   * PAR-10 enrichment — sign-aware convergence delta between the two prior
+   * synthesizer rounds. The server's `EnrichedTurn` narrows the engine's
+   * `0`-when-unmeasurable convention to `null` so the UI can render
+   * `—` for round-1 / no-prior-synthesis turns. Pre-Stage-3 transcripts
+   * may omit the field entirely (the badge hides in that case).
+   */
+  convergence_delta?: number | null;
 }
 
 export interface Conflict {
