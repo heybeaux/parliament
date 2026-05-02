@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { DeliberationSummary, TranscriptFile } from '../lib/types';
 import { listDeliberations, listTranscripts } from '../lib/api';
+import { PresetBadge } from './PresetBadge';
 
 interface Props {
   refreshKey: number;
@@ -123,6 +124,14 @@ export function TranscriptList({ refreshKey, onLoadDeliberation, onLoadTranscrip
                       onClick={() => onLoadDeliberation(d.id)}
                       className="surface-interactive block w-full rounded-xl px-3.5 py-3 text-left"
                     >
+                      {/* PAR-20: preset badge above the topic line so
+                          same-topic, different-preset runs are visually
+                          distinct without a click. Legacy rows (preset
+                          null/missing) render the neutral em-dash badge
+                          via the PresetBadge fallback contract. */}
+                      <div className="mb-1.5 flex items-center gap-2">
+                        <PresetBadge presetId={d.preset} />
+                      </div>
                       <div className="flex items-start justify-between gap-2">
                         <span className="text-sm font-medium leading-snug text-zinc-200 line-clamp-2">
                           {d.topic}
