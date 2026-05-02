@@ -22,7 +22,7 @@ export class RedAgent implements Agent {
       .map((t) => `[${t.agent}]: ${t.content}`)
       .join('\n\n');
 
-    const header = buildPromptHeader(blackboard.topic);
+    const header = buildPromptHeader(blackboard.topic, blackboard.context);
     const userPrompt = recentTurns.length > 0
       ? `${header}\n\nCurrent debate:\n\n${recentTurns}`
       : header;

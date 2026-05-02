@@ -250,6 +250,74 @@ describe('POST /deliberate', () => {
     expect(res.status).toBe(200);
   });
 
+  it('forwards optional context to runTopology and echoes it on the response (PAR-16)', async () => {
+    const { DeliberationEngine } = await import('@parliament/core');
+    const EngineMock = vi.mocked(DeliberationEngine);
+
+    const context = 'A multi-paragraph background brief about the system at hand.';
+
+    // Drive the engine mock so its returned result carries the context the
+    // server forwarded, mirroring real engine behaviour.
+    EngineMock.mockImplementationOnce(() => ({
+      run: vi.fn(),
+      runTopology: vi.fn(async (_topic: string, cfg: { context?: string }) => ({
+        topic: 'context test',
+        ...(cfg.context !== undefined ? { context: cfg.context } : {}),
+        turns: [],
+        conflicts: [],
+        residueScore: 0,
+        resolved: true,
+        synthesis: 'final',
+        split: null,
+        terminationReason: 'consensus',
+        totalRounds: 1,
+        started_at: '2026-01-01T00:00:00.000Z',
+        completed_at: '2026-01-01T00:00:30.000Z',
+        events: [],
+      })),
+    }) as unknown as InstanceType<typeof DeliberationEngine>);
+
+    const app = makeApp();
+
+    const res = await app.request('/deliberate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic: 'context test', context }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['context']).toBe(context);
+
+    // The engine instance received the context on its runTopology config.
+    const lastInstance = EngineMock.mock.results.at(-1)!.value as {
+      runTopology: ReturnType<typeof vi.fn>;
+    };
+    type RunTopologyArgs = [string, { context?: string }];
+    const [, configArg] = lastInstance.runTopology.mock.calls[0] as RunTopologyArgs;
+    expect(configArg.context).toBe(context);
+  });
+
+  it('omits context from runTopology config when not supplied (PAR-16)', async () => {
+    const { DeliberationEngine } = await import('@parliament/core');
+    const EngineMock = vi.mocked(DeliberationEngine);
+    const app = makeApp();
+
+    const res = await app.request('/deliberate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic: 'no context here' }),
+    });
+
+    expect(res.status).toBe(200);
+    const lastInstance = EngineMock.mock.results.at(-1)!.value as {
+      runTopology: ReturnType<typeof vi.fn>;
+    };
+    type RunTopologyArgs = [string, { context?: string }];
+    const [, configArg] = lastInstance.runTopology.mock.calls[0] as RunTopologyArgs;
+    expect(configArg.context).toBeUndefined();
+  });
+
   it('returns 400 when body is not valid JSON', async () => {
     const app = makeApp();
 

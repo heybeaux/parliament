@@ -24,10 +24,21 @@ export interface DeliberateOptions {
 
 export async function startDeliberation(
   topic: string,
-  options?: { preset?: string; config?: DeliberateOptions },
+  options?: {
+    preset?: string;
+    /**
+     * PAR-16: optional free-form prose context. When non-empty, included
+     * as the `context` field on the POST body so the engine prepends it
+     * to every agent's user message. The legacy inline `CONTEXT:` marker
+     * in the topic still works for back-compat but is deprecated.
+     */
+    context?: string;
+    config?: DeliberateOptions;
+  },
   signal?: AbortSignal,
 ): Promise<DeliberationCreated> {
   const preset = options?.preset?.trim();
+  const context = options?.context?.trim();
   const config = options?.config;
   const res = await fetch(`${BASE}/deliberate`, {
     method: 'POST',
@@ -35,6 +46,7 @@ export async function startDeliberation(
     body: JSON.stringify({
       topic,
       ...(preset ? { preset } : {}),
+      ...(context ? { context } : {}),
       ...(config ? { config } : {}),
     }),
     signal,

@@ -171,7 +171,7 @@ export class SynthesizerAgent implements Agent {
       .map((c) => `- ${c.between.join(' vs ')}: ${c.description}`)
       .join('\n');
 
-    let userPrompt = buildPromptHeader(blackboard.topic);
+    let userPrompt = buildPromptHeader(blackboard.topic, blackboard.context);
     if (recentTurns.length > 0) {
       userPrompt += `\n\nDiscussion:\n\n${recentTurns}`;
     }

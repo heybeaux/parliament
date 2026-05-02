@@ -46,6 +46,19 @@ const DeliberateBodySchema = z.object({
    * Precedence: request.preset > [topology].active > Debate fallback.
    */
   preset: z.string().min(1).optional(),
+  /**
+   * Optional free-form prose context the user supplies alongside the topic
+   * (PAR-16). When non-empty, the engine prepends it to every non-Sentry
+   * agent's user-message turn under a stable `## Background` heading so each
+   * agent starts with the same brief. The server echoes the context back
+   * unchanged on the response and persists it on the deliberation record so
+   * `GET /deliberate/:id` round-trips it.
+   *
+   * The legacy inline-`CONTEXT:` workaround that pre-PAR-16 callers stuffed
+   * into `topic` keeps working unchanged for back-compat — it is documented
+   * as deprecated; new callers should use this field instead.
+   */
+  context: z.string().optional(),
   config: z
     .object({
       maxRounds: z.number().int().positive().optional(),
@@ -144,7 +157,13 @@ function buildStructuralAgents(): {
  */
 function buildTopologyDeliberationConfig(
   topology: TopologyConfig,
-  overrides: { maxRounds?: number; redAgentInterval?: number; confidenceThreshold?: number },
+  overrides: {
+    maxRounds?: number;
+    redAgentInterval?: number;
+    confidenceThreshold?: number;
+    /** PAR-16: optional user-supplied prose context. */
+    context?: string;
+  },
 ): TopologyDeliberationConfig {
   const config = loadConfig();
   const defaults = config.parliament ?? DEFAULT_PARLIAMENT_DEFAULTS;
@@ -169,7 +188,7 @@ function buildTopologyDeliberationConfig(
     return new StubNeurotypeAgent(step.id, step.neurotype, adapter);
   };
 
-  return {
+  const out: TopologyDeliberationConfig = {
     maxRounds: overrides.maxRounds ?? defaults.max_rounds,
     redAgentInterval: overrides.redAgentInterval ?? defaults.red_agent_interval,
     confidenceThreshold: overrides.confidenceThreshold ?? defaults.confidence_threshold,
@@ -179,6 +198,10 @@ function buildTopologyDeliberationConfig(
     redAgent: structural.redAgent,
     sentry: structural.sentry,
   };
+  if (overrides.context !== undefined) {
+    out.context = overrides.context;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -595,7 +618,12 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
       return c.json({ error: 'Validation failed', issues: parsed.error.issues }, 400);
     }
 
-    const { topic, preset: requestPreset, config: configOverrides } = parsed.data;
+    const {
+      topic,
+      preset: requestPreset,
+      context: requestContext,
+      config: configOverrides,
+    } = parsed.data;
 
     let topology: TopologyConfig;
     try {
@@ -631,6 +659,10 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
         maxRounds: configOverrides?.maxRounds,
         redAgentInterval: configOverrides?.redAgentInterval,
         confidenceThreshold: configOverrides?.confidenceThreshold,
+        // PAR-16: forward the user-supplied prose context (when present) so
+        // the engine prepends it to every non-Sentry agent's user prompt
+        // and echoes it back unchanged on the result.
+        ...(requestContext !== undefined ? { context: requestContext } : {}),
       });
       result = await engine.runTopology(topic, topologyConfig);
     } catch (err) {

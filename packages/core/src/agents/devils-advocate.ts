@@ -71,7 +71,7 @@ export class DevilsAdvocateAgent implements Agent {
       .map((t) => `[${t.agent}]: ${t.content}`)
       .join('\n\n');
 
-    const header = buildPromptHeader(blackboard.topic);
+    const header = buildPromptHeader(blackboard.topic, blackboard.context);
     const round1 = isRoundOne(blackboard.turns);
     const systemPrompt = round1
       ? DEVILS_ADVOCATE_ROUND1_SYSTEM_PROMPT

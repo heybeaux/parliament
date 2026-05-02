@@ -6,7 +6,7 @@ export { SynthesizerAgent } from './synthesizer.js';
 export { RedAgent } from './red-agent.js';
 export type { SentryResult } from './sentry.js';
 export { SentryAgent } from './sentry.js';
-export { enforceWordCap, jaccardSimilarity } from './utils.js';
+export { CONTEXT_HEADING, buildPromptHeader, enforceWordCap, jaccardSimilarity } from './utils.js';
 
 // Stage 1 neurotype stubs — implementations land in per-agent tasks.
 export { StubNeurotypeAgent } from './stub-agent.js';

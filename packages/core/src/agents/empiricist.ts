@@ -26,7 +26,7 @@ export class EmpiricistAgent implements Agent {
       .map((t) => `[${t.agent}]: ${t.content}`)
       .join('\n\n');
 
-    const header = buildPromptHeader(blackboard.topic);
+    const header = buildPromptHeader(blackboard.topic, blackboard.context);
     const userPrompt = recentTurns.length > 0
       ? `${header}\n\nRecent discussion:\n\n${recentTurns}`
       : header;

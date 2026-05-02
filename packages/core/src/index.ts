@@ -54,6 +54,8 @@ export {
   RedAgent,
   SentryAgent,
   StubNeurotypeAgent,
+  CONTEXT_HEADING,
+  buildPromptHeader,
   enforceWordCap,
   jaccardSimilarity,
   BUILTIN_AGENT_REGISTRY,
