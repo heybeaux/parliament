@@ -1,6 +1,5 @@
-import type { ModelAdapter } from '../adapters/base.js';
 import type { Blackboard } from '../types.js';
-import type { Agent, AgentResult } from './base.js';
+import { AgentBase, type AgentResult } from './base.js';
 import { buildPromptHeader, capWithMeta } from './utils.js';
 
 export const PRAGMATIST_SYSTEM_PROMPT =
@@ -9,15 +8,10 @@ export const PRAGMATIST_SYSTEM_PROMPT =
   'When the maximalist version of the proposal is infeasible, suggest a minimum viable variant that respects the binding constraints and label it "minimum viable variant". ' +
   'Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists.';
 
-export class PragmatistAgent implements Agent {
+export class PragmatistAgent extends AgentBase {
   readonly role = 'Pragmatist';
   readonly neurotype = 'pragmatist';
   readonly posture = 'constraint-first';
-  readonly modelName: string;
-
-  constructor(private readonly adapter: ModelAdapter) {
-    this.modelName = adapter.modelName;
-  }
 
   async generate(blackboard: Blackboard): Promise<AgentResult> {
     const recentTurns = blackboard.turns
@@ -35,7 +29,8 @@ export class PragmatistAgent implements Agent {
       : header;
 
     // PAR-23: forward adapter telemetry onto the returned AgentResult.
-    const raw = await this.adapter.generate(userPrompt, PRAGMATIST_SYSTEM_PROMPT);
+    // PAR-25: failover-wrapped call.
+    const raw = await this.generateWithFailover(userPrompt, PRAGMATIST_SYSTEM_PROMPT);
     return capWithMeta(raw);
   }
 }

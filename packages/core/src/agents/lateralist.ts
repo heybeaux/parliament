@@ -1,6 +1,5 @@
-import type { ModelAdapter } from '../adapters/base.js';
 import type { Blackboard } from '../types.js';
-import type { Agent, AgentResult } from './base.js';
+import { AgentBase, type AgentResult } from './base.js';
 import { buildPromptHeader, capWithMeta } from './utils.js';
 
 export const LATERALIST_SYSTEM_PROMPT =
@@ -9,15 +8,10 @@ export const LATERALIST_SYSTEM_PROMPT =
   'Then offer a concrete cross-domain analogy that shares that shape — e.g., from biology, military history, urban planning, sport, finance, ecology, or the trades — and use the literal word "analogy" or "analogous" so the move is visible in the transcript. The analogy must come from a domain materially different from the topic itself. ' +
   'Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists.';
 
-export class LateralistAgent implements Agent {
+export class LateralistAgent extends AgentBase {
   readonly role = 'Lateralist';
   readonly neurotype = 'lateralist';
   readonly posture = 'structural-analogy';
-  readonly modelName: string;
-
-  constructor(private readonly adapter: ModelAdapter) {
-    this.modelName = adapter.modelName;
-  }
 
   async generate(blackboard: Blackboard): Promise<AgentResult> {
     const recentTurns = blackboard.turns
@@ -35,7 +29,8 @@ export class LateralistAgent implements Agent {
       : header;
 
     // PAR-23: forward adapter telemetry onto the returned AgentResult.
-    const raw = await this.adapter.generate(userPrompt, LATERALIST_SYSTEM_PROMPT);
+    // PAR-25: failover-wrapped call.
+    const raw = await this.generateWithFailover(userPrompt, LATERALIST_SYSTEM_PROMPT);
     return capWithMeta(raw);
   }
 }

@@ -129,7 +129,8 @@ export type SystemEventKind =
   | 'parallel_block_end'
   | 'synthesis_attempt'
   | 'consensus_reached'
-  | 'termination';
+  | 'termination'
+  | 'provider.failover';
 
 /**
  * Out-of-band engine event surfaced by the Stage 3 Observability panel.

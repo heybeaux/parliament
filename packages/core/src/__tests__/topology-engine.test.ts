@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { parse } from 'smol-toml';
+import { ModelConnectionError, type ModelAdapter } from '../adapters/base.js';
 import type { Agent, AgentResult } from '../agents/base.js';
+import { ProposerAgent } from '../agents/proposer.js';
 import type { SentryResult } from '../agents/sentry.js';
 import type { SynthesizerResult } from '../agents/synthesizer.js';
 import type {
@@ -13,6 +15,7 @@ import type { Blackboard, SynthesizerMeta } from '../types.js';
 import {
   DeliberationEngine,
   type NeurotypeResolver,
+  type NeurotypeResolverContext,
   type TopologyDeliberationConfig,
   type TopologyRuntimeLogger,
 } from '../engine.js';
@@ -925,5 +928,110 @@ active = "debate"
     for (const t of result.turns.filter((t) => t.agent !== 'Synthesizer')) {
       expect(t.residue_remaining).toBeUndefined();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PAR-25 — provider failover end-to-end on the topology runtime
+//
+// This is the integration counterpart to the AgentBase unit tests in
+// `agents/__tests__/agents.test.ts`. We wire a real `ProposerAgent` whose
+// primary adapter throws `ModelConnectionError` and whose fallback adapter
+// resolves cleanly. The engine MUST:
+//   - record the Proposer turn against the FALLBACK's `modelName` (the
+//     primary's model never produced content), and
+//   - emit exactly one `provider.failover` SystemEvent on the run's
+//     `events[]` array, stamped with the round in which the failover fired.
+// ---------------------------------------------------------------------------
+
+describe('runTopology — PAR-25 provider failover integration', () => {
+  it('emits a provider.failover event and records the fallback model when the primary connection-errors', async () => {
+    const topology = buildTopology(`
+[topology]
+active = "debate"
+`);
+
+    // Primary adapter — always throws ModelConnectionError, exercising the
+    // AgentBase failover branch.
+    const primary: ModelAdapter = {
+      modelName: 'primary-model',
+      generate: vi.fn().mockRejectedValue(
+        new ModelConnectionError('primary unreachable'),
+      ),
+    };
+    // Fallback adapter — succeeds with a short prose response.
+    const fallback: ModelAdapter = {
+      modelName: 'fallback-model',
+      generate: vi.fn().mockResolvedValue({ content: 'fallback proposal text' }),
+    };
+
+    // Skeptic stays as a plain mock; it's the Proposer we want to exercise
+    // through the AgentBase failover path.
+    const skeptic = makeAgent('Skeptic', 'skeptic', 'skeptical view');
+
+    // Custom resolver — wires the engine's onProviderFailover callback into
+    // the Proposer's runtime options, exactly as the production server-side
+    // resolver does. The Skeptic falls back to the static-map resolver.
+    const fallbackMap = makeResolver({ skeptic });
+    const resolveNeurotype: NeurotypeResolver = (
+      step: TopologyStep,
+      context?: NeurotypeResolverContext,
+    ): Agent => {
+      if (step.neurotype === 'proposer') {
+        return new ProposerAgent(primary, {
+          fallbackAdapter: fallback,
+          ...(context?.onProviderFailover !== undefined
+            ? { onProviderFailover: context.onProviderFailover }
+            : {}),
+        });
+      }
+      return fallbackMap(step, context);
+    };
+
+    const baseConfig = makeBaseConfig(topology, { skeptic }, { maxRounds: 1 });
+    const config: TopologyDeliberationConfig = {
+      ...baseConfig,
+      resolveNeurotype,
+    };
+
+    const engine = new DeliberationEngine();
+    const result = await engine.runTopology('failover topic', config);
+
+    // Exactly one provider.failover event landed on the run's events[].
+    const failoverEvents = result.events.filter((e) => e.kind === 'provider.failover');
+    expect(failoverEvents).toHaveLength(1);
+    const failoverEvent = failoverEvents[0]!;
+    // Round 1 — the failover fired during the Proposer's first call.
+    expect(failoverEvent.round).toBe(1);
+    expect(typeof failoverEvent.timestamp).toBe('string');
+    // Event payload identifies primary, fallback, and the connection error.
+    const data = failoverEvent.data as {
+      neurotype?: string;
+      primary?: string;
+      fallback?: string;
+      error?: string;
+    } | undefined;
+    expect(data?.neurotype).toBe('structured');
+    expect(data?.primary).toBe('primary-model');
+    expect(data?.fallback).toBe('fallback-model');
+    expect(data?.error).toBe('primary unreachable');
+
+    // The recorded Proposer turn carries the PRIMARY's model name — that's
+    // what the agent advertises via `Agent.modelName` (set at construction
+    // from the primary adapter). PAR-25 deliberately surfaces the failover
+    // through the `provider.failover` event, NOT by swapping the agent's
+    // model identity mid-flight: the prompt contract was authored against
+    // the primary and the operator-facing diagnostic is the event itself.
+    // The transcript still shows the prose the fallback produced.
+    const proposerTurn = result.turns.find((t) => t.agent === 'Proposer');
+    expect(proposerTurn).toBeDefined();
+    expect(proposerTurn!.model).toBe('primary-model');
+    expect(proposerTurn!.model_name).toBe('primary-model');
+    expect(proposerTurn!.content).toBe('fallback proposal text');
+
+    // Both adapters were called exactly once — the AgentBase contract
+    // pins single-retry semantics and we never go past it.
+    expect((primary.generate as ReturnType<typeof vi.fn>)).toHaveBeenCalledOnce();
+    expect((fallback.generate as ReturnType<typeof vi.fn>)).toHaveBeenCalledOnce();
   });
 });

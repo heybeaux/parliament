@@ -1,8 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { ModelAdapter } from '../adapters/base.js';
 import {
+  buildFallbackAdapter,
   loadConfig,
   resolveConfigPath,
   resetConfigCache,
@@ -124,6 +126,135 @@ model = "llama3.2"
     expect(() => loadConfig(path)).toThrow(
       /missing a string "system_prompt" field/,
     );
+  });
+
+  // -------------------------------------------------------------------------
+  // PAR-25 — fallback_provider / fallback_model TOML fields
+  //
+  // Two layers of coverage:
+  //   1. The TOML loader recognises the new fields, leaves them undefined when
+  //      omitted, and copies them onto NeurotypeConfig verbatim when present.
+  //   2. `buildFallbackAdapter` reads NeurotypeConfig, returns `undefined`
+  //      when `fallback_provider` is absent, and otherwise calls the adapter
+  //      factory with the documented model resolution (fallback_model wins
+  //      over primary model).
+  // -------------------------------------------------------------------------
+
+  it('PAR-25: leaves fallback_provider / fallback_model undefined when the TOML omits them', () => {
+    const path = writeTempToml(tmpDir, VALID_TOML);
+    const config = loadConfig(path);
+
+    const proposer = config.neurotypes['proposer']!;
+    // Plain TOML — neither field set. Both must round-trip as undefined so
+    // the production resolver's "no fallback wired" branch keeps firing for
+    // every existing parliament.toml in the wild.
+    expect(proposer.fallback_provider).toBeUndefined();
+    expect(proposer.fallback_model).toBeUndefined();
+  });
+
+  it('PAR-25: parses fallback_provider on its own and leaves fallback_model undefined', () => {
+    const toml = `
+[neurotypes.proposer]
+model = "llama3.2"
+provider = "ollama"
+system_prompt = "You are a proposer."
+fallback_provider = "openrouter"
+`;
+    const path = writeTempToml(tmpDir, toml);
+    const config = loadConfig(path);
+
+    const proposer = config.neurotypes['proposer']!;
+    expect(proposer.fallback_provider).toBe('openrouter');
+    // fallback_model omitted → undefined; buildFallbackAdapter will reuse
+    // the primary `model` when constructing the adapter.
+    expect(proposer.fallback_model).toBeUndefined();
+  });
+
+  it('PAR-25: parses both fallback_provider and fallback_model verbatim', () => {
+    const toml = `
+[neurotypes.proposer]
+model = "llama3.2"
+provider = "ollama"
+system_prompt = "You are a proposer."
+fallback_provider = "openrouter"
+fallback_model = "openai/gpt-4o-mini"
+`;
+    const path = writeTempToml(tmpDir, toml);
+    const config = loadConfig(path);
+
+    const proposer = config.neurotypes['proposer']!;
+    expect(proposer.fallback_provider).toBe('openrouter');
+    expect(proposer.fallback_model).toBe('openai/gpt-4o-mini');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PAR-25 — buildFallbackAdapter helper
+// ---------------------------------------------------------------------------
+
+describe('buildFallbackAdapter (PAR-25)', () => {
+  function makeStubAdapter(modelName: string): ModelAdapter {
+    return {
+      modelName,
+      generate: vi.fn().mockResolvedValue({ content: 'stub' }),
+    };
+  }
+
+  it('returns undefined when fallback_provider is absent', () => {
+    const factory = vi.fn();
+    const out = buildFallbackAdapter(
+      {
+        model: 'llama3.2',
+        system_prompt: 'sys',
+      },
+      factory,
+    );
+
+    expect(out).toBeUndefined();
+    // Factory MUST NOT be invoked — the helper short-circuits before touching
+    // it so opt-out behaviour stays free of provider-factory side effects.
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it('uses the explicit fallback_model when supplied', () => {
+    const fallbackAdapter = makeStubAdapter('openai/gpt-4o-mini');
+    const factory = vi.fn().mockReturnValue(fallbackAdapter);
+
+    const out = buildFallbackAdapter(
+      {
+        model: 'llama3.2',
+        system_prompt: 'sys',
+        fallback_provider: 'openrouter',
+        fallback_model: 'openai/gpt-4o-mini',
+      },
+      factory,
+    );
+
+    expect(out).toBe(fallbackAdapter);
+    // Factory called with the user-supplied fallback_model and the matching
+    // fallback_provider — never the primary model name when the user pinned
+    // a fallback model explicitly.
+    expect(factory).toHaveBeenCalledOnce();
+    expect(factory).toHaveBeenCalledWith('openai/gpt-4o-mini', 'openrouter');
+  });
+
+  it('reuses the primary model when fallback_model is omitted', () => {
+    const fallbackAdapter = makeStubAdapter('llama3.2');
+    const factory = vi.fn().mockReturnValue(fallbackAdapter);
+
+    const out = buildFallbackAdapter(
+      {
+        model: 'llama3.2',
+        system_prompt: 'sys',
+        fallback_provider: 'openrouter',
+      },
+      factory,
+    );
+
+    expect(out).toBe(fallbackAdapter);
+    // Same model name, different provider — the documented "I just want a
+    // different transport for the same model" path.
+    expect(factory).toHaveBeenCalledWith('llama3.2', 'openrouter');
   });
 });
 

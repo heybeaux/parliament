@@ -11,6 +11,24 @@ export interface NeurotypeConfig {
   system_prompt: string;
   /** Provider override for this neurotype: 'ollama' | 'lm_studio' | 'omlx'. Inherits global default if omitted. */
   provider?: string;
+  /**
+   * PAR-25 — optional provider to retry once on `ModelConnectionError`.
+   * When set, `fallback_model` may also be set (defaults to `model` if
+   * omitted). The engine emits a `provider.failover` SystemEvent on retry
+   * and `Turn.meta.provider` reflects whichever provider produced the
+   * content.
+   *
+   * Default behaviour is unchanged when this field is absent: a primary
+   * `ModelConnectionError` propagates as today and the deliberation fails.
+   */
+  fallback_provider?: string;
+  /**
+   * PAR-25 — model name to use with `fallback_provider`. Optional; when
+   * omitted the primary `model` name is reused. Useful when the fallback
+   * provider doesn't host the same model id (e.g. omlx local model name vs
+   * OpenRouter's `google/gemini-flash-1.5`).
+   */
+  fallback_model?: string;
 }
 
 /** Engine-wide defaults loaded from the optional `[parliament]` table. */
@@ -205,6 +223,17 @@ function validateConfig(raw: unknown, configPath: string): ParliamentTomlConfig 
       model: entry['model'],
       system_prompt: entry['system_prompt'],
       ...(typeof entry['provider'] === 'string' ? { provider: entry['provider'] } : {}),
+      // PAR-25 — opt-in failover. `fallback_provider` is the trigger; when
+      // absent every other failover branch is skipped. `fallback_model` is
+      // independently optional (defaults to the primary `model` at adapter
+      // construction time, not here, so the consumer sees the user-supplied
+      // value verbatim).
+      ...(typeof entry['fallback_provider'] === 'string'
+        ? { fallback_provider: entry['fallback_provider'] }
+        : {}),
+      ...(typeof entry['fallback_model'] === 'string'
+        ? { fallback_model: entry['fallback_model'] }
+        : {}),
     };
   }
 
@@ -311,4 +340,25 @@ export function buildAgentsFromConfig(
       systemPrompt: neurotype.system_prompt,
     };
   });
+}
+
+/**
+ * PAR-25 — small helper centralising the "construct a fallback adapter when
+ * the neurotype config opts in" rule. Returns `undefined` when
+ * `fallback_provider` is absent so the caller can pass the result straight
+ * through to `AgentRuntimeOptions.fallbackAdapter` without an extra branch.
+ *
+ * The model name resolution mirrors the documented contract on
+ * `NeurotypeConfig.fallback_model`: the user-supplied fallback model wins;
+ * otherwise the primary model name is reused. The adapter factory is the
+ * same callback callers already pass to `buildAgentsFromConfig` — no new
+ * dependency on the provider-factory module from this layer.
+ */
+export function buildFallbackAdapter(
+  neurotype: NeurotypeConfig,
+  adapterFactory: (model: string, provider?: string) => ModelAdapter,
+): ModelAdapter | undefined {
+  if (neurotype.fallback_provider === undefined) return undefined;
+  const model = neurotype.fallback_model ?? neurotype.model;
+  return adapterFactory(model, neurotype.fallback_provider);
 }

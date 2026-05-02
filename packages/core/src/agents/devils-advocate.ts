@@ -1,6 +1,5 @@
-import type { ModelAdapter } from '../adapters/base.js';
 import type { Blackboard, Turn } from '../types.js';
-import type { Agent, AgentResult } from './base.js';
+import { AgentBase, type AgentResult } from './base.js';
 import { buildPromptHeader, capWithMeta } from './utils.js';
 
 /**
@@ -55,15 +54,10 @@ export function isRoundOne(turns: Turn[]): boolean {
   return true;
 }
 
-export class DevilsAdvocateAgent implements Agent {
+export class DevilsAdvocateAgent extends AgentBase {
   readonly role = 'DevilsAdvocate';
   readonly neurotype = 'devils-advocate';
   readonly posture = 'contrarian';
-  readonly modelName: string;
-
-  constructor(private readonly adapter: ModelAdapter) {
-    this.modelName = adapter.modelName;
-  }
 
   async generate(blackboard: Blackboard): Promise<AgentResult> {
     const recentTurns = blackboard.turns
@@ -86,7 +80,8 @@ export class DevilsAdvocateAgent implements Agent {
       : header;
 
     // PAR-23: forward adapter telemetry onto the returned AgentResult.
-    const raw = await this.adapter.generate(userPrompt, systemPrompt);
+    // PAR-25: failover-wrapped call.
+    const raw = await this.generateWithFailover(userPrompt, systemPrompt);
     return capWithMeta(raw);
   }
 }

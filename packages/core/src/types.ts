@@ -289,6 +289,14 @@ export interface SplitSummary {
  *          `{ reason, totalRounds }` in `data` so the panel can render an
  *          "ended at round N — reason" summary without reading the result
  *          fields directly.
+ *        - `provider.failover` — PAR-25 — emitted when an agent's primary
+ *          adapter throws `ModelConnectionError` and the engine retries on
+ *          the configured fallback adapter. Carries
+ *          `{ neurotype, primary, fallback, error }` in `data` so the
+ *          Observability panel can render a "failover: omlx → openrouter"
+ *          marker. Only fires when the agent is configured with a
+ *          `fallbackAdapter`; otherwise the original error propagates as
+ *          today and no event is emitted.
  */
 export type SystemEventKind =
   | 'red_agent.injection'
@@ -299,7 +307,8 @@ export type SystemEventKind =
   | 'parallel_block_end'
   | 'synthesis_attempt'
   | 'consensus_reached'
-  | 'termination';
+  | 'termination'
+  | 'provider.failover';
 
 /**
  * Out-of-band events the engine records alongside the turn stream. These are

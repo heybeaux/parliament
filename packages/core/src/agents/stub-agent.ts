@@ -1,6 +1,6 @@
 import type { ModelAdapter } from '../adapters/base.js';
 import type { Blackboard } from '../types.js';
-import type { Agent, AgentResult } from './base.js';
+import { AgentBase, type AgentResult, type AgentRuntimeOptions } from './base.js';
 
 /**
  * Placeholder implementation used by neurotype agents that are registered
@@ -10,20 +10,26 @@ import type { Agent, AgentResult } from './base.js';
  * The stub returns a marker string and never calls the model adapter,
  * so test fixtures can register a stubbed neurotype without needing a
  * mock backend.
+ *
+ * PAR-25: extends AgentBase for the failover wiring even though
+ * `generate()` here never reaches the adapter — the engine constructs
+ * stubs uniformly via `BUILTIN_AGENT_REGISTRY` / the user-defined
+ * resolver, so accepting `AgentRuntimeOptions` lets the same wiring path
+ * apply to every agent class.
  */
-export class StubNeurotypeAgent implements Agent {
+export class StubNeurotypeAgent extends AgentBase {
   readonly role: string;
   readonly neurotype: string;
-  readonly modelName: string;
 
   constructor(
     role: string,
     neurotype: string,
-    private readonly adapter: ModelAdapter,
+    adapter: ModelAdapter,
+    options: AgentRuntimeOptions = {},
   ) {
+    super(adapter, options);
     this.role = role;
     this.neurotype = neurotype;
-    this.modelName = adapter.modelName;
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
