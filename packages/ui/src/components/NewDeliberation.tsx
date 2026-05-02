@@ -1,20 +1,22 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
+import { PresetPicker, FALLBACK_DEFAULT } from './PresetPicker';
 
 interface Props {
-  onSubmit: (topic: string) => void;
+  onSubmit: (topic: string, preset: string) => void;
   disabled: boolean;
 }
 
 export function NewDeliberation({ onSubmit, disabled }: Props) {
   const [topic, setTopic] = useState('');
+  const [preset, setPreset] = useState<string>(FALLBACK_DEFAULT);
   const [focused, setFocused] = useState(false);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = topic.trim();
     if (!trimmed || disabled) return;
-    onSubmit(trimmed);
+    onSubmit(trimmed, preset);
     setTopic('');
   }
 
@@ -43,6 +45,10 @@ export function NewDeliberation({ onSubmit, disabled }: Props) {
             </svg>
             New deliberation
           </label>
+
+          <div className="mb-4">
+            <PresetPicker value={preset} onChange={setPreset} disabled={disabled} />
+          </div>
 
           <div className="flex flex-col gap-3 sm:flex-row">
             <div className="relative flex-1">
