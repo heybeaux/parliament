@@ -12,7 +12,7 @@ export type {
   SentrySignal,
 } from './types.js';
 
-export type { ModelAdapter } from './adapters/base.js';
+export type { AdapterMeta, AdapterResult, ModelAdapter } from './adapters/base.js';
 export { ModelConnectionError } from './adapters/base.js';
 export { OllamaAdapter } from './adapters/ollama.js';
 export { OpenAICompatAdapter } from './adapters/openai-compat.js';
