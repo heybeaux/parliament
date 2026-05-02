@@ -374,7 +374,11 @@ describe('POST /deliberate — preset override (AC: precedence)', () => {
     expect(lastInstance.run).not.toHaveBeenCalled();
   });
 
-  it('uses legacy run() when no preset is supplied and config active is debate', async () => {
+  it('routes the default-preset (debate) path through runTopology, not legacy run()', async () => {
+    // PAR-7: every deliberation goes through the topology runtime, including
+    // the default Debate preset. The legacy hardcoded five-agent run() path
+    // is gone — runTopology(active=debate) is byte-identical per the engine's
+    // own byte-identical-debate.test.ts regression test.
     const { DeliberationEngine } = await import('@parliament/core');
     const EngineMock = vi.mocked(DeliberationEngine);
     const app = makeApp();
@@ -390,8 +394,69 @@ describe('POST /deliberate — preset override (AC: precedence)', () => {
       run: ReturnType<typeof vi.fn>;
       runTopology: ReturnType<typeof vi.fn>;
     };
-    expect(lastInstance.run).toHaveBeenCalledTimes(1);
-    expect(lastInstance.runTopology).not.toHaveBeenCalled();
+    expect(lastInstance.runTopology).toHaveBeenCalledTimes(1);
+    expect(lastInstance.run).not.toHaveBeenCalled();
+  });
+
+  it('passes the resolved Socratic topology config into runTopology when preset="socratic"', async () => {
+    // PAR-7 happy-path: a request with a non-default sequential preset must
+    // forward the resolved topology (active preset + per-step neurotype
+    // resolver + Sentry/Synth/RedAgent infra) into runTopology so the engine
+    // can walk the preset's `steps` array. We assert against the call args
+    // because the underlying engine is mocked — there are no real "turns"
+    // to inspect, but the topology config is the load-bearing wire shape.
+    const { DeliberationEngine, BUILTIN_PRESETS } = await import('@parliament/core');
+    const EngineMock = vi.mocked(DeliberationEngine);
+    const app = makeApp();
+
+    const res = await app.request('/deliberate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic: 'socratic happy path', preset: 'socratic' }),
+    });
+
+    expect(res.status).toBe(200);
+    const lastInstance = EngineMock.mock.results.at(-1)!.value as {
+      run: ReturnType<typeof vi.fn>;
+      runTopology: ReturnType<typeof vi.fn>;
+    };
+    expect(lastInstance.runTopology).toHaveBeenCalledTimes(1);
+
+    type RunTopologyArgs = [
+      string,
+      {
+        topology: {
+          activePreset: { id: string; steps: Array<{ id: string; neurotype: string }> };
+        };
+        synthesizer: unknown;
+        redAgent: unknown;
+        sentry: unknown;
+        resolveNeurotype: (step: { id: string; neurotype: string }) => unknown;
+      },
+    ];
+    const [topicArg, configArg] = lastInstance.runTopology.mock.calls[0] as RunTopologyArgs;
+    expect(topicArg).toBe('socratic happy path');
+
+    // The active preset must be Socratic and its steps must match the registry.
+    expect(configArg.topology.activePreset.id).toBe('socratic');
+    const stepNeurotypes = configArg.topology.activePreset.steps.map((s) => s.neurotype);
+    expect(stepNeurotypes).toEqual(
+      BUILTIN_PRESETS['socratic']!.steps.map((s) => s.neurotype),
+    );
+    // Sentry must NOT appear in the preset's steps (out-of-band invariant).
+    expect(stepNeurotypes).not.toContain('sentry');
+
+    // Structural-infrastructure trio must be wired in.
+    expect(configArg.synthesizer).toBeDefined();
+    expect(configArg.redAgent).toBeDefined();
+    expect(configArg.sentry).toBeDefined();
+
+    // The neurotype resolver must be a callable that the engine can invoke
+    // per step. We do a smoke check — calling it with the first Socratic
+    // step must not throw.
+    expect(typeof configArg.resolveNeurotype).toBe('function');
+    const firstStep = configArg.topology.activePreset.steps[0]!;
+    expect(() => configArg.resolveNeurotype(firstStep)).not.toThrow();
   });
 
   it('returns 400 with descriptive error when the preset is unknown', async () => {
