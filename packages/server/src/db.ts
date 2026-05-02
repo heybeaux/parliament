@@ -5,9 +5,14 @@ export { Database };
 
 /**
  * Initialises (or opens) the SQLite database and ensures the deliberations
- * table exists.  Call once at startup.
+ * table exists. Call once at startup.
  *
- * @param path - Filesystem path for the database file.  Defaults to
+ * Schema is additive across releases:
+ *   - PAR-16 adds a `context` column. Existing databases created before
+ *     PAR-16 lack it; we run an idempotent `ALTER TABLE` when the column
+ *     is missing so the migration is invisible to operators.
+ *
+ * @param path - Filesystem path for the database file. Defaults to
  *               "parliament.db" in the current working directory.
  */
 export function initDb(path = 'parliament.db'): Database.Database {
@@ -22,11 +27,28 @@ export function initDb(path = 'parliament.db'): Database.Database {
     )
   `);
 
+  // PAR-16: additive `context` column. better-sqlite3 has no IF NOT EXISTS
+  // for ADD COLUMN, so we inspect the schema and only ALTER when the
+  // column is missing. The check + add are idempotent on every startup.
+  type ColumnInfo = { name: string };
+  const columns = db
+    .prepare<[], ColumnInfo>(`PRAGMA table_info(deliberations)`)
+    .all();
+  const hasContext = columns.some((col) => col.name === 'context');
+  if (!hasContext) {
+    db.exec(`ALTER TABLE deliberations ADD COLUMN context TEXT`);
+  }
+
   return db;
 }
 
 /**
  * Persists a completed deliberation result.
+ *
+ * The full `DeliberationResult` (including the optional PAR-16 `context`
+ * field) is JSON-encoded into `result_json` so round-trips are exact. We
+ * also write `context` into its own dedicated column so summary listings
+ * and SQL-level queries can read it without parsing the JSON blob.
  */
 export function saveDeliberation(
   db: Database.Database,
@@ -35,29 +57,44 @@ export function saveDeliberation(
   result: DeliberationResult,
 ): void {
   const stmt = db.prepare(
-    `INSERT INTO deliberations (id, topic, result_json, created_at)
-     VALUES (?, ?, ?, ?)`,
+    `INSERT INTO deliberations (id, topic, result_json, created_at, context)
+     VALUES (?, ?, ?, ?, ?)`,
   );
 
-  stmt.run(id, topic, JSON.stringify(result), new Date().toISOString());
+  stmt.run(
+    id,
+    topic,
+    JSON.stringify(result),
+    new Date().toISOString(),
+    result.context ?? null,
+  );
 }
 
 /**
  * Retrieves a deliberation result by id.
  * Returns null when no record exists with that id.
+ *
+ * The PAR-16 `context` field travels inside `result_json` so the JSON
+ * round-trip is exact. We also fall back to the dedicated `context`
+ * column when the parsed result lacks it (e.g. rows whose JSON predates
+ * PAR-16 but were re-saved with the column populated).
  */
 export function getDeliberation(
   db: Database.Database,
   id: string,
 ): DeliberationResult | null {
-  const stmt = db.prepare<[string], { result_json: string }>(
-    `SELECT result_json FROM deliberations WHERE id = ?`,
+  const stmt = db.prepare<[string], { result_json: string; context: string | null }>(
+    `SELECT result_json, context FROM deliberations WHERE id = ?`,
   );
 
   const row = stmt.get(id);
   if (row === undefined) return null;
 
-  return JSON.parse(row.result_json) as DeliberationResult;
+  const parsed = JSON.parse(row.result_json) as DeliberationResult;
+  if (parsed.context === undefined && row.context !== null && row.context !== '') {
+    parsed.context = row.context;
+  }
+  return parsed;
 }
 
 export interface DeliberationSummary {

@@ -330,4 +330,62 @@ describe('REST API end-to-end (real engine + in-memory SQLite)', () => {
     const res = await app.request('/deliberate/nope-not-here');
     expect(res.status).toBe(404);
   });
+
+  // -------------------------------------------------------------------------
+  // PAR-16: deliberation context — POST + GET round-trip + persistence
+  // -------------------------------------------------------------------------
+  it('POST /deliberate accepts context, echoes it, persists it, and GET round-trips it', async () => {
+    const context =
+      'Endeavour is a single-model reasoning pipeline. ' +
+      'Parliament is a multi-agent deliberation engine. ' +
+      'The question under deliberation concerns whether to integrate Parliament ' +
+      'as a self-deliberation layer inside Endeavour.';
+
+    const res = await app.request('/deliberate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        topic: 'Should Endeavour integrate Parliament?',
+        context,
+        config: { maxRounds: 1, confidenceThreshold: 0.7 },
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+
+    // POST response echoes the context unchanged.
+    expect(body['context']).toBe(context);
+    expect(body['topic']).toBe('Should Endeavour integrate Parliament?');
+    const id = body['id'] as string;
+    expect(typeof id).toBe('string');
+
+    // SQLite row carries the context — the dedicated column survives the
+    // round-trip even when the JSON blob is stripped.
+    const stored = getDeliberation(db, id);
+    expect(stored).not.toBeNull();
+    expect(stored?.context).toBe(context);
+
+    // GET /deliberate/:id round-trips the context verbatim.
+    const fetched = await app.request(`/deliberate/${id}`);
+    expect(fetched.status).toBe(200);
+    const fetchedBody = (await fetched.json()) as Record<string, unknown>;
+    expect(fetchedBody['context']).toBe(context);
+    expect(fetchedBody['topic']).toBe('Should Endeavour integrate Parliament?');
+  });
+
+  it('POST /deliberate without context omits the field on the response', async () => {
+    const res = await app.request('/deliberate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        topic: 'Plain topic, no context.',
+        config: { maxRounds: 1, confidenceThreshold: 0.7 },
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['context']).toBeUndefined();
+  });
 });
