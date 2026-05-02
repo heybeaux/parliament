@@ -190,6 +190,24 @@ export function enforceWordCap(
 }
 
 /**
+ * PAR-23 helper — applies the standard 200-word cap to an `AdapterResult`
+ * and forwards the adapter's reported `meta` (latency, tokens, cost, provider)
+ * onto the produced `AgentResult`. Every prose agent (Proposer, Skeptic,
+ * Empiricist, Forecaster, Historian, Lateralist, Pragmatist, RedAgent,
+ * Steelmanner, Translator, DevilsAdvocate) takes this single shape, so the
+ * pattern lives here rather than being inlined per agent. The Synthesizer
+ * doesn't use this helper — it has its own JSON-envelope handling and
+ * threads adapter meta through `buildResult` directly.
+ */
+export function capWithMeta(
+  raw: { content: string; meta?: import('../types.js').AdapterMeta },
+  cap = 200,
+): import('./base.js').AgentResult {
+  const capped = enforceWordCap(raw.content, cap);
+  return raw.meta !== undefined ? { ...capped, meta: raw.meta } : capped;
+}
+
+/**
  * Computes Jaccard similarity between two strings based on word overlap.
  * Returns a value in [0, 1].
  */

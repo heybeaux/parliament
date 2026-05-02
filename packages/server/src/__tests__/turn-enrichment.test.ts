@@ -77,14 +77,14 @@ vi.mock('@parliament/core', async (importOriginal) => {
     }),
     createAdapter: vi.fn().mockReturnValue({
       modelName: 'mock-model',
-      generate: vi.fn().mockResolvedValue('mock response'),
+      generate: vi.fn().mockResolvedValue({ content: 'mock response' }),
     }),
     buildAgentsFromConfig: vi.fn().mockReturnValue([
-      { name: 'proposer', neurotype: 'proposer', model: 'mock', adapter: { generate: vi.fn().mockResolvedValue('ok') }, systemPrompt: '' },
-      { name: 'skeptic', neurotype: 'skeptic', model: 'mock', adapter: { generate: vi.fn().mockResolvedValue('ok') }, systemPrompt: '' },
-      { name: 'synthesizer', neurotype: 'synthesizer', model: 'mock', adapter: { generate: vi.fn().mockResolvedValue('ok') }, systemPrompt: '' },
-      { name: 'redAgent', neurotype: 'redAgent', model: 'mock', adapter: { generate: vi.fn().mockResolvedValue('ok') }, systemPrompt: '' },
-      { name: 'sentry', neurotype: 'sentry', model: 'mock', adapter: { generate: vi.fn().mockResolvedValue('ok') }, systemPrompt: '' },
+      { name: 'proposer', neurotype: 'proposer', model: 'mock', adapter: { generate: vi.fn().mockResolvedValue({ content: 'ok' }) }, systemPrompt: '' },
+      { name: 'skeptic', neurotype: 'skeptic', model: 'mock', adapter: { generate: vi.fn().mockResolvedValue({ content: 'ok' }) }, systemPrompt: '' },
+      { name: 'synthesizer', neurotype: 'synthesizer', model: 'mock', adapter: { generate: vi.fn().mockResolvedValue({ content: 'ok' }) }, systemPrompt: '' },
+      { name: 'redAgent', neurotype: 'redAgent', model: 'mock', adapter: { generate: vi.fn().mockResolvedValue({ content: 'ok' }) }, systemPrompt: '' },
+      { name: 'sentry', neurotype: 'sentry', model: 'mock', adapter: { generate: vi.fn().mockResolvedValue({ content: 'ok' }) }, systemPrompt: '' },
     ]),
     ProposerAgent: vi.fn().mockImplementation(() => ({ role: 'Proposer', neurotype: 'p', generate: vi.fn() })),
     SkepticAgent: vi.fn().mockImplementation(() => ({ role: 'Skeptic', neurotype: 's', generate: vi.fn() })),
@@ -113,7 +113,7 @@ function turn(opts: {
   content: string;
   round: number;
   word_count?: number;
-  meta?: { confidence: number; consensus: boolean; agreed: string[]; unresolved: string[] };
+  meta?: Record<string, unknown>;
 }) {
   const t: DeliberationResult['turns'][number] = {
     agent: opts.agent,
@@ -124,7 +124,7 @@ function turn(opts: {
     round: opts.round,
   };
   if (opts.word_count !== undefined) t.word_count = opts.word_count;
-  if (opts.meta !== undefined) t.meta = opts.meta;
+  if (opts.meta !== undefined) t.meta = opts.meta as DeliberationResult['turns'][number]['meta'];
   return t;
 }
 
@@ -386,5 +386,105 @@ describe('AC4 — old client schemas parse new responses', () => {
     expect(legacyView[0]!.agent).toBe('Proposer');
     expect(legacyView[0]!.model).toBe('m');
     expect(legacyView[0]!.round).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PAR-23 — adapter-meta round-trip on GET /deliberate/:id
+// ---------------------------------------------------------------------------
+
+describe('PAR-23 — adapter telemetry survives the persistence round-trip', () => {
+  it('GET /deliberate/:id passes turn.meta (latency, tokens, cost, provider) through verbatim', async () => {
+    hoisted.mockGetDeliberation.mockReturnValue(
+      baseResult({
+        turns: [
+          turn({
+            agent: 'Proposer',
+            neurotype: 'p',
+            model: 'anthropic/claude-3.5-sonnet',
+            content: 'hello',
+            round: 1,
+            meta: {
+              latencyMs: 1234,
+              promptTokens: 11,
+              completionTokens: 22,
+              costUsd: 0.0042,
+              generationId: 'gen_abc123',
+              provider: 'openrouter',
+            },
+          }),
+          turn({
+            agent: 'Synthesizer',
+            neurotype: 'integrative',
+            model: 'mock',
+            content: 's',
+            round: 1,
+            meta: {
+              // Synthesizer turn carries BOTH adapter telemetry and the
+              // synthesizer's own structured fields. The merged shape must
+              // round-trip cleanly.
+              latencyMs: 800,
+              promptTokens: 30,
+              completionTokens: 60,
+              provider: 'ollama',
+              confidence: 0.6,
+              consensus: false,
+              agreed: ['x'],
+              unresolved: ['y'],
+            },
+          }),
+        ],
+      }),
+    );
+
+    const app = makeApp();
+    const res = await app.request('/deliberate/par23-id');
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as {
+      turns: Array<Record<string, unknown>>;
+    };
+
+    // Adapter-only meta on the proposer turn.
+    const proposer = body.turns[0]!;
+    expect(proposer['meta']).toEqual({
+      latencyMs: 1234,
+      promptTokens: 11,
+      completionTokens: 22,
+      costUsd: 0.0042,
+      generationId: 'gen_abc123',
+      provider: 'openrouter',
+    });
+
+    // Merged adapter + synthesizer meta on the synth turn — additive.
+    const synth = body.turns[1]!;
+    expect(synth['meta']).toMatchObject({
+      latencyMs: 800,
+      promptTokens: 30,
+      completionTokens: 60,
+      provider: 'ollama',
+      confidence: 0.6,
+      consensus: false,
+      agreed: ['x'],
+      unresolved: ['y'],
+    });
+  });
+
+  it('GET /deliberate/:id tolerates a turn with no meta field at all (legacy rows)', async () => {
+    hoisted.mockGetDeliberation.mockReturnValue(
+      baseResult({
+        turns: [
+          turn({ agent: 'Proposer', neurotype: 'p', model: 'm', content: 'x', round: 1 }),
+        ],
+      }),
+    );
+
+    const app = makeApp();
+    const res = await app.request('/deliberate/legacy-meta');
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as { turns: Array<Record<string, unknown>> };
+    // No meta field is fine — the response shape stays valid.
+    expect(body.turns).toHaveLength(1);
   });
 });

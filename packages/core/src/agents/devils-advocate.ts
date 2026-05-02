@@ -1,7 +1,7 @@
 import type { ModelAdapter } from '../adapters/base.js';
 import type { Blackboard, Turn } from '../types.js';
 import type { Agent, AgentResult } from './base.js';
-import { buildPromptHeader, enforceWordCap } from './utils.js';
+import { buildPromptHeader, capWithMeta } from './utils.js';
 
 /**
  * Round-1 system prompt. With no prior synthesis to invert, the agent
@@ -85,7 +85,8 @@ export class DevilsAdvocateAgent implements Agent {
       ? `${header}\n\nRecent discussion:\n\n${recentTurns}`
       : header;
 
+    // PAR-23: forward adapter telemetry onto the returned AgentResult.
     const raw = await this.adapter.generate(userPrompt, systemPrompt);
-    return enforceWordCap(raw);
+    return capWithMeta(raw);
   }
 }

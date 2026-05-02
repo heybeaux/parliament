@@ -63,8 +63,8 @@ export interface DeliberationSource {
  * judgement on whether the debate has resolved (`consensus`), and short
  * bullet-string lists of the points that have / have not been resolved.
  *
- * Only the synthesizer populates `Turn.meta`; for all other agents it is
- * absent.
+ * The synthesizer populates these fields on its own turn's `meta`; non-synthesizer
+ * turns leave them undefined and may carry only the PAR-23 adapter telemetry.
  */
 export interface SynthesizerMeta {
   /** Calibrated certainty in the synthesis, in [0, 1]. */
@@ -76,6 +76,55 @@ export interface SynthesizerMeta {
   /** Short bullet strings (~10 words each) that remain unresolved. */
   unresolved: string[];
 }
+
+/**
+ * Provider-reported telemetry an adapter attaches to its `generate()` result.
+ * Re-exported on `Turn.meta` so persisted transcripts carry the latency, token,
+ * cost, and trace fields the engine observed for that turn.
+ *
+ * Mirrored intentionally from `adapters/base.ts#AdapterMeta` so the public
+ * `@parliament/core` types module stays self-contained — server, UI, and
+ * downstream tooling can read `TurnMeta.latencyMs` without importing
+ * adapter-internal modules.
+ *
+ * PAR-23.
+ */
+export interface AdapterMeta {
+  /** Wall-clock duration of the adapter's `generate` call, in milliseconds. */
+  latencyMs?: number;
+  /** Prompt-side token count reported by the provider, when available. */
+  promptTokens?: number;
+  /** Completion-side token count reported by the provider, when available. */
+  completionTokens?: number;
+  /**
+   * Cost in USD as reported by the provider. OpenRouter populates this from
+   * the `X-OR-Cost` response header. Local providers leave this absent.
+   */
+  costUsd?: number;
+  /**
+   * Provider-side generation id useful for trace lookups (e.g. the OpenRouter
+   * dashboard). Populated only when the provider returns one.
+   */
+  generationId?: string;
+  /**
+   * Stable provider discriminator string. Matches the provider keys accepted
+   * by `createAdapter`.
+   */
+  provider?: string;
+}
+
+/**
+ * Combined per-turn metadata persisted into `result_json`. Carries both the
+ * synthesizer's structured fields (when the turn comes from the synthesizer)
+ * and the adapter telemetry (`AdapterMeta`) for any agent. All fields are
+ * optional so older / non-synth turns serialize cleanly.
+ *
+ * PAR-23 — additive shape change. Pre-PAR-23 stored transcripts that carried
+ * only `{confidence, consensus, agreed, unresolved}` continue to deserialize
+ * without modification because every field stays optional and no field is
+ * renamed.
+ */
+export interface TurnMeta extends Partial<SynthesizerMeta>, AdapterMeta {}
 
 export interface Turn {
   agent: string;
@@ -137,8 +186,17 @@ export interface Turn {
    * PAR-10 — additive observability enrichment.
    */
   convergence_delta?: number | null;
-  /** Populated by SynthesizerAgent only — structured signals next to the prose. */
-  meta?: SynthesizerMeta;
+  /**
+   * Combined per-turn metadata. Pre-PAR-23 carried only the synthesizer's
+   * structured signals (`{confidence, consensus, agreed, unresolved}`), and
+   * those fields stay populated on synthesizer turns. PAR-23 additionally
+   * stamps adapter telemetry (`{latencyMs, promptTokens, completionTokens,
+   * costUsd, generationId, provider}`) onto every fresh turn the engine
+   * records. Old transcripts without the telemetry fields, and old client
+   * builds that only read the synthesizer fields, continue to work
+   * unchanged because every field is optional.
+   */
+  meta?: TurnMeta;
   /**
    * PAR-19 — per-round residue value, populated ONLY on synthesizer turns at
    * the end of each round. Carries the same weighted-fraction-of-unresolved-

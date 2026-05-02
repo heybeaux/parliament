@@ -42,7 +42,7 @@ function makeAdapter(role: keyof RoleScripts, scripts: RoleScripts): ModelAdapte
       const list = scripts[role];
       const value = list[Math.min(i, list.length - 1)] ?? '';
       i++;
-      return value;
+      return { content: value };
     }),
   };
 }
@@ -237,18 +237,28 @@ vi.mock('@parliament/core', async (importOriginal) => {
         generate: vi.fn(async (_prompt: string, system?: string) => {
           const sys = system ?? '';
           if (/synthesiz/i.test(sys)) {
-            return mockScripts.synthesizer[counts.synth++ % mockScripts.synthesizer.length] ?? '';
+            return {
+              content: mockScripts.synthesizer[counts.synth++ % mockScripts.synthesizer.length] ?? '',
+            };
           }
           if (/critic/i.test(sys)) {
-            return mockScripts.skeptic[counts.skeptic++ % mockScripts.skeptic.length] ?? '';
+            return {
+              content: mockScripts.skeptic[counts.skeptic++ % mockScripts.skeptic.length] ?? '',
+            };
           }
           if (/disruptor/i.test(sys)) {
-            return mockScripts.redAgent[counts.red++ % mockScripts.redAgent.length] ?? '';
+            return {
+              content: mockScripts.redAgent[counts.red++ % mockScripts.redAgent.length] ?? '',
+            };
           }
           if (/monitor/i.test(sys)) {
-            return mockScripts.sentry[counts.sentry++ % mockScripts.sentry.length] ?? 'OK';
+            return {
+              content: mockScripts.sentry[counts.sentry++ % mockScripts.sentry.length] ?? 'OK',
+            };
           }
-          return mockScripts.proposer[counts.proposer++ % mockScripts.proposer.length] ?? '';
+          return {
+            content: mockScripts.proposer[counts.proposer++ % mockScripts.proposer.length] ?? '',
+          };
         }),
       };
     }),

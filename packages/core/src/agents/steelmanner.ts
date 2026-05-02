@@ -1,7 +1,7 @@
 import type { ModelAdapter } from '../adapters/base.js';
 import type { Blackboard } from '../types.js';
 import type { Agent, AgentResult } from './base.js';
-import { buildPromptHeader, enforceWordCap } from './utils.js';
+import { buildPromptHeader, capWithMeta } from './utils.js';
 
 export const STEELMANNER_SYSTEM_PROMPT =
   'You are the Steelmanner. Your posture is charity: construct the strongest reasonable opposing case to whatever was just argued in the most recent substantive turn. ' +
@@ -36,7 +36,8 @@ export class SteelmannerAgent implements Agent {
       ? `${header}\n\nRecent discussion to steelman against:\n\n${recentTurns}`
       : header;
 
+    // PAR-23: forward adapter telemetry onto the returned AgentResult.
     const raw = await this.adapter.generate(userPrompt, STEELMANNER_SYSTEM_PROMPT);
-    return enforceWordCap(raw);
+    return capWithMeta(raw);
   }
 }

@@ -1,7 +1,7 @@
 import type { ModelAdapter } from '../adapters/base.js';
 import type { Blackboard } from '../types.js';
 import type { Agent, AgentResult } from './base.js';
-import { buildPromptHeader, enforceWordCap } from './utils.js';
+import { buildPromptHeader, capWithMeta } from './utils.js';
 
 export const FORECASTER_SYSTEM_PROMPT =
   'You are the Forecaster. Your posture is forward-projection: reason about likely downstream consequences and second-order effects of the present claim. ' +
@@ -34,7 +34,8 @@ export class ForecasterAgent implements Agent {
       ? `${header}\n\nRecent discussion:\n\n${recentTurns}`
       : header;
 
+    // PAR-23: forward adapter telemetry onto the returned AgentResult.
     const raw = await this.adapter.generate(userPrompt, FORECASTER_SYSTEM_PROMPT);
-    return enforceWordCap(raw);
+    return capWithMeta(raw);
   }
 }

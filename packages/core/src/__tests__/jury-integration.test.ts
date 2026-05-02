@@ -57,12 +57,12 @@ function makeStubAdapter(opts: {
 }): ModelAdapter {
   return {
     modelName: opts.modelName,
-    async generate(prompt: string, system?: string): Promise<string> {
+    async generate(prompt: string, system?: string) {
       opts.capture.push({ prompt, system, modelName: opts.modelName });
       if (opts.delayMs !== undefined && opts.delayMs > 0) {
         await new Promise((r) => setTimeout(r, opts.delayMs));
       }
-      return opts.text;
+      return { content: opts.text };
     },
   };
 }
@@ -75,15 +75,17 @@ function makeStubAdapter(opts: {
 function makeSynthStubAdapter(capture: CapturedCall[]): ModelAdapter {
   return {
     modelName: 'stub-synth',
-    async generate(prompt: string, system?: string): Promise<string> {
+    async generate(prompt: string, system?: string) {
       capture.push({ prompt, system, modelName: 'stub-synth' });
-      return JSON.stringify({
-        summary: 'Synth saw the room.',
-        confidence: 0.3,
-        consensus: false,
-        agreed: [],
-        unresolved: [],
-      });
+      return {
+        content: JSON.stringify({
+          summary: 'Synth saw the room.',
+          confidence: 0.3,
+          consensus: false,
+          agreed: [],
+          unresolved: [],
+        }),
+      };
     },
   };
 }
@@ -95,8 +97,8 @@ function makeSynthStubAdapter(capture: CapturedCall[]): ModelAdapter {
 function makeSentryStubAdapter(): ModelAdapter {
   return {
     modelName: 'stub-sentry',
-    async generate(): Promise<string> {
-      return 'ok';
+    async generate() {
+      return { content: 'ok' };
     },
   };
 }

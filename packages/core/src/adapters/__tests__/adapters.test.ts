@@ -11,10 +11,17 @@ import { createAdapter } from '../provider-factory.js';
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeFetchOk(body: unknown): typeof fetch {
+/**
+ * PAR-23: helpers can now optionally stamp response headers on the mock
+ * `Response`. We model headers as a plain `Record<string, string>` and expose
+ * a real `Headers` instance via `response.headers` so case-insensitive
+ * `Headers.get` works the way OpenRouterAdapter expects.
+ */
+function makeFetchOk(body: unknown, headers?: Record<string, string>): typeof fetch {
   return vi.fn().mockResolvedValue({
     ok: true,
     status: 200,
+    headers: new Headers(headers ?? {}),
     json: () => Promise.resolve(body),
   } as unknown as Response);
 }
@@ -27,6 +34,7 @@ function makeFetchNotOk(status: number): typeof fetch {
   return vi.fn().mockResolvedValue({
     ok: false,
     status,
+    headers: new Headers(),
     json: () => Promise.resolve({}),
   } as unknown as Response);
 }
@@ -55,7 +63,7 @@ describe('OllamaAdapter', () => {
     const adapter = new OllamaAdapter('llama3', 'http://localhost:11434');
     const result = await adapter.generate('What is 2+2?', 'You are helpful.');
 
-    expect(result).toBe('Hello from Ollama');
+    expect(result.content).toBe('Hello from Ollama');
 
     expect(mockFetch).toHaveBeenCalledOnce();
     const [url, init] = (mockFetch as ReturnType<typeof vi.fn>).mock.calls[0] as [
@@ -118,6 +126,52 @@ describe('OllamaAdapter', () => {
     );
     await expect(adapter.generate('hello')).rejects.toThrow('500');
   });
+
+  // -------------------------------------------------------------------------
+  // PAR-23: meta telemetry
+  // -------------------------------------------------------------------------
+
+  it('PAR-23: stamps latencyMs and provider="ollama" on every call', async () => {
+    globalThis.fetch = makeFetchOk({
+      message: { role: 'assistant', content: 'ok' },
+    });
+
+    const adapter = new OllamaAdapter('llama3');
+    const result = await adapter.generate('hi');
+
+    expect(result.meta).toBeDefined();
+    expect(typeof result.meta!.latencyMs).toBe('number');
+    expect(result.meta!.latencyMs).toBeGreaterThanOrEqual(0);
+    expect(result.meta!.provider).toBe('ollama');
+    // Cost is intentionally omitted — local execution.
+    expect(result.meta!.costUsd).toBeUndefined();
+  });
+
+  it('PAR-23: maps prompt_eval_count/eval_count to promptTokens/completionTokens', async () => {
+    globalThis.fetch = makeFetchOk({
+      message: { role: 'assistant', content: 'ok' },
+      prompt_eval_count: 12,
+      eval_count: 34,
+    });
+
+    const adapter = new OllamaAdapter('llama3');
+    const result = await adapter.generate('hi');
+
+    expect(result.meta!.promptTokens).toBe(12);
+    expect(result.meta!.completionTokens).toBe(34);
+  });
+
+  it('PAR-23: leaves token fields undefined when Ollama omits them', async () => {
+    globalThis.fetch = makeFetchOk({
+      message: { role: 'assistant', content: 'ok' },
+    });
+
+    const adapter = new OllamaAdapter('llama3');
+    const result = await adapter.generate('hi');
+
+    expect(result.meta!.promptTokens).toBeUndefined();
+    expect(result.meta!.completionTokens).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -148,7 +202,7 @@ describe('OpenAICompatAdapter', () => {
     );
     const result = await adapter.generate('Tell me a joke', 'Be funny.');
 
-    expect(result).toBe('Hi from OpenAI compat');
+    expect(result.content).toBe('Hi from OpenAI compat');
 
     expect(mockFetch).toHaveBeenCalledOnce();
     const [url, init] = (mockFetch as ReturnType<typeof vi.fn>).mock.calls[0] as [
@@ -209,6 +263,50 @@ describe('OpenAICompatAdapter', () => {
     );
     await expect(adapter.generate('hello')).rejects.toThrow('401');
   });
+
+  // -------------------------------------------------------------------------
+  // PAR-23: meta telemetry
+  // -------------------------------------------------------------------------
+
+  it('PAR-23: stamps latencyMs + provider="openai_compat" by default', async () => {
+    globalThis.fetch = makeFetchOk({
+      choices: [{ message: { role: 'assistant', content: 'ok' } }],
+    });
+
+    const adapter = new OpenAICompatAdapter('gpt-4o', 'http://my-proxy:8080');
+    const result = await adapter.generate('hi');
+
+    expect(result.meta).toBeDefined();
+    expect(typeof result.meta!.latencyMs).toBe('number');
+    expect(result.meta!.latencyMs).toBeGreaterThanOrEqual(0);
+    expect(result.meta!.provider).toBe('openai_compat');
+  });
+
+  it('PAR-23: parses usage block into promptTokens/completionTokens', async () => {
+    globalThis.fetch = makeFetchOk({
+      choices: [{ message: { role: 'assistant', content: 'ok' } }],
+      usage: { prompt_tokens: 17, completion_tokens: 42, total_tokens: 59 },
+    });
+
+    const adapter = new OpenAICompatAdapter('gpt-4o', 'http://my-proxy:8080');
+    const result = await adapter.generate('hi');
+
+    expect(result.meta!.promptTokens).toBe(17);
+    expect(result.meta!.completionTokens).toBe(42);
+  });
+
+  it('PAR-23: leaves token fields undefined when usage block is absent', async () => {
+    globalThis.fetch = makeFetchOk({
+      choices: [{ message: { role: 'assistant', content: 'ok' } }],
+    });
+
+    const adapter = new OpenAICompatAdapter('gpt-4o', 'http://my-proxy:8080');
+    const result = await adapter.generate('hi');
+
+    expect(result.meta!.promptTokens).toBeUndefined();
+    expect(result.meta!.completionTokens).toBeUndefined();
+    expect(result.meta!.costUsd).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -235,7 +333,7 @@ describe('LMStudioAdapter', () => {
     const adapter = new LMStudioAdapter('mistral', 'http://localhost:1234/v1', 'local');
     const result = await adapter.generate('Hello', 'Be concise.');
 
-    expect(result).toBe('Hi from LM Studio');
+    expect(result.content).toBe('Hi from LM Studio');
 
     const [url, init] = (mockFetch as ReturnType<typeof vi.fn>).mock.calls[0] as [
       string,
@@ -282,6 +380,21 @@ describe('LMStudioAdapter', () => {
     await expect(adapter.generate('hello')).rejects.toThrow(ModelConnectionError);
     await expect(adapter.generate('hello')).rejects.toThrow('503');
   });
+
+  it('PAR-23: stamps provider="lm_studio" and forwards usage tokens', async () => {
+    globalThis.fetch = makeFetchOk({
+      choices: [{ message: { role: 'assistant', content: 'ok' } }],
+      usage: { prompt_tokens: 5, completion_tokens: 11 },
+    });
+
+    const adapter = new LMStudioAdapter('mistral');
+    const result = await adapter.generate('hi');
+
+    expect(result.meta!.provider).toBe('lm_studio');
+    expect(typeof result.meta!.latencyMs).toBe('number');
+    expect(result.meta!.promptTokens).toBe(5);
+    expect(result.meta!.completionTokens).toBe(11);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -308,7 +421,7 @@ describe('OMLXAdapter', () => {
     const adapter = new OMLXAdapter('phi3', 'http://localhost:8080/v1', 'local');
     const result = await adapter.generate('Hello', 'Be precise.');
 
-    expect(result).toBe('Hi from oMLX');
+    expect(result.content).toBe('Hi from oMLX');
 
     const [url, init] = (mockFetch as ReturnType<typeof vi.fn>).mock.calls[0] as [
       string,
@@ -355,6 +468,21 @@ describe('OMLXAdapter', () => {
     await expect(adapter.generate('hello')).rejects.toThrow(ModelConnectionError);
     await expect(adapter.generate('hello')).rejects.toThrow('502');
   });
+
+  it('PAR-23: stamps provider="omlx" and forwards usage tokens', async () => {
+    globalThis.fetch = makeFetchOk({
+      choices: [{ message: { role: 'assistant', content: 'ok' } }],
+      usage: { prompt_tokens: 3, completion_tokens: 7 },
+    });
+
+    const adapter = new OMLXAdapter('phi3');
+    const result = await adapter.generate('hi');
+
+    expect(result.meta!.provider).toBe('omlx');
+    expect(typeof result.meta!.latencyMs).toBe('number');
+    expect(result.meta!.promptTokens).toBe(3);
+    expect(result.meta!.completionTokens).toBe(7);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -384,7 +512,7 @@ describe('OpenRouterAdapter', () => {
     );
     const result = await adapter.generate('Say hi', 'Be brief.');
 
-    expect(result).toBe('Hi from OpenRouter');
+    expect(result.content).toBe('Hi from OpenRouter');
 
     expect(mockFetch).toHaveBeenCalledOnce();
     const [url, init] = (mockFetch as ReturnType<typeof vi.fn>).mock.calls[0] as [
@@ -473,6 +601,70 @@ describe('OpenRouterAdapter', () => {
     );
     await expect(adapter.generate('hello')).rejects.toThrow(ModelConnectionError);
     await expect(adapter.generate('hello')).rejects.toThrow('401');
+  });
+
+  // -------------------------------------------------------------------------
+  // PAR-23: meta telemetry
+  // -------------------------------------------------------------------------
+
+  it('PAR-23: parses X-OR-Cost and X-OR-Generation-Id into AdapterMeta', async () => {
+    globalThis.fetch = makeFetchOk(
+      {
+        choices: [{ message: { role: 'assistant', content: 'ok' } }],
+        usage: { prompt_tokens: 8, completion_tokens: 16 },
+      },
+      {
+        'X-OR-Cost': '0.0042',
+        'X-OR-Generation-Id': 'gen_abc123',
+      },
+    );
+
+    const adapter = new OpenRouterAdapter(
+      'anthropic/claude-3.5-sonnet',
+      'sk-or-test',
+    );
+    const result = await adapter.generate('hi');
+
+    expect(result.meta!.provider).toBe('openrouter');
+    expect(result.meta!.costUsd).toBe(0.0042);
+    expect(result.meta!.generationId).toBe('gen_abc123');
+    expect(result.meta!.promptTokens).toBe(8);
+    expect(result.meta!.completionTokens).toBe(16);
+  });
+
+  it('PAR-23: leaves costUsd undefined (not NaN) when X-OR-Cost is absent', async () => {
+    globalThis.fetch = makeFetchOk({
+      choices: [{ message: { role: 'assistant', content: 'ok' } }],
+    });
+
+    const adapter = new OpenRouterAdapter(
+      'anthropic/claude-3.5-sonnet',
+      'sk-or-test',
+    );
+    const result = await adapter.generate('hi');
+
+    expect(result.meta!.provider).toBe('openrouter');
+    expect(result.meta!.costUsd).toBeUndefined();
+    expect(result.meta!.generationId).toBeUndefined();
+  });
+
+  it('PAR-23: leaves costUsd undefined when X-OR-Cost is unparseable', async () => {
+    globalThis.fetch = makeFetchOk(
+      {
+        choices: [{ message: { role: 'assistant', content: 'ok' } }],
+      },
+      { 'X-OR-Cost': 'not-a-number' },
+    );
+
+    const adapter = new OpenRouterAdapter(
+      'anthropic/claude-3.5-sonnet',
+      'sk-or-test',
+    );
+    const result = await adapter.generate('hi');
+
+    expect(result.meta!.costUsd).toBeUndefined();
+    // No NaN should leak through.
+    expect(Number.isNaN(result.meta!.costUsd as unknown as number)).toBe(false);
   });
 });
 

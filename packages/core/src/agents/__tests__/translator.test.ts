@@ -5,7 +5,7 @@ import { TranslatorAgent, TRANSLATOR_SYSTEM_PROMPT } from '../translator.js';
 import { BUILTIN_AGENT_REGISTRY, createBuiltinAgent } from '../registry.js';
 
 function makeAdapter(response: string): ModelAdapter {
-  return { modelName: 'test-model', generate: vi.fn().mockResolvedValue(response) };
+  return { modelName: 'test-model', generate: vi.fn().mockResolvedValue({ content: response }) };
 }
 
 function makeBlackboard(overrides?: Partial<Blackboard>): Blackboard {

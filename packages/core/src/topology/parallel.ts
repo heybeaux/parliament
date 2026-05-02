@@ -26,7 +26,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { Agent } from '../agents/base.js';
-import type { Blackboard, Conflict, Turn } from '../types.js';
+import type { AdapterMeta, Blackboard, Conflict, Turn } from '../types.js';
 import type { NeurotypeResolver, TopologyRuntimeLogger } from '../engine.js';
 import type { TopologyStep } from './types.js';
 
@@ -136,7 +136,15 @@ async function runSibling(
   step: TopologyStep,
   snapshot: Blackboard,
   resolveNeurotype: NeurotypeResolver,
-): Promise<{ step: TopologyStep; agent: Agent; content: string; elapsedMs: number; conflicts: Conflict[] }> {
+): Promise<{
+  step: TopologyStep;
+  agent: Agent;
+  content: string;
+  /** PAR-23 — adapter telemetry for this sibling, when reported. */
+  meta?: AdapterMeta;
+  elapsedMs: number;
+  conflicts: Conflict[];
+}> {
   // Each sibling gets its OWN clone of the snapshot so any mutation it makes
   // (e.g. Skeptic pushing to `conflicts`) is isolated. The outer snapshot is
   // shared only by reference for read-only fields like `topic` — we still
@@ -152,10 +160,14 @@ async function runSibling(
   // that might re-order conflicts (none currently do).
   const newConflicts = ownView.conflicts.slice(snapshot.conflicts.length);
 
+  // PAR-23: forward the adapter telemetry from `result.meta` so the parallel
+  // executor can stamp it onto the sibling's recorded Turn — same shape as
+  // the sequential path's `recordTurn(..., result.meta)` call.
   return {
     step,
     agent,
     content: result.content,
+    ...(result.meta !== undefined ? { meta: result.meta } : {}),
     elapsedMs,
     conflicts: newConflicts,
   };
@@ -262,14 +274,14 @@ export async function executeParallelBlock(
 
   for (let i = 0; i < outcomes.length; i++) {
     const o = outcomes[i] as { kind: 'ok'; value: Awaited<ReturnType<typeof runSibling>> };
-    const { step, agent, content, elapsedMs, conflicts: stepConflicts } = o.value;
+    const { step, agent, content, meta, elapsedMs, conflicts: stepConflicts } = o.value;
     // PAR-10: posture defaults to neurotype id when the agent doesn't
     // declare one (kept consistent with `recordTurn` in engine.ts).
     const posture =
       'posture' in agent && typeof agent.posture === 'string'
         ? agent.posture
         : agent.neurotype;
-    turns.push({
+    const turn: Turn = {
       agent: agent.role,
       neurotype: agent.neurotype,
       model: agent.modelName,
@@ -281,7 +293,14 @@ export async function executeParallelBlock(
       model_name: agent.modelName,
       neurotype_posture: posture,
       convergence_delta: convergenceDelta,
-    });
+    };
+    // PAR-23: stamp adapter telemetry onto the sibling turn — same shape as
+    // the sequential `recordTurn` path so parallel transcripts carry the
+    // same observability signal.
+    if (meta !== undefined) {
+      turn.meta = meta;
+    }
+    turns.push(turn);
     conflicts.push(...stepConflicts);
     if (logger !== undefined) {
       logger.info(

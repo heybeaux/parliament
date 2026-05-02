@@ -61,7 +61,7 @@ function nWords(n: number): string {
 function makeStubAdapter(reply: string): ModelAdapter {
   return {
     modelName: 'integration-stub',
-    generate: vi.fn().mockResolvedValue(reply),
+    generate: vi.fn().mockResolvedValue({ content: reply }),
   };
 }
 

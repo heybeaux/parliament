@@ -3,10 +3,10 @@ import type {
   DeliberationResult,
   DeliberationSource,
   SplitSummary,
-  SynthesizerMeta,
   SystemEvent,
   TerminationReason,
   Turn,
+  TurnMeta,
 } from './types.js';
 import type { Agent } from './agents/base.js';
 import type { SynthesizerAgent, SynthesizerResult } from './agents/synthesizer.js';
@@ -327,7 +327,10 @@ function recordTurn(
   content: string,
   round: number,
   synthConfidenceByRound: ReadonlyMap<number, number>,
-  meta?: SynthesizerMeta,
+  // PAR-23 — accepts the merged TurnMeta shape so adapter telemetry
+  // (latency, tokens, cost, provider) lands on every recorded turn alongside
+  // the synthesizer's structured fields.
+  meta?: TurnMeta,
 ): void {
   // Posture defaults to the agent's neurotype id when the class does not
   // declare a plain-language posture. Keeps the wire field always populated
@@ -484,7 +487,14 @@ export class DeliberationEngine {
       // ------------------------------------------------------------------ //
       if (round === 1) {
         const proposerResult = await proposer.generate(blackboard);
-        recordTurn(blackboard, proposer, proposerResult.content, round, synthConfidenceByRound);
+        recordTurn(
+          blackboard,
+          proposer,
+          proposerResult.content,
+          round,
+          synthConfidenceByRound,
+          proposerResult.meta,
+        );
       }
 
       // ------------------------------------------------------------------ //
@@ -493,7 +503,14 @@ export class DeliberationEngine {
       //  call generate to drive that side-effect and record the turn.)
       // ------------------------------------------------------------------ //
       const skepticResult = await skeptic.generate(blackboard);
-      recordTurn(blackboard, skeptic, skepticResult.content, round, synthConfidenceByRound);
+      recordTurn(
+        blackboard,
+        skeptic,
+        skepticResult.content,
+        round,
+        synthConfidenceByRound,
+        skepticResult.meta,
+      );
 
       // ------------------------------------------------------------------ //
       // Step 3: Sentry check — terminate on collapse_detected
@@ -590,7 +607,14 @@ export class DeliberationEngine {
       // ------------------------------------------------------------------ //
       if (round % redAgentInterval === 0) {
         const redResult = await redAgent.generate(blackboard);
-        recordTurn(blackboard, redAgent, redResult.content, round, synthConfidenceByRound);
+        recordTurn(
+          blackboard,
+          redAgent,
+          redResult.content,
+          round,
+          synthConfidenceByRound,
+          redResult.meta,
+        );
         events.push({
           round,
           kind: 'red_agent.injection',
@@ -812,7 +836,14 @@ export class DeliberationEngine {
 
         const agent = resolveNeurotype(step);
         const result = await agent.generate(blackboard);
-        recordTurn(blackboard, agent, result.content, round, synthConfidenceByRound);
+        recordTurn(
+          blackboard,
+          agent,
+          result.content,
+          round,
+          synthConfidenceByRound,
+          result.meta,
+        );
         notifyLastTurn();
 
         // Out-of-band Sentry after every step. The loader has already
@@ -992,7 +1023,14 @@ export class DeliberationEngine {
       // ------------------------------------------------------------------ //
       if (round % redAgentInterval === 0) {
         const redResult = await redAgent.generate(blackboard);
-        recordTurn(blackboard, redAgent, redResult.content, round, synthConfidenceByRound);
+        recordTurn(
+          blackboard,
+          redAgent,
+          redResult.content,
+          round,
+          synthConfidenceByRound,
+          redResult.meta,
+        );
         notifyLastTurn();
         pushEvent({
           round,

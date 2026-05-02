@@ -1,7 +1,7 @@
 import type { ModelAdapter } from '../adapters/base.js';
 import type { Blackboard } from '../types.js';
 import type { Agent, AgentResult } from './base.js';
-import { buildPromptHeader, enforceWordCap } from './utils.js';
+import { buildPromptHeader, capWithMeta } from './utils.js';
 
 export const EMPIRICIST_SYSTEM_PROMPT =
   'You are the Empiricist. Your posture is evidence-first: distinguish empirical claims (testable against the world) from value-judgment claims (not testable). ' +
@@ -57,7 +57,8 @@ export class EmpiricistAgent implements Agent {
       ? `${EMPIRICIST_SOURCES_MODE_PREFIX}\n\n${EMPIRICIST_SYSTEM_PROMPT}`
       : EMPIRICIST_SYSTEM_PROMPT;
 
+    // PAR-23: forward adapter telemetry onto the returned AgentResult.
     const raw = await this.adapter.generate(userPrompt, systemPrompt);
-    return enforceWordCap(raw);
+    return capWithMeta(raw);
   }
 }

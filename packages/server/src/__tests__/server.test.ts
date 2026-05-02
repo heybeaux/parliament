@@ -67,14 +67,14 @@ vi.mock('@parliament/core', async (importOriginal) => {
       },
     }),
     buildAgentsFromConfig: vi.fn().mockReturnValue([
-      { name: 'proposer', neurotype: 'proposer', model: 'mock', adapter: { generate: vi.fn().mockResolvedValue('ok') }, systemPrompt: '' },
-      { name: 'skeptic', neurotype: 'skeptic', model: 'mock', adapter: { generate: vi.fn().mockResolvedValue('ok') }, systemPrompt: '' },
-      { name: 'synthesizer', neurotype: 'synthesizer', model: 'mock', adapter: { generate: vi.fn().mockResolvedValue('ok') }, systemPrompt: '' },
-      { name: 'redAgent', neurotype: 'redAgent', model: 'mock', adapter: { generate: vi.fn().mockResolvedValue('ok') }, systemPrompt: '' },
-      { name: 'sentry', neurotype: 'sentry', model: 'mock', adapter: { generate: vi.fn().mockResolvedValue('ok') }, systemPrompt: '' },
+      { name: 'proposer', neurotype: 'proposer', model: 'mock', adapter: { generate: vi.fn().mockResolvedValue({ content: 'ok' }) }, systemPrompt: '' },
+      { name: 'skeptic', neurotype: 'skeptic', model: 'mock', adapter: { generate: vi.fn().mockResolvedValue({ content: 'ok' }) }, systemPrompt: '' },
+      { name: 'synthesizer', neurotype: 'synthesizer', model: 'mock', adapter: { generate: vi.fn().mockResolvedValue({ content: 'ok' }) }, systemPrompt: '' },
+      { name: 'redAgent', neurotype: 'redAgent', model: 'mock', adapter: { generate: vi.fn().mockResolvedValue({ content: 'ok' }) }, systemPrompt: '' },
+      { name: 'sentry', neurotype: 'sentry', model: 'mock', adapter: { generate: vi.fn().mockResolvedValue({ content: 'ok' }) }, systemPrompt: '' },
     ]),
     createAdapter: vi.fn().mockReturnValue({
-      generate: vi.fn().mockResolvedValue('ok'),
+      generate: vi.fn().mockResolvedValue({ content: 'ok' }),
     }),
     ProposerAgent: vi.fn().mockImplementation(() => ({
       role: 'Proposer',

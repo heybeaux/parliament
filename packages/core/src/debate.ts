@@ -126,16 +126,20 @@ export async function runDebate(options: DebateOptions): Promise<DebateResult> {
   for (let round = 0; round < maxRounds; round++) {
     for (const agent of orderedAgents) {
       const prompt = buildPrompt(topic, turns, agent.name);
-      const content = await agent.adapter.generate(prompt, agent.systemPrompt);
+      // PAR-23: adapter.generate now returns AdapterResult; legacy debate
+      // path simply unwraps `.content` and stamps `meta` onto the turn so
+      // even the pre-engine path carries telemetry.
+      const result = await agent.adapter.generate(prompt, agent.systemPrompt);
 
       const turn: Turn = {
         agent: agent.name,
         neurotype: agent.neurotype,
         model: agent.model,
-        content,
+        content: result.content,
         timestamp: new Date().toISOString(),
         round: round + 1,
         // osi_score is left undefined until a scoring pass is implemented.
+        ...(result.meta !== undefined ? { meta: result.meta } : {}),
       };
 
       // Print to stdout as soon as the turn is ready.
