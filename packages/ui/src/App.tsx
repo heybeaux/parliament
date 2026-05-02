@@ -5,6 +5,11 @@ import { Timeline } from './components/Timeline';
 import { TranscriptList } from './components/TranscriptList';
 import { HealthBar } from './components/HealthBar';
 import { getDeliberation, getTranscript, startDeliberation } from './lib/api';
+import {
+  clearActiveDeliberationId,
+  getActiveDeliberationId,
+  setActiveDeliberationId,
+} from './lib/activeDeliberation';
 import type { DeliberationResult } from './lib/types';
 
 export default function App() {
@@ -35,6 +40,53 @@ export default function App() {
     };
   }, [running]);
 
+  // PAR-1: rehydrate from a persisted in-flight deliberation id on mount.
+  //
+  // If a previous tab wrote `parliament:active_deliberation_id` to
+  // localStorage and the user hard-refreshed, we re-fetch via
+  // `GET /deliberate/:id` so the in-progress / final card re-appears
+  // instead of a blank home view. We only run this once on mount and bail
+  // cleanly on every error path (404, network, parse) by dropping the key
+  // so the next refresh shows a clean state.
+  useEffect(() => {
+    const persistedId = getActiveDeliberationId();
+    if (!persistedId) return;
+
+    let cancelled = false;
+    setRunning(true);
+
+    (async () => {
+      try {
+        const r = await getDeliberation(persistedId);
+        if (cancelled) return;
+        setResult(r);
+        setTopic(r.topic);
+        // Server-stored deliberations are always terminal — `saveDeliberation`
+        // is only called once the engine returns. Clear the key so a second
+        // refresh after the result is on screen lands on the clean home view.
+        clearActiveDeliberationId();
+      } catch (err) {
+        if (cancelled) return;
+        // 404 → stale id (engine likely failed before save, or DB was wiped).
+        // Drop the key silently so we don't loop on every refresh and so the
+        // user lands on a clean home view rather than a scary error banner
+        // for an action they didn't take. Non-404 errors (network, parse)
+        // surface to the banner so the user knows the rehydrate didn't work.
+        clearActiveDeliberationId();
+        const message = err instanceof Error ? err.message : String(err);
+        if (!/HTTP 404/i.test(message)) {
+          setError(message);
+        }
+      } finally {
+        if (!cancelled) setRunning(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   async function handleSubmit(t: string, preset: string, context?: string) {
     setError(null);
     setResult(null);
@@ -44,9 +96,19 @@ export default function App() {
       // PAR-16: forward optional prose context. `startDeliberation` strips
       // empty / whitespace-only values so we don't have to here.
       const r = await startDeliberation(t, { preset, context });
+      // PAR-1: persist the returned id so a hard refresh while the result
+      // is on screen rehydrates from `GET /deliberate/:id` instead of
+      // dropping the user back to an empty home view. The mount effect
+      // takes ownership of clearing the key once it has rendered the
+      // rehydrated result; explicit user navigation (sidebar click, new
+      // submit) also clears via the matching handlers below.
+      setActiveDeliberationId(r.id);
       setResult(r);
       setRefreshKey((k) => k + 1);
     } catch (err) {
+      // The POST never returned a usable id; nothing to persist. Make sure
+      // we don't leave a stale id from a previous run lying around.
+      clearActiveDeliberationId();
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setRunning(false);
@@ -56,6 +118,9 @@ export default function App() {
   async function handleLoadDeliberation(id: string) {
     setError(null);
     setRunning(false);
+    // User explicitly navigated away from any in-flight resume — drop the
+    // key so the next refresh starts clean.
+    clearActiveDeliberationId();
     try {
       const r = await getDeliberation(id);
       setResult(r);
@@ -69,6 +134,7 @@ export default function App() {
   async function handleLoadTranscript(file: string) {
     setError(null);
     setRunning(false);
+    clearActiveDeliberationId();
     try {
       const r = await getTranscript(file);
       setResult(r);
