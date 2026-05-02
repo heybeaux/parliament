@@ -2,6 +2,7 @@ import type {
   DeliberationCreated,
   DeliberationResult,
   DeliberationSummary,
+  PresetsResponse,
   TranscriptFile,
 } from './types';
 
@@ -23,16 +24,34 @@ export interface DeliberateOptions {
 
 export async function startDeliberation(
   topic: string,
-  config?: DeliberateOptions,
+  options?: { preset?: string; config?: DeliberateOptions },
   signal?: AbortSignal,
 ): Promise<DeliberationCreated> {
+  const preset = options?.preset?.trim();
+  const config = options?.config;
   const res = await fetch(`${BASE}/deliberate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ topic, ...(config ? { config } : {}) }),
+    body: JSON.stringify({
+      topic,
+      ...(preset ? { preset } : {}),
+      ...(config ? { config } : {}),
+    }),
     signal,
   });
   return jsonOrThrow<DeliberationCreated>(res);
+}
+
+/**
+ * Fetch the topology preset registry from the server.
+ *
+ * The server returns `{ presets, defaultPreset }`. Callers should provide a
+ * fallback list when this rejects so the form remains usable if the endpoint
+ * is unavailable (network error, 404 on older servers, etc.).
+ */
+export async function getPresets(signal?: AbortSignal): Promise<PresetsResponse> {
+  const res = await fetch(`${BASE}/presets`, { signal });
+  return jsonOrThrow<PresetsResponse>(res);
 }
 
 export async function getDeliberation(id: string): Promise<DeliberationResult> {

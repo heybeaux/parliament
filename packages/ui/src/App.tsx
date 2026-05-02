@@ -35,13 +35,13 @@ export default function App() {
     };
   }, [running]);
 
-  async function handleSubmit(t: string) {
+  async function handleSubmit(t: string, preset: string) {
     setError(null);
     setResult(null);
     setTopic(t);
     setRunning(true);
     try {
-      const r = await startDeliberation(t);
+      const r = await startDeliberation(t, { preset });
       setResult(r);
       setRefreshKey((k) => k + 1);
     } catch (err) {
