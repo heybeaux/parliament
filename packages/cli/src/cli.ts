@@ -11,6 +11,7 @@
  *   parliament get <id>
  */
 
+import fs from 'node:fs';
 import { Command } from 'commander';
 import {
   loadConfig,
@@ -46,11 +47,42 @@ interface DeliberateOptions {
   modelSkeptic?: string;
   maxRounds?: string;
   config?: string;
+  /**
+   * Path to a UTF-8 file whose contents will be sent as the deliberation's
+   * `context` field (PAR-16). The engine prepends the file's contents to
+   * every non-Sentry agent's user prompt under a stable `## Background`
+   * heading. Prefer this over the deprecated inline `CONTEXT:` marker
+   * approach in the topic string — that workaround still parses for
+   * back-compat but pollutes the topic display.
+   */
+  contextFile?: string;
+}
+
+/**
+ * Reads the user-supplied context file from disk. Returns `undefined` when
+ * the option is not set; throws a clear CLI-level error and exits when the
+ * file is unreadable so callers can't silently send an empty context.
+ */
+function readContextFile(p: string | undefined): string | undefined {
+  if (p === undefined) return undefined;
+  try {
+    return fs.readFileSync(p, 'utf8');
+  } catch (err) {
+    process.stderr.write(
+      `Parliament: failed to read --context-file "${p}": ${
+        err instanceof Error ? err.message : String(err)
+      }\n`,
+    );
+    process.exit(1);
+  }
 }
 
 async function runDeliberate(topic: string, opts: DeliberateOptions): Promise<void> {
   const configPath = opts.config ?? process.env['PARLIAMENT_CONFIG'];
   const cfg = loadConfig(configPath);
+  // PAR-16: optional --context-file. We resolve once up-front so a missing
+  // file fails fast (before models are loaded) rather than mid-run.
+  const context = readContextFile(opts.contextFile);
 
   const defaults = cfg.parliament ?? DEFAULT_PARLIAMENT_DEFAULTS;
   const maxRounds =
@@ -135,6 +167,7 @@ async function runDeliberate(topic: string, opts: DeliberateOptions): Promise<vo
       synthesizer,
       redAgent,
       sentry,
+      ...(context !== undefined ? { context } : {}),
     });
   } else {
     // Legacy 5-agent path — preserved byte-identically for the default Debate
@@ -150,6 +183,7 @@ async function runDeliberate(topic: string, opts: DeliberateOptions): Promise<vo
       redAgentInterval: defaults.red_agent_interval,
       confidenceThreshold: defaults.confidence_threshold,
       agents: { proposer, skeptic, synthesizer, redAgent, sentry },
+      ...(context !== undefined ? { context } : {}),
     });
   }
 
@@ -217,6 +251,13 @@ export function createProgram(): Command {
     .option('--model-skeptic <id>', 'Model ID override for the Skeptic agent')
     .option('--max-rounds <n>', 'Maximum number of deliberation rounds (default: 5)')
     .option('--config <path>', 'Path to parliament.toml config file')
+    .option(
+      '--context-file <path>',
+      // PAR-16: prefer this over the deprecated inline `CONTEXT:` marker
+      // approach. Each agent sees the file contents under a stable
+      // `## Background` heading at the top of its user prompt.
+      'Path to a UTF-8 file whose contents are sent as the deliberation context (prepended to every agent prompt). The legacy inline `CONTEXT:` marker in <topic> is deprecated.',
+    )
     .action(async (topic: string, opts: DeliberateOptions) => {
       await runDeliberate(topic, opts);
     });
