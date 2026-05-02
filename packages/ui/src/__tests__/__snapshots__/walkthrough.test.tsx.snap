@@ -1,0 +1,1448 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`PAR-6 — Stage 3 UI walkthrough > walks PresetPicker → Timeline (parallel siblings + enrichment) → Observability 1`] = `
+<div>
+  <div
+    class="relative min-h-screen bg-ink-950"
+  >
+    <div
+      class="pointer-events-none fixed inset-0 overflow-hidden"
+    >
+      <div
+        class="absolute -top-[40%] left-1/2 h-[800px] w-[800px] -translate-x-1/2 rounded-full bg-gradient-radial from-parliament-400/[0.04] via-transparent to-transparent"
+      />
+      <div
+        class="absolute -bottom-[20%] -right-[10%] h-[600px] w-[600px] rounded-full bg-gradient-radial from-blue-500/[0.03] via-transparent to-transparent"
+      />
+    </div>
+    <header
+      class="glass glass-border sticky top-0 z-30"
+    >
+      <div
+        class="mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-8"
+      >
+        <div
+          class="flex h-16 items-center justify-between"
+        >
+          <div
+            class="flex items-center gap-4"
+          >
+            <div
+              class="relative flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-parliament-400/20 to-parliament-600/20 ring-1 ring-parliament-400/20"
+            >
+              <svg
+                class="text-parliament-400"
+                fill="none"
+                height="18"
+                viewBox="0 0 24 24"
+                width="18"
+              >
+                <path
+                  d="M12 2L2 7l10 5 10-5-10-5z"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1.5"
+                />
+                <path
+                  d="M2 17l10 5 10-5"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1.5"
+                />
+                <path
+                  d="M2 12l10 5 10-5"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1.5"
+                />
+              </svg>
+            </div>
+            <div>
+              <h1
+                class="text-[15px] font-semibold tracking-tight text-zinc-100"
+              >
+                Parliament
+              </h1>
+              <p
+                class="text-2xs font-medium text-zinc-500"
+              >
+                Multi-agent deliberation
+              </p>
+            </div>
+          </div>
+          <div
+            class="flex items-center gap-3"
+          >
+            <div
+              class="hidden items-center gap-1.5 sm:flex"
+            >
+              <div
+                class="flex items-center gap-1.5 rounded-lg px-2 py-1 transition-colors bg-white/[0.03] ring-1 ring-white/[0.06]"
+                title="mock-model: connected"
+              >
+                <span
+                  class="h-1.5 w-1.5 rounded-full bg-zinc-400"
+                />
+                <span
+                  class="text-2xs font-medium text-zinc-400"
+                >
+                  mock-model
+                </span>
+              </div>
+              <div
+                class="ml-1 flex items-center gap-1 text-2xs text-emerald-400/70"
+              >
+                <svg
+                  fill="none"
+                  height="10"
+                  viewBox="0 0 24 24"
+                  width="10"
+                >
+                  <path
+                    d="M20 6L9 17l-5-5"
+                    stroke="currentColor"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2.5"
+                  />
+                </svg>
+              </div>
+            </div>
+            <button
+              class="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-white/5 hover:text-zinc-200 lg:hidden"
+              type="button"
+            >
+              <svg
+                fill="none"
+                height="18"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+                width="18"
+              >
+                <path
+                  d="M3 12h18M3 6h18M3 18h18"
+                />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+    <main
+      class="relative mx-auto max-w-[1400px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8"
+    >
+      <div
+        class="lg:grid lg:grid-cols-[1fr_320px] lg:gap-8"
+      >
+        <div
+          class="min-w-0 space-y-6"
+        >
+          <form
+            class="relative"
+            style="<<framer-motion>>"
+          >
+            <div
+              class="relative overflow-hidden rounded-2xl transition-all duration-300 ring-1 ring-white/[0.06]"
+            >
+              <div
+                class="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-parliament-400/30 to-transparent"
+              />
+              <div
+                class="surface p-5 !border-0"
+              >
+                <label
+                  class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-zinc-400"
+                >
+                  <svg
+                    class="text-parliament-400"
+                    fill="none"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    width="14"
+                  >
+                    <path
+                      d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                      stroke-width="1.5"
+                    />
+                  </svg>
+                  New deliberation
+                </label>
+                <div
+                  class="mb-4"
+                >
+                  <div
+                    class="flex flex-col gap-2"
+                  >
+                    <div
+                      class="flex items-center justify-between"
+                    >
+                      <label
+                        class="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-zinc-400"
+                        for="preset-picker"
+                      >
+                        <svg
+                          class="text-parliament-400"
+                          fill="none"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          width="14"
+                        >
+                          <path
+                            d="M4 6h16M4 12h10M4 18h7"
+                            stroke="currentColor"
+                            stroke-linecap="round"
+                            stroke-width="1.5"
+                          />
+                        </svg>
+                        Preset
+                      </label>
+                    </div>
+                    <div
+                      class="relative"
+                    >
+                      <select
+                        aria-label="Deliberation preset"
+                        class="w-full appearance-none rounded-xl border-0 bg-white/[0.03] px-4 py-3 pr-10 text-sm text-zinc-100 outline-none ring-1 ring-white/[0.06] transition-colors focus:bg-white/[0.05] focus:ring-parliament-400/30 disabled:opacity-40"
+                        id="preset-picker"
+                      >
+                        <option
+                          aria-disabled="false"
+                          title="Proposer vs. Skeptic with a Synthesizer reconciling."
+                          value="debate"
+                        >
+                          Debate
+                           — 
+                          Proposer vs. Skeptic with a Synthesizer reconciling.
+                        </option>
+                        <option
+                          aria-disabled="false"
+                          title="Parallel independent panel votes; results merged in order."
+                          value="jury"
+                        >
+                          Jury
+                           — 
+                          Parallel independent panel votes; results merged in order.
+                        </option>
+                        <option
+                          aria-disabled="false"
+                          title="Adversarial panel pressure-tests the proposal."
+                          value="star-chamber"
+                        >
+                          Star Chamber
+                           — 
+                          Adversarial panel pressure-tests the proposal.
+                        </option>
+                      </select>
+                      <svg
+                        aria-hidden="true"
+                        class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500"
+                        fill="none"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        width="14"
+                      >
+                        <path
+                          d="M6 9l6 6 6-6"
+                          stroke="currentColor"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="1.75"
+                        />
+                      </svg>
+                    </div>
+                    <div
+                      class="flex flex-wrap items-center gap-1.5"
+                      data-testid="preset-chip-row"
+                    >
+                      <button
+                        aria-pressed="false"
+                        class="rounded-md transition-opacity cursor-pointer hover:opacity-100 opacity-70"
+                        title="Proposer vs. Skeptic with a Synthesizer reconciling."
+                        type="button"
+                      >
+                        <span
+                          class="inline-flex items-center rounded-md ring-1 uppercase tracking-wider gap-1 px-1.5 py-0.5 text-2xs font-semibold bg-indigo-500/10 text-indigo-300 ring-indigo-400/25"
+                          data-preset-id="debate"
+                          data-testid="preset-badge"
+                          title="Preset: Debate"
+                        >
+                          <span
+                            aria-hidden="true"
+                            class="shrink-0 rounded-full h-1.5 w-1.5 bg-indigo-400"
+                          />
+                          <span
+                            class="truncate normal-case tracking-normal"
+                          >
+                            Debate
+                          </span>
+                        </span>
+                      </button>
+                      <button
+                        aria-pressed="true"
+                        class="rounded-md transition-opacity cursor-pointer hover:opacity-100 opacity-100 ring-1 ring-white/20"
+                        title="Parallel independent panel votes; results merged in order."
+                        type="button"
+                      >
+                        <span
+                          class="inline-flex items-center rounded-md ring-1 uppercase tracking-wider gap-1 px-1.5 py-0.5 text-2xs font-semibold bg-lime-500/10 text-lime-300 ring-lime-400/25"
+                          data-preset-id="jury"
+                          data-testid="preset-badge"
+                          title="Preset: Jury"
+                        >
+                          <span
+                            aria-hidden="true"
+                            class="shrink-0 rounded-full h-1.5 w-1.5 bg-lime-400"
+                          />
+                          <span
+                            class="truncate normal-case tracking-normal"
+                          >
+                            Jury
+                          </span>
+                        </span>
+                      </button>
+                      <button
+                        aria-pressed="false"
+                        class="rounded-md transition-opacity cursor-pointer hover:opacity-100 opacity-70"
+                        title="Adversarial panel pressure-tests the proposal."
+                        type="button"
+                      >
+                        <span
+                          class="inline-flex items-center rounded-md ring-1 uppercase tracking-wider gap-1 px-1.5 py-0.5 text-2xs font-semibold bg-orange-500/10 text-orange-300 ring-orange-400/25"
+                          data-preset-id="star-chamber"
+                          data-testid="preset-badge"
+                          title="Preset: Star Chamber"
+                        >
+                          <span
+                            aria-hidden="true"
+                            class="shrink-0 rounded-full h-1.5 w-1.5 bg-orange-400"
+                          />
+                          <span
+                            class="truncate normal-case tracking-normal"
+                          >
+                            Star Chamber
+                          </span>
+                        </span>
+                      </button>
+                    </div>
+                    <div
+                      class="flex items-center gap-2 text-xs text-zinc-500"
+                      data-testid="preset-best-for"
+                    >
+                      <span
+                        class="inline-flex items-center rounded-md ring-1 uppercase tracking-wider gap-1 px-1.5 py-0.5 text-2xs font-semibold bg-lime-500/10 text-lime-300 ring-lime-400/25"
+                        data-preset-id="jury"
+                        data-testid="preset-badge"
+                        title="Preset: Jury"
+                      >
+                        <span
+                          aria-hidden="true"
+                          class="shrink-0 rounded-full h-1.5 w-1.5 bg-lime-400"
+                        />
+                        <span
+                          class="truncate normal-case tracking-normal"
+                        >
+                          Jury
+                        </span>
+                      </span>
+                      <span>
+                        <span
+                          class="text-zinc-400"
+                        >
+                          Best for:
+                        </span>
+                         
+                        When breadth of independent opinion matters more than dialogue.
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div
+                  class="flex flex-col gap-3 sm:flex-row"
+                >
+                  <div
+                    class="relative flex-1"
+                  >
+                    <input
+                      class="w-full rounded-xl border-0 bg-white/[0.03] px-4 py-3 text-sm text-zinc-100 placeholder-zinc-500/70 outline-none transition-colors focus:bg-white/[0.05] disabled:opacity-40"
+                      placeholder="Should an autonomous AI ever take irreversible actions?"
+                      type="text"
+                      value=""
+                    />
+                  </div>
+                  <button
+                    class="group relative overflow-hidden rounded-xl px-6 py-3 text-sm font-medium shadow-md transition-all disabled:opacity-30 disabled:shadow-none sm:shrink-0"
+                    disabled=""
+                    type="submit"
+                  >
+                    <div
+                      class="absolute inset-0 bg-gradient-to-r from-parliament-500 to-parliament-400 transition-opacity group-hover:opacity-90 group-disabled:opacity-50"
+                    />
+                    <div
+                      class="absolute inset-0 bg-gradient-to-r from-parliament-400 to-amber-400 opacity-0 transition-opacity group-hover:opacity-100 group-disabled:opacity-0"
+                    />
+                    <span
+                      class="relative flex items-center justify-center gap-2 text-ink-900 font-semibold"
+                    >
+                      Deliberate
+                      <svg
+                        class="transition-transform group-hover:translate-x-0.5"
+                        fill="none"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        width="14"
+                      >
+                        <path
+                          d="M5 12h14m-6-6l6 6-6 6"
+                          stroke="currentColor"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                        />
+                      </svg>
+                    </span>
+                  </button>
+                </div>
+                <div
+                  class="mt-3"
+                >
+                  <button
+                    aria-controls="deliberation-context"
+                    aria-expanded="false"
+                    class="flex items-center gap-2 rounded-lg px-2 py-1 text-xs font-medium uppercase tracking-widest text-zinc-400 transition-colors hover:text-zinc-200 disabled:opacity-40"
+                    type="button"
+                  >
+                    <svg
+                      aria-hidden="true"
+                      fill="none"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      width="12"
+                    >
+                      <path
+                        d="M12 5v14M5 12h14"
+                        stroke="currentColor"
+                        stroke-linecap="round"
+                        stroke-width="1.75"
+                      />
+                    </svg>
+                    Add context
+                  </button>
+                </div>
+              </div>
+            </div>
+          </form>
+          <section
+            class="space-y-5"
+          >
+            <div
+              class="flex items-center justify-between"
+            >
+              <div
+                class="flex items-center gap-3"
+              >
+                <h2
+                  class="text-xs font-semibold uppercase tracking-widest text-zinc-500"
+                >
+                  Deliberation
+                </h2>
+              </div>
+              <button
+                aria-controls="observability-panel"
+                aria-expanded="true"
+                class="flex h-7 items-center gap-1.5 rounded-md px-2 text-2xs font-medium ring-1 transition-colors bg-white/[0.06] text-zinc-200 ring-white/[0.1]"
+                type="button"
+              >
+                <svg
+                  aria-hidden="true"
+                  fill="none"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  width="12"
+                >
+                  <path
+                    d="M3 12h4l3-9 4 18 3-9h4"
+                    stroke="currentColor"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="1.5"
+                  />
+                </svg>
+                Hide observability
+              </button>
+            </div>
+            <div
+              class="rounded-xl bg-white/[0.015] p-4 ring-1 ring-white/[0.05]"
+              data-testid="observability-panel"
+            >
+              <div
+                class="mb-3 flex items-baseline justify-between"
+              >
+                <h3
+                  class="text-2xs font-semibold uppercase tracking-widest text-zinc-500"
+                >
+                  Observability
+                </h3>
+                <span
+                  class="text-2xs text-zinc-600"
+                  title="Inspection view — research metrics surfaced in tooltips and aria-labels."
+                >
+                  inspection view
+                </span>
+              </div>
+              <div
+                class="grid gap-4 md:grid-cols-2"
+              >
+                <section
+                  aria-label="Confidence sparkline (convergence_delta cumulative)"
+                  class="rounded-lg bg-white/[0.02] p-3 ring-1 ring-white/[0.04]"
+                >
+                  <header
+                    class="mb-2 flex items-baseline justify-between"
+                  >
+                    <h4
+                      class="text-2xs font-semibold uppercase tracking-wider text-zinc-400"
+                    >
+                      Room movement
+                    </h4>
+                    <span
+                      class="font-mono text-2xs text-zinc-600"
+                      title="research metric: convergence_delta cumulative"
+                    >
+                      3
+                       round
+                      s
+                    </span>
+                  </header>
+                  <svg
+                    aria-label="Cumulative convergence_delta sparkline across 3 rounds"
+                    class="block max-w-full"
+                    height="56"
+                    role="img"
+                    viewBox="0 0 280 56"
+                    width="280"
+                  >
+                    <title>
+                      Cumulative convergence_delta — research term: convergence_delta running sum
+                    </title>
+                    <line
+                      stroke="rgba(255,255,255,0.06)"
+                      stroke-width="1"
+                      x1="4"
+                      x2="276"
+                      y1="52"
+                      y2="52"
+                    />
+                    <path
+                      d="M4.00,52.00 L140.00,32.80 L276.00,4.00"
+                      fill="none"
+                      stroke="rgb(125 211 252 / 0.7)"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="1.5"
+                    />
+                    <circle
+                      cx="276"
+                      cy="4"
+                      fill="rgb(125 211 252)"
+                      r="2.5"
+                    />
+                  </svg>
+                </section>
+                <section
+                  aria-label="Disagreement remaining (residue of conflict)"
+                  class="rounded-lg bg-white/[0.02] p-3 ring-1 ring-white/[0.04]"
+                >
+                  <header
+                    class="mb-2 flex items-baseline justify-between"
+                  >
+                    <h4
+                      class="text-2xs font-semibold uppercase tracking-wider text-zinc-400"
+                    >
+                      Disagreement remaining
+                    </h4>
+                    <span
+                      class="font-mono text-2xs text-zinc-600"
+                      title="research metric: residue of conflict"
+                    >
+                      final residue 
+                      0.08
+                    </span>
+                  </header>
+                  <svg
+                    aria-label="Disagreement remaining (residue of conflict) per round across 3 rounds"
+                    class="block max-w-full"
+                    data-residue-source="real"
+                    height="56"
+                    role="img"
+                    viewBox="0 0 280 56"
+                    width="280"
+                  >
+                    <title>
+                      Disagreement remaining — research term: residue of conflict
+                    </title>
+                    <line
+                      stroke="rgba(255,255,255,0.06)"
+                      stroke-width="1"
+                      x1="4"
+                      x2="276"
+                      y1="52"
+                      y2="52"
+                    />
+                    <rect
+                      fill="rgb(251 191 36 / 0.45)"
+                      height="20.16"
+                      rx="1.5"
+                      width="63.46666666666667"
+                      x="108.26666666666668"
+                      y="31.84"
+                    >
+                      <title>
+                        Round 2: residue = 0.420
+                      </title>
+                    </rect>
+                    <rect
+                      fill="rgb(251 191 36 / 0.45)"
+                      height="3.84"
+                      rx="1.5"
+                      width="63.46666666666667"
+                      x="198.93333333333334"
+                      y="48.16"
+                    >
+                      <title>
+                        Round 3: residue = 0.080
+                      </title>
+                    </rect>
+                  </svg>
+                </section>
+                <section
+                  aria-label="System events (RedAgent injections, Sentry warnings, lifecycle markers)"
+                  class="rounded-lg bg-white/[0.02] p-3 ring-1 ring-white/[0.04] md:col-span-2"
+                >
+                  <header
+                    class="mb-2 flex items-baseline justify-between"
+                  >
+                    <h4
+                      class="text-2xs font-semibold uppercase tracking-wider text-zinc-400"
+                    >
+                      Interventions
+                    </h4>
+                    <span
+                      class="font-mono text-2xs text-zinc-600"
+                      title="research metric: events[] stream (red_agent.injection, sentry.echo, lifecycle)"
+                    >
+                      1
+                       event
+                    </span>
+                  </header>
+                  <ul
+                    class="space-y-1.5"
+                  >
+                    <li
+                      class="flex items-start gap-2 rounded-md bg-white/[0.02] px-3 py-2 text-2xs"
+                    >
+                      <span
+                        class="mt-0.5 inline-flex shrink-0 items-center rounded bg-white/[0.04] px-1.5 py-0.5 font-mono text-2xs text-zinc-400"
+                        title="research kind: red_agent.injection"
+                      >
+                        R2
+                      </span>
+                      <div
+                        class="min-w-0 flex-1"
+                      >
+                        <p
+                          class="font-medium text-zinc-300"
+                        >
+                          Devil-advocate injection
+                        </p>
+                        <p
+                          class="mt-0.5 break-words text-zinc-500"
+                        >
+                          Devil's advocate: what if rollback channels are themselves compromised?
+                        </p>
+                      </div>
+                    </li>
+                  </ul>
+                </section>
+              </div>
+            </div>
+            <div
+              class="rounded-xl bg-white/[0.02] p-4 ring-1 ring-white/[0.06]"
+              style="<<framer-motion>>"
+            >
+              <div
+                class="mb-2 flex items-center gap-2"
+              >
+                <p
+                  class="text-2xs font-semibold uppercase tracking-widest text-zinc-500"
+                >
+                  Topic
+                </p>
+                <span
+                  class="h-2.5 w-px bg-white/[0.06]"
+                />
+                <span
+                  class="inline-flex items-center rounded-md ring-1 uppercase tracking-wider gap-1.5 px-2.5 py-1 text-xs font-semibold bg-lime-500/10 text-lime-300 ring-lime-400/25"
+                  data-preset-id="jury"
+                  data-testid="preset-badge"
+                  title="Preset: Jury"
+                >
+                  <span
+                    aria-hidden="true"
+                    class="shrink-0 rounded-full h-2 w-2 bg-lime-400"
+                  />
+                  <span
+                    class="truncate normal-case tracking-normal"
+                  >
+                    Jury
+                  </span>
+                </span>
+              </div>
+              <p
+                class="text-lg font-medium text-zinc-100"
+              >
+                Should we allow autonomous AI to make irreversible decisions?
+              </p>
+            </div>
+            <div
+              class="relative overflow-hidden rounded-xl bg-blue-500/[0.05] p-4 ring-1 ring-blue-400/15"
+              data-testid="in-progress-card"
+              style="<<framer-motion>>"
+            >
+              <div
+                class="absolute inset-0 animate-shimmer bg-shimmer bg-[length:200%_100%]"
+              />
+              <div
+                class="relative flex items-center justify-between"
+              >
+                <div
+                  class="flex items-center gap-3"
+                >
+                  <div
+                    class="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-500/10"
+                  >
+                    <svg
+                      class="h-4 w-4 animate-spin text-blue-400"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        class="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        stroke-width="3"
+                      />
+                      <path
+                        class="opacity-75"
+                        d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                        fill="currentColor"
+                      />
+                    </svg>
+                  </div>
+                  <div>
+                    <p
+                      class="text-sm font-medium text-blue-200"
+                    >
+                      Agents deliberating
+                    </p>
+                    <p
+                      class="text-2xs text-blue-300/50"
+                    >
+                      5 turns so far
+                    </p>
+                  </div>
+                </div>
+                <div
+                  class="text-right"
+                >
+                  <span
+                    class="font-mono text-lg font-semibold tabular-nums text-blue-300/80"
+                  >
+                    0s
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div
+              class="relative overflow-hidden rounded-xl p-4 bg-emerald-500/[0.06] ring-1 ring-emerald-400/20"
+              style="<<framer-motion>>"
+            >
+              <div
+                class="absolute -top-12 left-1/2 h-24 w-48 -translate-x-1/2 rounded-full blur-3xl bg-emerald-400/10"
+              />
+              <div
+                class="relative flex flex-wrap items-center gap-x-4 gap-y-2"
+              >
+                <div
+                  class="flex items-center gap-2"
+                >
+                  <svg
+                    class="text-emerald-400"
+                    fill="none"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    width="16"
+                  >
+                    <path
+                      d="M20 6L9 17l-5-5"
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                    />
+                  </svg>
+                  <span
+                    class="text-sm font-semibold text-emerald-300"
+                  >
+                    Consensus reached
+                  </span>
+                </div>
+                <div
+                  class="flex flex-wrap items-center gap-3 text-xs text-zinc-400"
+                >
+                  <span
+                    class="flex items-center gap-1.5"
+                  >
+                    <svg
+                      class="text-zinc-500"
+                      fill="none"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      width="12"
+                    >
+                      <circle
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                      />
+                      <path
+                        d="M12 6v6l4 2"
+                        stroke="currentColor"
+                        stroke-linecap="round"
+                        stroke-width="1.5"
+                      />
+                    </svg>
+                    3
+                     rounds
+                  </span>
+                  <span
+                    class="h-3 w-px bg-white/10"
+                  />
+                  <span>
+                    consensus
+                  </span>
+                  <span
+                    class="h-3 w-px bg-white/10"
+                  />
+                  <span>
+                    residue 
+                    0.08
+                  </span>
+                  <span
+                    class="h-3 w-px bg-white/10"
+                  />
+                  <span>
+                    duration 
+                    12s
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div
+              class="relative overflow-hidden rounded-xl bg-blue-500/[0.04] p-5 ring-1 ring-blue-400/15"
+              style="<<framer-motion>>"
+            >
+              <div
+                class="absolute -top-8 right-8 h-32 w-32 rounded-full bg-blue-500/[0.06] blur-3xl"
+              />
+              <div
+                class="relative"
+              >
+                <div
+                  class="mb-3 flex items-center gap-2"
+                >
+                  <svg
+                    class="text-blue-400"
+                    fill="none"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    width="14"
+                  >
+                    <path
+                      d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                      stroke-width="1.5"
+                    />
+                  </svg>
+                  <h3
+                    class="text-xs font-semibold uppercase tracking-widest text-blue-300/80"
+                  >
+                    Synthesis
+                  </h3>
+                </div>
+                <p
+                  class="whitespace-pre-wrap text-sm leading-relaxed text-zinc-200/90"
+                >
+                  Permit autonomous AI to take irreversible actions only inside pre-approved domains with mandatory human escalation for novel categories.
+                </p>
+              </div>
+            </div>
+            <div
+              class="space-y-8"
+            >
+              <div
+                style="<<framer-motion>>"
+              >
+                <div
+                  class="mb-4 flex items-center gap-3"
+                >
+                  <span
+                    class="flex h-6 items-center rounded-md bg-white/[0.04] px-2.5 font-mono text-2xs font-semibold uppercase tracking-widest text-zinc-500 ring-1 ring-white/[0.06]"
+                  >
+                    Round 
+                    1
+                  </span>
+                  <div
+                    class="h-px flex-1 bg-gradient-to-r from-white/[0.06] to-transparent"
+                  />
+                </div>
+                <div
+                  class="space-y-5"
+                >
+                  <div
+                    class="rounded-xl bg-white/[0.015] p-3 ring-1 ring-white/[0.04]"
+                    data-parallel-group="round-1-jury"
+                    data-testid="parallel-row"
+                  >
+                    <div
+                      class="mb-2 flex items-center gap-2 px-1"
+                    >
+                      <span
+                        class="rounded-md bg-violet-500/10 px-2 py-0.5 text-2xs font-semibold uppercase tracking-widest text-violet-300/90 ring-1 ring-violet-400/20"
+                      >
+                        Parallel block
+                      </span>
+                      <span
+                        class="text-2xs text-zinc-500"
+                      >
+                        2
+                         siblings
+                      </span>
+                    </div>
+                    <div
+                      class="flex flex-col gap-4 md:flex-row md:items-stretch md:[&>*]:flex-1"
+                    >
+                      <div
+                        class="group relative"
+                        style="<<framer-motion>>"
+                      >
+                        <div
+                          class="surface-interactive relative overflow-hidden rounded-xl p-4"
+                        >
+                          <div
+                            class="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-emerald-500/20 to-emerald-500/0"
+                          />
+                          <div
+                            class="mb-3"
+                          >
+                            <span
+                              class="inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-2xs font-semibold bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-400/20"
+                            >
+                              <span
+                                class="h-1.5 w-1.5 rounded-full bg-emerald-400"
+                              />
+                              Proposer
+                            </span>
+                            <p
+                              class="mt-1.5 truncate font-mono text-2xs text-zinc-500/70"
+                            >
+                              mock-model
+                            </p>
+                          </div>
+                          <p
+                            class="whitespace-pre-wrap text-[13px] leading-[1.7] text-zinc-300/90"
+                          >
+                            Round 1 Juror A: irreversible AI decisions require strong governance, audit trails, and a human-in-the-loop fallback to remain trustworthy.
+                          </p>
+                          <div
+                            class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-zinc-500"
+                            data-testid="turn-enrichment"
+                          >
+                            <span
+                              aria-label="model: mock-model-v1"
+                              class="font-mono text-zinc-500/80"
+                              title="model"
+                            >
+                              mock-model-v1
+                            </span>
+                            <span
+                              aria-label="posture: evidence-first (neurotype: proposer)"
+                              title="neurotype: proposer"
+                            >
+                              evidence-first
+                            </span>
+                            <span
+                              aria-label="word count: 24"
+                              class="tabular-nums text-zinc-500/80"
+                              title="word_count"
+                            >
+                              24
+                               words
+                            </span>
+                            <span
+                              aria-label="movement toward consensus: not measurable yet"
+                              class="tabular-nums text-zinc-500"
+                              title="convergence_delta"
+                            >
+                              —
+                            </span>
+                          </div>
+                          <div
+                            class="mt-3 flex items-center justify-between border-t border-white/[0.04] pt-2.5"
+                          >
+                            <span
+                              class="text-2xs text-zinc-500"
+                            >
+                              05:00 a.m.
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div
+                        class="group relative"
+                        style="<<framer-motion>>"
+                      >
+                        <div
+                          class="surface-interactive relative overflow-hidden rounded-xl p-4"
+                        >
+                          <div
+                            class="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-amber-500/20 to-amber-500/0"
+                          />
+                          <div
+                            class="mb-3"
+                          >
+                            <span
+                              class="inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-2xs font-semibold bg-amber-500/10 text-amber-300 ring-1 ring-amber-400/20"
+                            >
+                              <span
+                                class="h-1.5 w-1.5 rounded-full bg-amber-400"
+                              />
+                              Skeptic
+                            </span>
+                            <p
+                              class="mt-1.5 truncate font-mono text-2xs text-zinc-500/70"
+                            >
+                              mock-model
+                            </p>
+                          </div>
+                          <p
+                            class="whitespace-pre-wrap text-[13px] leading-[1.7] text-zinc-300/90"
+                          >
+                            Round 1 Juror B: irreversibility itself is the failure mode; even sound governance cannot recover from a single catastrophic action.
+                          </p>
+                          <div
+                            class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-zinc-500"
+                            data-testid="turn-enrichment"
+                          >
+                            <span
+                              aria-label="model: mock-model-v1"
+                              class="font-mono text-zinc-500/80"
+                              title="model"
+                            >
+                              mock-model-v1
+                            </span>
+                            <span
+                              aria-label="posture: adversarial (neurotype: skeptic)"
+                              title="neurotype: skeptic"
+                            >
+                              adversarial
+                            </span>
+                            <span
+                              aria-label="word count: 21"
+                              class="tabular-nums text-zinc-500/80"
+                              title="word_count"
+                            >
+                              21
+                               words
+                            </span>
+                            <span
+                              aria-label="movement toward consensus: not measurable yet"
+                              class="tabular-nums text-zinc-500"
+                              title="convergence_delta"
+                            >
+                              —
+                            </span>
+                          </div>
+                          <div
+                            class="mt-3 flex items-center justify-between border-t border-white/[0.04] pt-2.5"
+                          >
+                            <span
+                              class="text-2xs text-zinc-500"
+                            >
+                              05:00 a.m.
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div
+                style="<<framer-motion>>"
+              >
+                <div
+                  class="mb-4 flex items-center gap-3"
+                >
+                  <span
+                    class="flex h-6 items-center rounded-md bg-white/[0.04] px-2.5 font-mono text-2xs font-semibold uppercase tracking-widest text-zinc-500 ring-1 ring-white/[0.06]"
+                  >
+                    Round 
+                    2
+                  </span>
+                  <div
+                    class="h-px flex-1 bg-gradient-to-r from-white/[0.06] to-transparent"
+                  />
+                </div>
+                <div
+                  class="grid gap-4 md:grid-cols-2 xl:grid-cols-3"
+                >
+                  <div
+                    class="group relative"
+                    style="<<framer-motion>>"
+                  >
+                    <div
+                      class="surface-interactive relative overflow-hidden rounded-xl p-4"
+                    >
+                      <div
+                        class="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-blue-500/20 to-blue-500/0"
+                      />
+                      <div
+                        class="mb-3"
+                      >
+                        <span
+                          class="inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-2xs font-semibold bg-blue-500/10 text-blue-300 ring-1 ring-blue-400/20"
+                        >
+                          <span
+                            class="h-1.5 w-1.5 rounded-full bg-blue-400"
+                          />
+                          Synthesizer
+                        </span>
+                        <p
+                          class="mt-1.5 truncate font-mono text-2xs text-zinc-500/70"
+                        >
+                          mock-model
+                        </p>
+                      </div>
+                      <p
+                        class="whitespace-pre-wrap text-[13px] leading-[1.7] text-zinc-300/90"
+                      >
+                        Round 2 synthesis: jurors converge on guardrails, diverge on whether any irreversible action is acceptable.
+                      </p>
+                      <div
+                        class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-zinc-500"
+                        data-testid="turn-enrichment"
+                      >
+                        <span
+                          aria-label="model: mock-model-v1"
+                          class="font-mono text-zinc-500/80"
+                          title="model"
+                        >
+                          mock-model-v1
+                        </span>
+                        <span
+                          aria-label="posture: reconciliation (neurotype: synthesizer)"
+                          title="neurotype: synthesizer"
+                        >
+                          reconciliation
+                        </span>
+                        <span
+                          aria-label="word count: 18"
+                          class="tabular-nums text-zinc-500/80"
+                          title="word_count"
+                        >
+                          18
+                           words
+                        </span>
+                        <span
+                          aria-label="movement toward consensus: +0.12 (convergence_delta)"
+                          class="tabular-nums text-emerald-300/80"
+                          title="convergence_delta"
+                        >
+                          +0.12
+                        </span>
+                      </div>
+                      <div
+                        class="mt-3 flex items-center justify-between border-t border-white/[0.04] pt-2.5"
+                      >
+                        <span
+                          class="text-2xs text-zinc-500"
+                        >
+                          05:00 a.m.
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div
+                style="<<framer-motion>>"
+              >
+                <div
+                  class="mb-4 flex items-center gap-3"
+                >
+                  <span
+                    class="flex h-6 items-center rounded-md bg-white/[0.04] px-2.5 font-mono text-2xs font-semibold uppercase tracking-widest text-zinc-500 ring-1 ring-white/[0.06]"
+                  >
+                    Round 
+                    3
+                  </span>
+                  <div
+                    class="h-px flex-1 bg-gradient-to-r from-white/[0.06] to-transparent"
+                  />
+                </div>
+                <div
+                  class="grid gap-4 md:grid-cols-2 xl:grid-cols-3"
+                >
+                  <div
+                    class="group relative"
+                    style="<<framer-motion>>"
+                  >
+                    <div
+                      class="surface-interactive relative overflow-hidden rounded-xl p-4"
+                    >
+                      <div
+                        class="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-emerald-500/20 to-emerald-500/0"
+                      />
+                      <div
+                        class="mb-3"
+                      >
+                        <span
+                          class="inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-2xs font-semibold bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-400/20"
+                        >
+                          <span
+                            class="h-1.5 w-1.5 rounded-full bg-emerald-400"
+                          />
+                          Proposer
+                        </span>
+                        <p
+                          class="mt-1.5 truncate font-mono text-2xs text-zinc-500/70"
+                        >
+                          mock-model
+                        </p>
+                      </div>
+                      <p
+                        class="whitespace-pre-wrap text-[13px] leading-[1.7] text-zinc-300/90"
+                      >
+                        Round 3 closing: bounded autonomy with explicit reversibility clauses and pre-committed rollback channels resolves most concerns.
+                      </p>
+                      <div
+                        class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-zinc-500"
+                        data-testid="turn-enrichment"
+                      >
+                        <span
+                          aria-label="model: mock-model-v1"
+                          class="font-mono text-zinc-500/80"
+                          title="model"
+                        >
+                          mock-model-v1
+                        </span>
+                        <span
+                          aria-label="posture: evidence-first (neurotype: proposer)"
+                          title="neurotype: proposer"
+                        >
+                          evidence-first
+                        </span>
+                        <span
+                          aria-label="word count: 22"
+                          class="tabular-nums text-zinc-500/80"
+                          title="word_count"
+                        >
+                          22
+                           words
+                        </span>
+                        <span
+                          aria-label="movement toward consensus: +0.18 (convergence_delta)"
+                          class="tabular-nums text-emerald-300/80"
+                          title="convergence_delta"
+                        >
+                          +0.18
+                        </span>
+                      </div>
+                      <div
+                        class="mt-3 flex items-center justify-between border-t border-white/[0.04] pt-2.5"
+                      >
+                        <span
+                          class="text-2xs text-zinc-500"
+                        >
+                          05:00 a.m.
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div
+                    class="group relative"
+                    style="<<framer-motion>>"
+                  >
+                    <div
+                      class="surface-interactive relative overflow-hidden rounded-xl p-4"
+                    >
+                      <div
+                        class="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-blue-500/20 to-blue-500/0"
+                      />
+                      <div
+                        class="mb-3"
+                      >
+                        <span
+                          class="inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-2xs font-semibold bg-blue-500/10 text-blue-300 ring-1 ring-blue-400/20"
+                        >
+                          <span
+                            class="h-1.5 w-1.5 rounded-full bg-blue-400"
+                          />
+                          Synthesizer
+                        </span>
+                        <p
+                          class="mt-1.5 truncate font-mono text-2xs text-zinc-500/70"
+                        >
+                          mock-model
+                        </p>
+                      </div>
+                      <p
+                        class="whitespace-pre-wrap text-[13px] leading-[1.7] text-zinc-300/90"
+                      >
+                        Round 3 final synthesis: permit autonomous AI to take irreversible actions only inside pre-approved domains with mandatory human escalation for novel categories.
+                      </p>
+                      <div
+                        class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-zinc-500"
+                        data-testid="turn-enrichment"
+                      >
+                        <span
+                          aria-label="model: mock-model-v1"
+                          class="font-mono text-zinc-500/80"
+                          title="model"
+                        >
+                          mock-model-v1
+                        </span>
+                        <span
+                          aria-label="posture: reconciliation (neurotype: synthesizer)"
+                          title="neurotype: synthesizer"
+                        >
+                          reconciliation
+                        </span>
+                        <span
+                          aria-label="word count: 26"
+                          class="tabular-nums text-zinc-500/80"
+                          title="word_count"
+                        >
+                          26
+                           words
+                        </span>
+                        <span
+                          aria-label="movement toward consensus: +0.24 (convergence_delta)"
+                          class="tabular-nums text-emerald-300/80"
+                          title="convergence_delta"
+                        >
+                          +0.24
+                        </span>
+                      </div>
+                      <div
+                        class="mt-3 flex items-center justify-between border-t border-white/[0.04] pt-2.5"
+                      >
+                        <span
+                          class="text-2xs text-zinc-500"
+                        >
+                          05:00 a.m.
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+        <aside
+          class="hidden lg:block"
+        >
+          <div
+            class="sticky top-24"
+          >
+            <aside
+              class="min-w-0 overflow-hidden"
+            >
+              <div
+                class="mb-4 flex items-center justify-between"
+              >
+                <h2
+                  class="text-xs font-semibold uppercase tracking-widest text-zinc-500"
+                >
+                  History
+                </h2>
+              </div>
+              <div
+                class="mb-4 flex gap-1 rounded-lg bg-white/[0.03] p-1 ring-1 ring-white/[0.06]"
+              >
+                <button
+                  class="flex-1 rounded-md px-3 py-1.5 text-2xs font-semibold transition-all bg-white/[0.08] text-zinc-200 shadow-sm"
+                  type="button"
+                >
+                  Stored (
+                  0
+                  )
+                </button>
+                <button
+                  class="flex-1 rounded-md px-3 py-1.5 text-2xs font-semibold transition-all text-zinc-500 hover:text-zinc-300"
+                  type="button"
+                >
+                  Transcripts (
+                  0
+                  )
+                </button>
+              </div>
+              <div
+                style="<<framer-motion>>"
+              >
+                <div
+                  class="flex flex-col items-center rounded-xl border border-dashed border-white/[0.06] bg-white/[0.01] py-8 text-center"
+                >
+                  <svg
+                    class="mb-2 text-zinc-600"
+                    fill="none"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    width="20"
+                  >
+                    <path
+                      d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="1.5"
+                    />
+                  </svg>
+                  <p
+                    class="text-2xs text-zinc-500"
+                  >
+                    No deliberations yet
+                  </p>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </aside>
+      </div>
+    </main>
+  </div>
+</div>
+`;
