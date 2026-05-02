@@ -58,6 +58,7 @@ export function isRoundOne(turns: Turn[]): boolean {
 export class DevilsAdvocateAgent implements Agent {
   readonly role = 'DevilsAdvocate';
   readonly neurotype = 'devils-advocate';
+  readonly posture = 'contrarian';
   readonly modelName: string;
 
   constructor(private readonly adapter: ModelAdapter) {

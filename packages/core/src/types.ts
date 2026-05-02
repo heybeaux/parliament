@@ -46,6 +46,46 @@ export interface Turn {
    * populate it.
    */
   word_count?: number;
+  /**
+   * Stable observability echo of `model`. The Stage 3 Observability UI binds
+   * the Timeline turn-card "model" badge to this field rather than to the
+   * legacy `model` field so the wire-name stays decoupled from the engine's
+   * internal field name. Always populated by the engine on freshly recorded
+   * turns; pre-Stage-3 transcripts may omit it (the server falls back to
+   * echoing `model` when the field is absent).
+   *
+   * PAR-10 — see `openspec/changes/add-observability-ui/specs/observability-ui/spec.md`.
+   * Additive: the legacy `model` field MUST NOT be removed or renamed.
+   */
+  model_name?: string;
+  /**
+   * Short plain-language posture label for the agent that produced this turn
+   * (e.g. "evidence-first" for Empiricist, "adversarial" for Skeptic,
+   * "reconciliation" for Synthesizer). The Stage 3 Timeline turn-card surfaces
+   * this directly so users can read a posture without decoding the
+   * neurotype ID. When the agent does not declare a posture, the engine
+   * defaults to echoing `neurotype` so the field is always populated for
+   * fresh turns. Pre-Stage-3 transcripts may omit it.
+   *
+   * PAR-10 — additive observability enrichment.
+   */
+  neurotype_posture?: string;
+  /**
+   * Engine-attached convergence delta for this turn — how the synthesizer's
+   * confidence shifted between the two prior rounds:
+   *   delta(R) = synth_confidence(R-1) - synth_confidence(R-2)
+   *
+   * The engine writes 0 when the delta is not measurable (round 1, or when
+   * the prior round produced no synthesizer turn). Round 1 turns therefore
+   * always carry 0 here; the server response layer translates 0 to `null`
+   * for the Timeline "no movement yet" rendering, which is why this field
+   * accepts `null` as well — the server's `EnrichedTurn` extension narrows
+   * to `number | null`. See
+   * `packages/server/src/routes.ts#computeConvergenceDelta`.
+   *
+   * PAR-10 — additive observability enrichment.
+   */
+  convergence_delta?: number | null;
   /** Populated by SynthesizerAgent only — structured signals next to the prose. */
   meta?: SynthesizerMeta;
   /**
@@ -83,26 +123,92 @@ export interface SplitSummary {
 }
 
 /**
+ * Canonical kinds for `SystemEvent`. The Stage 3 Observability UI keys
+ * rendering decisions off these values; every kind that can appear in a fresh
+ * deliberation is enumerated here so type-narrowing on the UI side is
+ * exhaustive.
+ *
+ * Two families exist, kept on a single union to preserve the additive
+ * backward-compat contract:
+ *
+ *   1. **Intervention kinds** — predate PAR-10 and cover engine interventions
+ *      that the Observability panel originally surfaced:
+ *        - `red_agent.injection` — RedAgent fired at the configured interval.
+ *          The RedAgent's content is also recorded as a turn; the event is
+ *          the out-of-band marker for the panel's chronological list.
+ *        - `sentry.echo` — Sentry returned `collapse_detected`, terminating
+ *          the deliberation with `echo_loop`. No corresponding turn is
+ *          recorded (Sentry never produces transcript prose).
+ *
+ *   2. **Lifecycle kinds** — added in PAR-10 so the panel can render a
+ *      proper round/parallel/synthesis timeline without inferring boundaries
+ *      from turn ordering. Lifecycle kinds are diagnostic — old client
+ *      builds that filter the events array to only the original two kinds
+ *      keep working unchanged.
+ *        - `round_start` / `round_end` — boundary markers for each
+ *          deliberation round.
+ *        - `parallel_block_start` / `parallel_block_end` — markers around
+ *          a `parallel_steps` block (Jury preset). Carry the block's
+ *          `parallel_group` UUID in `data` so siblings can be cross-linked
+ *          to their group marker.
+ *        - `synthesis_attempt` — emitted whenever the synthesizer runs,
+ *          regardless of whether consensus was reached. Carries
+ *          `{ confidence, consensus }` in `data`.
+ *        - `consensus_reached` — emitted when the synthesizer's vote +
+ *          confidence cross the configured threshold and the round
+ *          terminates with `terminationReason = "consensus"`.
+ *        - `termination` — emitted exactly once at deliberation end with
+ *          `{ reason, totalRounds }` in `data` so the panel can render an
+ *          "ended at round N — reason" summary without reading the result
+ *          fields directly.
+ */
+export type SystemEventKind =
+  | 'red_agent.injection'
+  | 'sentry.echo'
+  | 'round_start'
+  | 'round_end'
+  | 'parallel_block_start'
+  | 'parallel_block_end'
+  | 'synthesis_attempt'
+  | 'consensus_reached'
+  | 'termination';
+
+/**
  * Out-of-band events the engine records alongside the turn stream. These are
  * NOT turns themselves — they capture engine-level interventions (RedAgent
- * injections) and infrastructure signals (Sentry echo-collapse warnings) that
- * the Stage 3 Observability UI surfaces in the event list.
+ * injections, Sentry warnings) and engine lifecycle markers (round and
+ * parallel-block boundaries, synthesis attempts, termination) that the
+ * Stage 3 Observability UI surfaces in the event list.
  *
- * Kinds:
- *   - `red_agent.injection` — RedAgent fired at the configured interval. The
- *     RedAgent's content is also recorded as a turn; the event is the
- *     out-of-band marker for the panel's chronological list.
- *   - `sentry.echo` — Sentry returned `collapse_detected`, terminating the
- *     deliberation with `echo_loop`. No corresponding turn is recorded for
- *     this event (Sentry never produces transcript prose).
+ * Both the legacy `red_agent.injection` / `sentry.echo` shape and the new
+ * lifecycle kinds (PAR-10) carry the same three core fields (`round`, `kind`,
+ * `message`), so old client builds that filter on those fields keep working.
+ * Lifecycle kinds also populate the optional `data` payload and `timestamp`
+ * fields where the UI needs structured context.
  */
 export interface SystemEvent {
   /** 1-indexed round in which the event fired. */
   round: number;
-  /** Discriminator for the event source. */
-  kind: 'red_agent.injection' | 'sentry.echo';
+  /** Discriminator for the event source. See `SystemEventKind` for taxonomy. */
+  kind: SystemEventKind;
   /** Human-readable description for the Observability panel's event list. */
   message: string;
+  /**
+   * ISO8601 timestamp captured when the engine emitted the event. Optional
+   * for backward-compat with stored deliberations recorded before PAR-10
+   * (those rows have only `round`, `kind`, `message`).
+   */
+  timestamp?: string;
+  /**
+   * Kind-specific structured payload. Optional and free-form so each
+   * lifecycle kind can carry the data the UI needs without coupling the
+   * UI to a strict per-kind type. Examples (non-exhaustive):
+   *   - `parallel_block_start` / `parallel_block_end` →
+   *     `{ parallel_group: string, step_count: number }`
+   *   - `synthesis_attempt` → `{ confidence: number, consensus: boolean }`
+   *   - `termination` → `{ reason: TerminationReason, totalRounds: number }`
+   */
+  data?: unknown;
 }
 
 /** Result produced by DeliberationEngine.run(). */

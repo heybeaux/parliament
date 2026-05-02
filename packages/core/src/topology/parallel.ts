@@ -50,6 +50,13 @@ export interface ExecuteParallelBlockOptions {
   timeoutMs?: number;
   /** Optional logger for completion-timing debug output. */
   logger?: TopologyRuntimeLogger;
+  /**
+   * PAR-10: synthesizer-confidence-by-round map captured by the engine.
+   * Used to compute each sibling's `convergence_delta` so parallel turns
+   * carry the same enrichment as sequential ones. Optional for back-compat
+   * with existing tests that don't exercise the field.
+   */
+  synthConfidenceByRound?: ReadonlyMap<number, number>;
 }
 
 /**
@@ -98,6 +105,25 @@ function countWords(content: string): number {
   const trimmed = content.trim();
   if (trimmed.length === 0) return 0;
   return trimmed.split(/\s+/).length;
+}
+
+/**
+ * PAR-10: per-turn convergence delta, identical semantics to the function of
+ * the same name in `engine.ts`. Duplicated here rather than imported because
+ * `parallel.ts` is consumed by the engine module — making engine.ts depend on
+ * parallel.ts AND parallel.ts depend on engine.ts would cycle. Returns 0
+ * (the explicit "not measurable" sentinel) when no map is provided.
+ */
+function computeConvergenceDeltaForRound(
+  round: number,
+  synthByRound: ReadonlyMap<number, number> | undefined,
+): number {
+  if (synthByRound === undefined) return 0;
+  if (round <= 1) return 0;
+  const prior = synthByRound.get(round - 1);
+  if (prior === undefined) return 0;
+  const before = synthByRound.get(round - 2) ?? 0;
+  return Number((prior - before).toFixed(4));
 }
 
 /**
@@ -154,7 +180,7 @@ export async function executeParallelBlock(
   round: number,
   options: ExecuteParallelBlockOptions = {},
 ): Promise<ParallelBlockResult> {
-  const { timeoutMs, logger } = options;
+  const { timeoutMs, logger, synthConfidenceByRound } = options;
   const parallelGroup = randomUUID();
 
   if (steps.length === 0) {
@@ -229,9 +255,20 @@ export async function executeParallelBlock(
   const turns: Turn[] = [];
   const conflicts: Conflict[] = [];
 
+  // PAR-10: convergence_delta is the same for every sibling in this block —
+  // it depends only on the round and the engine-supplied synth-confidence
+  // map. Compute once outside the loop.
+  const convergenceDelta = computeConvergenceDeltaForRound(round, synthConfidenceByRound);
+
   for (let i = 0; i < outcomes.length; i++) {
     const o = outcomes[i] as { kind: 'ok'; value: Awaited<ReturnType<typeof runSibling>> };
     const { step, agent, content, elapsedMs, conflicts: stepConflicts } = o.value;
+    // PAR-10: posture defaults to neurotype id when the agent doesn't
+    // declare one (kept consistent with `recordTurn` in engine.ts).
+    const posture =
+      'posture' in agent && typeof agent.posture === 'string'
+        ? agent.posture
+        : agent.neurotype;
     turns.push({
       agent: agent.role,
       neurotype: agent.neurotype,
@@ -241,6 +278,9 @@ export async function executeParallelBlock(
       round,
       word_count: countWords(content),
       parallel_group: parallelGroup,
+      model_name: agent.modelName,
+      neurotype_posture: posture,
+      convergence_delta: convergenceDelta,
     });
     conflicts.push(...stepConflicts);
     if (logger !== undefined) {

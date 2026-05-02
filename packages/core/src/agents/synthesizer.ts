@@ -153,6 +153,7 @@ function failClosed(raw: string): ParsedSynthesizerJson {
 export class SynthesizerAgent implements Agent {
   readonly role = 'Synthesizer';
   readonly neurotype = 'integrative';
+  readonly posture = 'reconciliation';
   readonly modelName: string;
 
   constructor(private readonly adapter: ModelAdapter) {

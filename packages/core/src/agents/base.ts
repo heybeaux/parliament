@@ -39,5 +39,19 @@ export interface Agent {
   role: string;
   neurotype: string;
   readonly modelName: string;
+  /**
+   * Optional plain-language posture label (e.g. "evidence-first" for
+   * Empiricist, "adversarial" for Skeptic, "reconciliation" for Synthesizer).
+   * The deliberation engine writes this into `Turn.neurotype_posture` so the
+   * Stage 3 Observability UI can render a human-readable posture without
+   * decoding the kebab-case neurotype ID.
+   *
+   * Optional for backward-compat with mock agents in existing test files.
+   * When omitted, the engine defaults `Turn.neurotype_posture` to the
+   * agent's `neurotype` so the wire field is always populated.
+   *
+   * PAR-10 — additive observability enrichment.
+   */
+  readonly posture?: string;
   generate(blackboard: Blackboard): Promise<AgentResult>;
 }

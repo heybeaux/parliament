@@ -12,6 +12,7 @@ export const HISTORIAN_SYSTEM_PROMPT =
 export class HistorianAgent implements Agent {
   readonly role = 'Historian';
   readonly neurotype = 'historian';
+  readonly posture = 'precedent-first';
   readonly modelName: string;
 
   constructor(private readonly adapter: ModelAdapter) {

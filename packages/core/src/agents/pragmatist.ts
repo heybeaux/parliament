@@ -12,6 +12,7 @@ export const PRAGMATIST_SYSTEM_PROMPT =
 export class PragmatistAgent implements Agent {
   readonly role = 'Pragmatist';
   readonly neurotype = 'pragmatist';
+  readonly posture = 'constraint-first';
   readonly modelName: string;
 
   constructor(private readonly adapter: ModelAdapter) {

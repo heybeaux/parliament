@@ -13,6 +13,7 @@ export const EMPIRICIST_SYSTEM_PROMPT =
 export class EmpiricistAgent implements Agent {
   readonly role = 'Empiricist';
   readonly neurotype = 'empiricist';
+  readonly posture = 'evidence-first';
   readonly modelName: string;
 
   constructor(private readonly adapter: ModelAdapter) {

@@ -12,6 +12,7 @@ export const LATERALIST_SYSTEM_PROMPT =
 export class LateralistAgent implements Agent {
   readonly role = 'Lateralist';
   readonly neurotype = 'lateralist';
+  readonly posture = 'structural-analogy';
   readonly modelName: string;
 
   constructor(private readonly adapter: ModelAdapter) {

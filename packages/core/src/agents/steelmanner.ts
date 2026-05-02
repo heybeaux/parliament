@@ -14,6 +14,7 @@ export const STEELMANNER_SYSTEM_PROMPT =
 export class SteelmannerAgent implements Agent {
   readonly role = 'Steelmanner';
   readonly neurotype = 'steelmanner';
+  readonly posture = 'charitable';
   readonly modelName: string;
 
   constructor(private readonly adapter: ModelAdapter) {

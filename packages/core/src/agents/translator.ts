@@ -14,6 +14,7 @@ export const TRANSLATOR_SYSTEM_PROMPT =
 export class TranslatorAgent implements Agent {
   readonly role = 'Translator';
   readonly neurotype = 'translator';
+  readonly posture = 'assumption-surfacing';
   readonly modelName: string;
 
   constructor(private readonly adapter: ModelAdapter) {

@@ -10,7 +10,7 @@
       "round preserved (load-bearing — round-1-only Proposer, per-round Skeptic/Synthesizer)",
       "model preserved (assertion includes per-turn metadata)"
     ],
-    "what_this_pins": "DeliberationEngine.runTopology() with [topology].active = 'debate' MUST produce a Turn[] equal to this fixture (after the same timestamp normalization). The fixture is the regression contract for the Debate preset across the topology refactor."
+    "what_this_pins": "DeliberationEngine.runTopology() with [topology].active = 'debate' MUST produce a Turn[] equal to this fixture (after the same timestamp normalization). The fixture is the regression contract for the Debate preset across the topology refactor. PAR-10: each turn additionally carries model_name (echo of model), neurotype_posture (posture or neurotype fallback), and convergence_delta (synth(R-1) - synth(R-2), 0 when not measurable). The legacy `model`, `neurotype`, and pre-PAR-10 fields are preserved unchanged."
   },
   "topic": "Should the team adopt feature flags for every new endpoint?",
   "turns": [
@@ -21,7 +21,10 @@
       "content": "Adopt feature flags universally because they decouple deploy from release.",
       "timestamp": "NORMALIZED",
       "round": 1,
-      "word_count": 10
+      "word_count": 10,
+      "model_name": "stub-proposer",
+      "neurotype_posture": "structured",
+      "convergence_delta": 0
     },
     {
       "agent": "Skeptic",
@@ -30,7 +33,10 @@
       "content": "Universal flags add operational tax; not every endpoint needs runtime gating.",
       "timestamp": "NORMALIZED",
       "round": 1,
-      "word_count": 11
+      "word_count": 11,
+      "model_name": "stub-skeptic",
+      "neurotype_posture": "critical",
+      "convergence_delta": 0
     },
     {
       "agent": "Synthesizer",
@@ -40,6 +46,9 @@
       "timestamp": "NORMALIZED",
       "round": 1,
       "word_count": 12,
+      "model_name": "stub-synthesizer",
+      "neurotype_posture": "integrative",
+      "convergence_delta": 0,
       "meta": {
         "confidence": 0.5,
         "consensus": false,
@@ -54,7 +63,10 @@
       "content": "Universal flags add operational tax; not every endpoint needs runtime gating.",
       "timestamp": "NORMALIZED",
       "round": 2,
-      "word_count": 11
+      "word_count": 11,
+      "model_name": "stub-skeptic",
+      "neurotype_posture": "critical",
+      "convergence_delta": 0.5
     },
     {
       "agent": "Synthesizer",
@@ -64,6 +76,9 @@
       "timestamp": "NORMALIZED",
       "round": 2,
       "word_count": 12,
+      "model_name": "stub-synthesizer",
+      "neurotype_posture": "integrative",
+      "convergence_delta": 0.5,
       "meta": {
         "confidence": 0.5,
         "consensus": false,
