@@ -190,3 +190,119 @@ describe('Timeline parallel-sibling grouping (PAR-4)', () => {
     expect(screen.getByText('Synthesizer')).toBeInTheDocument();
   });
 });
+
+/**
+ * PAR-24 — deliberation totals row.
+ *
+ * The result-view header sums per-turn telemetry across every turn that
+ * carries `meta`. Per-field chips hide independently; the row collapses
+ * entirely when no turn populated any meta.
+ */
+describe('Timeline deliberation totals (PAR-24)', () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('sums latency / tokens / cost across mixed turns and shows all chips', () => {
+    const turns: Turn[] = [
+      makeTurn({
+        agent: 'Proposer',
+        round: 1,
+        timestamp: STARTED_AT,
+      }),
+      makeTurn({
+        agent: 'Skeptic',
+        round: 1,
+        timestamp: STARTED_AT,
+      }),
+      makeTurn({
+        agent: 'Synthesizer',
+        round: 1,
+        timestamp: STARTED_AT,
+      }),
+    ];
+    // Turn 0 — full openrouter telemetry.
+    turns[0]!.meta = {
+      latencyMs: 1500,
+      promptTokens: 100,
+      completionTokens: 50,
+      costUsd: 0.0021,
+      provider: 'openrouter',
+    };
+    // Turn 1 — local provider, no cost.
+    turns[1]!.meta = {
+      latencyMs: 800,
+      promptTokens: 80,
+      completionTokens: 40,
+      provider: 'omlx',
+    };
+    // Turn 2 — pre-PAR-23 turn, no meta. Should not contribute.
+
+    render(
+      <Timeline
+        result={makeResult(turns)}
+        running={false}
+        elapsedSec={0}
+        topic="Mixed topic"
+      />,
+    );
+
+    const totals = screen.getByTestId('deliberation-totals');
+
+    // Compute total = 1500ms + 800ms = 2300ms → 2.3s.
+    expect(within(totals).getByText('2.3s')).toBeInTheDocument();
+    // Tokens summed: prompt 180 → completion 90.
+    expect(within(totals).getByText(/180\s*\u2192\s*90/)).toBeInTheDocument();
+    // Cost summed: only turn 0 contributed (0.0021).
+    expect(within(totals).getByText('$0.0021')).toBeInTheDocument();
+  });
+
+  it('hides the cost chip when no turn carries costUsd', () => {
+    const turns: Turn[] = [
+      makeTurn({ agent: 'Proposer', round: 1, timestamp: STARTED_AT }),
+      makeTurn({ agent: 'Skeptic', round: 1, timestamp: STARTED_AT }),
+    ];
+    turns[0]!.meta = {
+      latencyMs: 600,
+      promptTokens: 100,
+      completionTokens: 50,
+      provider: 'omlx',
+    };
+    turns[1]!.meta = {
+      latencyMs: 700,
+      promptTokens: 80,
+      completionTokens: 40,
+      provider: 'omlx',
+    };
+
+    render(
+      <Timeline
+        result={makeResult(turns)}
+        running={false}
+        elapsedSec={0}
+        topic="Local-only topic"
+      />,
+    );
+
+    const totals = screen.getByTestId('deliberation-totals');
+
+    // Compute and tokens still render…
+    expect(within(totals).getByText('1.3s')).toBeInTheDocument();
+    expect(within(totals).getByText(/180\s*\u2192\s*90/)).toBeInTheDocument();
+    // …but no cost chip — there's no $-prefixed 4-decimal value.
+    expect(within(totals).queryByText(/^\$\d+\.\d{4}$/)).toBeNull();
+  });
+
+  it('hides the totals row entirely when no turn has any meta', () => {
+    render(
+      <Timeline
+        result={makeResult(LEGACY_TURNS)}
+        running={false}
+        elapsedSec={0}
+        topic="Legacy topic"
+      />,
+    );
+
+    expect(screen.queryByTestId('deliberation-totals')).not.toBeInTheDocument();
+  });
+});
