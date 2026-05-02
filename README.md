@@ -59,7 +59,19 @@ system_prompt = "You are a structured reasoner. ..."
 
 A `[neurotypes.<id>]` block declares which model and prompt to use for that neurotype. The infrastructure roles (`synthesizer`, `redAgent`, `sentry`) are always wired by the engine. Steppable neurotypes only need a block when the active preset references them — see [the preset table below](#presets) and **[docs/neurotypes.md](docs/neurotypes.md)** for the full roster. Multiple neurotypes may share a model; the scheduler groups same-model agents into batches to minimise model swaps.
 
-Switch the LLM provider via `PARLIAMENT_PROVIDER` or per-neurotype `provider` field: `ollama`, `lm_studio`, or `omlx` (default for this config). Set `OMLX_BASE_URL` to point at your oMLX instance (default: `http://localhost:8080/v1`).
+Switch the LLM provider via `PARLIAMENT_PROVIDER` or per-neurotype `provider` field: `ollama`, `lm_studio`, `omlx` (default for this config), or `openrouter`. Set `OMLX_BASE_URL` to point at your oMLX instance (default: `http://localhost:8080/v1`).
+
+#### OpenRouter
+
+[OpenRouter](https://openrouter.ai) is an OpenAI-API-compatible router for hosted models — opt in per-neurotype to mix paid hosted models with local ones in the same deliberation. Browse the catalog at [openrouter.ai/models](https://openrouter.ai/models).
+
+```toml
+[neurotypes.skeptic]
+provider = "openrouter"
+model    = "anthropic/claude-3.5-sonnet"
+```
+
+Required env: `OPENROUTER_API_KEY`. Optional: `OPENROUTER_BASE_URL` (default `https://openrouter.ai/api/v1`), and the attribution headers `OPENROUTER_HTTP_REFERER` / `OPENROUTER_X_TITLE` (sent only when set). Missing the API key throws a clear startup error naming the env var, not a 401 mid-deliberation. See `.env.example` for the full list.
 
 ## REST API
 
@@ -149,7 +161,7 @@ Built-in presets always include their full metadata (`name`, `description`, `bes
 
 ## Architecture
 
-- **`@parliament/core`** — pure TypeScript engine. Contains `DeliberationEngine`, the thirteen built-in neurotype agent classes, the topology loader (presets, parallel-step support), model adapters (Ollama, LM Studio, OMLX, OpenAI-compatible), the OSI calibration module, the model-aware scheduler, and the TOML config loader.
+- **`@parliament/core`** — pure TypeScript engine. Contains `DeliberationEngine`, the thirteen built-in neurotype agent classes, the topology loader (presets, parallel-step support), model adapters (Ollama, LM Studio, OMLX, OpenRouter, OpenAI-compatible), the OSI calibration module, the model-aware scheduler, and the TOML config loader.
 - **`@parliament/server`** — Hono REST server backed by SQLite (better-sqlite3). Wires the engine to HTTP, exposes `GET /presets` for UI pickers, and persists every result.
 - **`@parliament/cli`** — Commander-based CLI that runs deliberations locally and fetches stored ones from the server.
 - **`@parliament/ui`** — React + Vite web client. Includes the preset picker, live SSE turn stream, and observability panel.

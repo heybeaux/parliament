@@ -4,6 +4,8 @@ import { OllamaAdapter } from '../ollama.js';
 import { OpenAICompatAdapter } from '../openai-compat.js';
 import { LMStudioAdapter } from '../lm-studio.js';
 import { OMLXAdapter } from '../omlx.js';
+import { OpenRouterAdapter } from '../openrouter.js';
+import { createAdapter } from '../provider-factory.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -352,5 +354,238 @@ describe('OMLXAdapter', () => {
     const adapter = new OMLXAdapter('phi3');
     await expect(adapter.generate('hello')).rejects.toThrow(ModelConnectionError);
     await expect(adapter.generate('hello')).rejects.toThrow('502');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// OpenRouterAdapter
+// ---------------------------------------------------------------------------
+
+describe('OpenRouterAdapter', () => {
+  let originalFetch: typeof fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('defaults base URL to https://openrouter.ai/api/v1 and sends Bearer auth', async () => {
+    const mockFetch = makeFetchOk({
+      choices: [{ message: { role: 'assistant', content: 'Hi from OpenRouter' } }],
+    });
+    globalThis.fetch = mockFetch;
+
+    const adapter = new OpenRouterAdapter(
+      'anthropic/claude-3.5-sonnet',
+      'sk-or-test',
+    );
+    const result = await adapter.generate('Say hi', 'Be brief.');
+
+    expect(result).toBe('Hi from OpenRouter');
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const [url, init] = (mockFetch as ReturnType<typeof vi.fn>).mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+
+    expect(url).toBe('https://openrouter.ai/api/v1/chat/completions');
+    expect(init.method).toBe('POST');
+
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Authorization']).toBe('Bearer sk-or-test');
+    expect(headers['HTTP-Referer']).toBeUndefined();
+    expect(headers['X-Title']).toBeUndefined();
+
+    const body = JSON.parse(init.body as string) as {
+      model: string;
+      messages: Array<{ role: string; content: string }>;
+    };
+    // Model string must pass through verbatim — the slash must NOT be URL-encoded.
+    expect(body.model).toBe('anthropic/claude-3.5-sonnet');
+    expect(body.messages).toEqual([
+      { role: 'system', content: 'Be brief.' },
+      { role: 'user', content: 'Say hi' },
+    ]);
+  });
+
+  it('uses a custom base URL when supplied', async () => {
+    const mockFetch = makeFetchOk({
+      choices: [{ message: { role: 'assistant', content: 'ok' } }],
+    });
+    globalThis.fetch = mockFetch;
+
+    const adapter = new OpenRouterAdapter(
+      'anthropic/claude-3.5-sonnet',
+      'sk-or-test',
+      'https://example.test/api/v1',
+    );
+    await adapter.generate('hi');
+
+    const [url] = (mockFetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string];
+    expect(url).toBe('https://example.test/api/v1/chat/completions');
+  });
+
+  it('sends HTTP-Referer and X-Title when provided via options', async () => {
+    const mockFetch = makeFetchOk({
+      choices: [{ message: { role: 'assistant', content: 'ok' } }],
+    });
+    globalThis.fetch = mockFetch;
+
+    const adapter = new OpenRouterAdapter(
+      'anthropic/claude-3.5-sonnet',
+      'sk-or-test',
+      'https://openrouter.ai/api/v1',
+      { httpReferer: 'https://parliament.local', xTitle: 'Parliament' },
+    );
+    await adapter.generate('hi');
+
+    const [, init] = (mockFetch as ReturnType<typeof vi.fn>).mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Authorization']).toBe('Bearer sk-or-test');
+    expect(headers['HTTP-Referer']).toBe('https://parliament.local');
+    expect(headers['X-Title']).toBe('Parliament');
+  });
+
+  it('throws ModelConnectionError when fetch rejects', async () => {
+    globalThis.fetch = makeFetchError('network down');
+
+    const adapter = new OpenRouterAdapter(
+      'anthropic/claude-3.5-sonnet',
+      'sk-or-test',
+    );
+    await expect(adapter.generate('hello')).rejects.toThrow(ModelConnectionError);
+    await expect(adapter.generate('hello')).rejects.toThrow('network down');
+  });
+
+  it('throws ModelConnectionError when response is not ok', async () => {
+    globalThis.fetch = makeFetchNotOk(401);
+
+    const adapter = new OpenRouterAdapter(
+      'anthropic/claude-3.5-sonnet',
+      'sk-or-test',
+    );
+    await expect(adapter.generate('hello')).rejects.toThrow(ModelConnectionError);
+    await expect(adapter.generate('hello')).rejects.toThrow('401');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createAdapter (provider factory)
+// ---------------------------------------------------------------------------
+
+describe('createAdapter (openrouter)', () => {
+  let originalFetch: typeof fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    vi.unstubAllEnvs();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.unstubAllEnvs();
+  });
+
+  it('returns an OpenRouterAdapter when OPENROUTER_API_KEY is set', () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-from-env');
+    vi.stubEnv('OPENROUTER_BASE_URL', '');
+    vi.stubEnv('OPENROUTER_HTTP_REFERER', '');
+    vi.stubEnv('OPENROUTER_X_TITLE', '');
+
+    const adapter = createAdapter('anthropic/claude-3.5-sonnet', 'openrouter');
+    expect(adapter).toBeInstanceOf(OpenRouterAdapter);
+    expect(adapter.modelName).toBe('anthropic/claude-3.5-sonnet');
+  });
+
+  it('points the OpenRouterAdapter at the default base URL when env override is unset', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-from-env');
+    vi.stubEnv('OPENROUTER_BASE_URL', '');
+
+    const mockFetch = makeFetchOk({
+      choices: [{ message: { role: 'assistant', content: 'ok' } }],
+    });
+    globalThis.fetch = mockFetch;
+
+    const adapter = createAdapter('anthropic/claude-3.5-sonnet', 'openrouter');
+    await adapter.generate('hi');
+
+    const [url] = (mockFetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string];
+    expect(url).toBe('https://openrouter.ai/api/v1/chat/completions');
+  });
+
+  it('honors OPENROUTER_BASE_URL when set', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-from-env');
+    vi.stubEnv('OPENROUTER_BASE_URL', 'https://example.test/api/v1');
+
+    const mockFetch = makeFetchOk({
+      choices: [{ message: { role: 'assistant', content: 'ok' } }],
+    });
+    globalThis.fetch = mockFetch;
+
+    const adapter = createAdapter('anthropic/claude-3.5-sonnet', 'openrouter');
+    await adapter.generate('hi');
+
+    const [url] = (mockFetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string];
+    expect(url).toBe('https://example.test/api/v1/chat/completions');
+  });
+
+  it('forwards OPENROUTER_HTTP_REFERER and OPENROUTER_X_TITLE as headers', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-from-env');
+    vi.stubEnv('OPENROUTER_HTTP_REFERER', 'https://parliament.local');
+    vi.stubEnv('OPENROUTER_X_TITLE', 'Parliament');
+
+    const mockFetch = makeFetchOk({
+      choices: [{ message: { role: 'assistant', content: 'ok' } }],
+    });
+    globalThis.fetch = mockFetch;
+
+    const adapter = createAdapter('anthropic/claude-3.5-sonnet', 'openrouter');
+    await adapter.generate('hi');
+
+    const [, init] = (mockFetch as ReturnType<typeof vi.fn>).mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Authorization']).toBe('Bearer sk-or-from-env');
+    expect(headers['HTTP-Referer']).toBe('https://parliament.local');
+    expect(headers['X-Title']).toBe('Parliament');
+  });
+
+  it('omits attribution headers when env vars are unset', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-from-env');
+    vi.stubEnv('OPENROUTER_HTTP_REFERER', '');
+    vi.stubEnv('OPENROUTER_X_TITLE', '');
+
+    const mockFetch = makeFetchOk({
+      choices: [{ message: { role: 'assistant', content: 'ok' } }],
+    });
+    globalThis.fetch = mockFetch;
+
+    const adapter = createAdapter('anthropic/claude-3.5-sonnet', 'openrouter');
+    await adapter.generate('hi');
+
+    const [, init] = (mockFetch as ReturnType<typeof vi.fn>).mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    const headers = init.headers as Record<string, string>;
+    expect(headers['HTTP-Referer']).toBeUndefined();
+    expect(headers['X-Title']).toBeUndefined();
+  });
+
+  it('throws a clear error naming OPENROUTER_API_KEY when the env var is unset', () => {
+    vi.stubEnv('OPENROUTER_API_KEY', '');
+
+    expect(() =>
+      createAdapter('anthropic/claude-3.5-sonnet', 'openrouter'),
+    ).toThrow(/OPENROUTER_API_KEY/);
   });
 });

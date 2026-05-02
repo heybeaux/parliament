@@ -18,6 +18,10 @@ export { OllamaAdapter } from './adapters/ollama.js';
 export { OpenAICompatAdapter } from './adapters/openai-compat.js';
 export { LMStudioAdapter } from './adapters/lm-studio.js';
 export { OMLXAdapter } from './adapters/omlx.js';
+export {
+  OpenRouterAdapter,
+  type OpenRouterAdapterOptions,
+} from './adapters/openrouter.js';
 export { createAdapter } from './adapters/provider-factory.js';
 
 export type {

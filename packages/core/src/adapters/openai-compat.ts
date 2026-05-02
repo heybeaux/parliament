@@ -16,6 +16,7 @@ export class OpenAICompatAdapter implements ModelAdapter {
     private readonly model: string,
     private readonly baseUrl: string,
     private readonly apiKey: string = 'local',
+    private readonly extraHeaders: Record<string, string> = {},
   ) {
     this.modelName = model;
   }
@@ -36,6 +37,7 @@ export class OpenAICompatAdapter implements ModelAdapter {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${this.apiKey}`,
+          ...this.extraHeaders,
         },
         body: JSON.stringify({
           model: this.model,
