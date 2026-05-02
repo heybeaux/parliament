@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { ModelAdapter } from '@parliament/core';
+import type { AdapterResult, ModelAdapter } from '@parliament/core';
 
 // ---------------------------------------------------------------------------
 // Mocks: stub createAdapter and loadConfig so the CLI does not touch Ollama.
@@ -25,7 +25,7 @@ vi.mock('@parliament/core', async (importOriginal) => {
 
   const adapter: ModelAdapter = {
     modelName: 'mock-test-model',
-    generate: vi.fn(async (_prompt: string, system?: string) => {
+    generate: vi.fn(async (_prompt: string, system?: string): Promise<AdapterResult> => {
       const sys = system ?? '';
       if (/synthesiz/i.test(sys)) {
         synthIdx++;
