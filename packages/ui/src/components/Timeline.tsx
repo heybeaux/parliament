@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { DeliberationResult, Turn } from '../lib/types';
 import { TurnCard } from './TurnCard';
+import { ObservabilityPanel, ObservabilityToggle } from './ObservabilityPanel';
 
 interface Props {
   result: DeliberationResult | null;
@@ -107,6 +109,10 @@ function ResultBanner({ result }: { result: DeliberationResult }) {
 
 export function Timeline({ result, running, elapsedSec, topic }: Props) {
   const rounds = result ? groupIntoRounds(result.turns) : [];
+  // PAR-5 — Observability panel is closed by default. Toggle lives in the
+  // Timeline header; the panel itself mounts directly under the header so
+  // it's an inspection layer that never dominates the transcript.
+  const [observabilityOpen, setObservabilityOpen] = useState(false);
 
   return (
     <section className="space-y-5">
@@ -126,7 +132,14 @@ export function Timeline({ result, running, elapsedSec, topic }: Props) {
             </span>
           )}
         </div>
+        <ObservabilityToggle
+          open={observabilityOpen}
+          onToggle={() => setObservabilityOpen((v) => !v)}
+        />
       </div>
+
+      {/* Observability panel — hidden by default, opens via the header toggle */}
+      <ObservabilityPanel result={result} open={observabilityOpen} />
 
       {/* Topic hero */}
       {topic && (
