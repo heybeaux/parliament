@@ -98,6 +98,14 @@ export interface SplitSummary {
 export interface DeliberationResult {
   topic: string;
   /**
+   * PAR-20: topology preset id that produced this deliberation. Used by the
+   * result-view header to render a per-preset color/badge so same-topic,
+   * different-preset runs are visually distinct. Optional / additive — old
+   * server builds and pre-PAR-20 stored deliberations omit this field; the
+   * `<PresetBadge>` component renders a neutral fallback when missing.
+   */
+  preset?: string;
+  /**
    * Optional free-form prose context the user supplied alongside the topic
    * (PAR-16). Echoed back unchanged on `POST /deliberate` and persisted on
    * the deliberation record so `GET /deliberate/:id` round-trips it.
@@ -136,6 +144,15 @@ export interface DeliberationSummary {
   resolved: number;
   total_rounds: number;
   termination_reason: string;
+  /**
+   * PAR-20: topology preset id (e.g. `debate`, `star-chamber`, `jury`) that
+   * produced this deliberation. Drives the per-preset color/badge in the
+   * deliberation list so same-topic, different-preset runs are visually
+   * distinct. Optional / additive — old server builds and deliberations
+   * recorded before PAR-20 omit (or send `null` for) this field; the UI
+   * renders a neutral fallback badge in that case.
+   */
+  preset?: string | null;
 }
 
 export interface TranscriptFile {

@@ -104,6 +104,18 @@ export interface DeliberationSummary {
   resolved: number;
   total_rounds: number;
   termination_reason: string;
+  /**
+   * PAR-20: topology preset id (e.g. `debate`, `star-chamber`, `jury`) that
+   * produced this deliberation. Surfaced on the summary so the deliberation
+   * list can render a per-preset color/badge without re-fetching the full
+   * record.
+   *
+   * Optional / additive: deliberations recorded before PAR-20 lack this
+   * field on their stored `result_json`; the listing query reads `null` in
+   * that case and the UI renders a neutral fallback badge. Old client
+   * builds keep parsing because no existing field is renamed or removed.
+   */
+  preset?: string | null;
 }
 
 /**
@@ -121,11 +133,18 @@ export function listDeliberations(db: Database.Database): DeliberationSummary[] 
     let resolved = 0;
     let total_rounds = 0;
     let termination_reason = 'unknown';
+    let preset: string | null = null;
     try {
       const r = JSON.parse(row.result_json) as DeliberationResult;
       resolved = r.resolved ? 1 : 0;
       total_rounds = r.totalRounds;
       termination_reason = r.terminationReason;
+      // PAR-20: stored deliberations recorded after PAR-20 carry the preset
+      // id inside `result_json`; older rows omit it and we surface `null`
+      // so the UI's badge renders the neutral fallback.
+      if (typeof r.preset === 'string' && r.preset.length > 0) {
+        preset = r.preset;
+      }
     } catch {
       // ignore malformed rows
     }
@@ -136,6 +155,7 @@ export function listDeliberations(db: Database.Database): DeliberationSummary[] 
       resolved,
       total_rounds,
       termination_reason,
+      preset,
     };
   });
 }
