@@ -99,7 +99,7 @@ vi.mock('@parliament/core', async (importOriginal) => {
     }),
     createAdapter: vi.fn().mockReturnValue({
       modelName: 'mock-model',
-      generate: vi.fn().mockResolvedValue('ok'),
+      generate: vi.fn().mockResolvedValue({ content: 'ok' }),
     }),
   };
 });

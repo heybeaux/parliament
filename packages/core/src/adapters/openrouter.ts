@@ -1,3 +1,4 @@
+import type { AdapterMeta } from './base.js';
 import { OpenAICompatAdapter } from './openai-compat.js';
 
 export interface OpenRouterAdapterOptions {
@@ -22,9 +23,14 @@ export interface OpenRouterAdapterOptions {
  *   - forwards the API key via `Authorization: Bearer <key>`
  *   - threads OpenRouter's optional `HTTP-Referer` / `X-Title` attribution
  *     headers when supplied via {@link OpenRouterAdapterOptions}
+ *   - parses OpenRouter-specific response headers `X-OR-Cost` and
+ *     `X-OR-Generation-Id` into the returned `AdapterMeta` (PAR-23). When
+ *     either header is absent or unparseable, the corresponding field is
+ *     simply left undefined — never NaN.
  *
- * The subclass exists for `instanceof` / debugging clarity and as a hook for
- * future OpenRouter-specific behaviour (model fallbacks, cost telemetry, etc.).
+ * The header parse path overrides `OpenAICompatAdapter.parseResponseHeaders`
+ * rather than re-implementing `generate()`, so latency and `usage`-based
+ * token telemetry come "for free" from the base.
  */
 export class OpenRouterAdapter extends OpenAICompatAdapter {
   constructor(
@@ -40,6 +46,35 @@ export class OpenRouterAdapter extends OpenAICompatAdapter {
     if (options.xTitle !== undefined) {
       extraHeaders['X-Title'] = options.xTitle;
     }
-    super(model, baseUrl, apiKey, extraHeaders);
+    super(model, baseUrl, apiKey, extraHeaders, 'openrouter');
+  }
+
+  /**
+   * PAR-23: OpenRouter reports per-call cost in the `X-OR-Cost` header (USD
+   * decimal string) and a stable trace id in `X-OR-Generation-Id`. Both
+   * headers are optional on the wire — when absent we leave the corresponding
+   * `AdapterMeta` fields undefined rather than emitting `NaN` or an empty
+   * string. `Headers.get` is case-insensitive per the Fetch spec, so the
+   * `X-OR-*` casing here is just for readability.
+   */
+  protected override parseResponseHeaders(
+    response: Response,
+  ): Partial<AdapterMeta> | undefined {
+    const out: Partial<AdapterMeta> = {};
+
+    const rawCost = response.headers.get('X-OR-Cost');
+    if (rawCost !== null && rawCost.length > 0) {
+      const parsed = Number(rawCost);
+      if (Number.isFinite(parsed)) {
+        out.costUsd = parsed;
+      }
+    }
+
+    const generationId = response.headers.get('X-OR-Generation-Id');
+    if (generationId !== null && generationId.length > 0) {
+      out.generationId = generationId;
+    }
+
+    return Object.keys(out).length > 0 ? out : undefined;
   }
 }

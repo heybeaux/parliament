@@ -1,5 +1,5 @@
 import type { ModelAdapter } from '../adapters/base.js';
-import type { Blackboard, SynthesizerMeta } from '../types.js';
+import type { AdapterMeta, Blackboard, SynthesizerMeta, TurnMeta } from '../types.js';
 import type { Agent, AgentResult } from './base.js';
 import { buildPromptHeader, enforceWordCap } from './utils.js';
 
@@ -37,8 +37,13 @@ const FAILSAFE_SUMMARY_WORDCAP = 60;
 export interface SynthesizerResult extends AgentResult {
   /** Convenience field — mirrors `meta.confidence`. */
   confidence: number;
-  /** Structured signals; identical to what is attached to the recorded turn. */
-  meta: SynthesizerMeta;
+  /**
+   * Structured signals; identical to what is attached to the recorded turn.
+   * PAR-23 — also carries adapter telemetry (latency, tokens, cost,
+   * provider) on the same record so the engine can persist the merged shape
+   * onto `Turn.meta` without splitting the field.
+   */
+  meta: TurnMeta & SynthesizerMeta;
 }
 
 interface ParsedSynthesizerJson {
@@ -186,9 +191,11 @@ export class SynthesizerAgent implements Agent {
 
     // First attempt.
     const raw = await this.adapter.generate(userPrompt, SYSTEM_PROMPT);
-    const parsed = extractJsonObject(raw);
+    const parsed = extractJsonObject(raw.content);
     if (parsed !== null) {
-      return this.buildResult(parsed);
+      // PAR-23: thread the adapter's reported meta from the call that
+      // produced the parsed structured output.
+      return this.buildResult(parsed, raw.meta);
     }
 
     // One retry — embed the prior exchange into the user prompt so the model
@@ -198,36 +205,50 @@ export class SynthesizerAgent implements Agent {
       userPrompt,
       '',
       '--- Your previous response ---',
-      raw,
+      raw.content,
       '--- End previous response ---',
       '',
       RETRY_INSTRUCTION,
     ].join('\n');
 
     const retryRaw = await this.adapter.generate(retryPrompt, SYSTEM_PROMPT);
-    const retryParsed = extractJsonObject(retryRaw);
+    const retryParsed = extractJsonObject(retryRaw.content);
     if (retryParsed !== null) {
-      return this.buildResult(retryParsed);
+      // PAR-23: when the retry succeeds, attribute meta to the retry call
+      // whose content actually became the synthesis. The first-attempt
+      // latency / tokens are intentionally NOT summed in — turn-level meta
+      // is a snapshot of the call that produced the persisted prose.
+      return this.buildResult(retryParsed, retryRaw.meta);
     }
 
     // Both attempts failed — fail closed and warn. Match the existing
     // console-based logging used elsewhere in the package.
     console.warn(
       '[SynthesizerAgent] failed to parse JSON after 1 retry; falling back to fail-closed result',
-      { firstAttemptLength: raw.length, retryLength: retryRaw.length },
+      { firstAttemptLength: raw.content.length, retryLength: retryRaw.content.length },
     );
-    return this.buildResult(failClosed(retryRaw));
+    return this.buildResult(failClosed(retryRaw.content), retryRaw.meta);
   }
 
-  private buildResult(parsed: ParsedSynthesizerJson): SynthesizerResult {
+  private buildResult(
+    parsed: ParsedSynthesizerJson,
+    adapterMeta: AdapterMeta | undefined,
+  ): SynthesizerResult {
     // The blackboard stays human-readable: `content` is the prose summary,
-    // and the structured signals live on `meta`.
+    // and the structured signals live on `meta`. PAR-23: adapter telemetry
+    // (latency, tokens, cost, provider) is merged in alongside the
+    // synthesizer's own structured fields so the engine can persist the
+    // combined shape onto Turn.meta in a single write.
     const { content, truncated } = enforceWordCap(parsed.summary);
-    const meta: SynthesizerMeta = {
+    const synthFields: SynthesizerMeta = {
       confidence: parsed.confidence,
       consensus: parsed.consensus,
       agreed: parsed.agreed,
       unresolved: parsed.unresolved,
+    };
+    const meta: TurnMeta & SynthesizerMeta = {
+      ...(adapterMeta ?? {}),
+      ...synthFields,
     };
     return { content, truncated, confidence: parsed.confidence, meta };
   }

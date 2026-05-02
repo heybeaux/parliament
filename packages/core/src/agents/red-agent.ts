@@ -1,7 +1,7 @@
 import type { ModelAdapter } from '../adapters/base.js';
 import type { Blackboard } from '../types.js';
 import type { Agent, AgentResult } from './base.js';
-import { buildPromptHeader, enforceWordCap } from './utils.js';
+import { buildPromptHeader, capWithMeta } from './utils.js';
 
 const SYSTEM_PROMPT =
   'You are a disruptor. Inject a challenging perspective that prevents premature consensus. Target the weakest assumption in the current debate. Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists.';
@@ -31,7 +31,8 @@ export class RedAgent implements Agent {
       ? `${header}\n\nCurrent debate:\n\n${recentTurns}`
       : header;
 
+    // PAR-23: forward adapter telemetry onto the returned AgentResult.
     const raw = await this.adapter.generate(userPrompt, SYSTEM_PROMPT);
-    return enforceWordCap(raw);
+    return capWithMeta(raw);
   }
 }

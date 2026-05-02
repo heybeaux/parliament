@@ -1,4 +1,4 @@
-import type { Blackboard } from '../types.js';
+import type { AdapterMeta, Blackboard } from '../types.js';
 
 /**
  * Result of an agent's `generate()` call.
@@ -16,10 +16,17 @@ import type { Blackboard } from '../types.js';
  *     therefore does not pass through the word cap.
  *   - Synthesizer's `summary` field is capped, but its surrounding JSON
  *     envelope (confidence, consensus, agreed[], unresolved[]) is not.
+ *
+ * PAR-23 — every agent additionally surfaces the adapter's `AdapterMeta`
+ * (latency, tokens, cost, provider) on `meta` so the engine can persist it
+ * onto the recorded `Turn`. Optional because Sentry never calls the adapter
+ * and stub agents in tests need not populate it.
  */
 export interface AgentResult {
   content: string;
   truncated: boolean;
+  /** PAR-23 — adapter-reported telemetry passed through from `adapter.generate`. */
+  meta?: AdapterMeta;
 }
 
 /**

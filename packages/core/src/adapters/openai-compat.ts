@@ -1,4 +1,9 @@
-import { type ModelAdapter, ModelConnectionError } from './base.js';
+import {
+  type AdapterMeta,
+  type AdapterResult,
+  type ModelAdapter,
+  ModelConnectionError,
+} from './base.js';
 
 interface OpenAIChatResponse {
   choices: Array<{
@@ -7,21 +12,53 @@ interface OpenAIChatResponse {
       content: string;
     };
   }>;
+  /**
+   * OpenAI-format usage block. Present on every "real" provider we target
+   * (OpenAI, OpenRouter, LM Studio, oMLX) but optional on the wire — small
+   * local servers occasionally omit it. Read defensively.
+   */
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
 }
+
+/**
+ * Subclass-extension hook used by `OpenRouterAdapter` to read provider-specific
+ * response headers (e.g. `X-OR-Cost`, `X-OR-Generation-Id`) and merge them
+ * into the returned {@link AdapterMeta}. The base implementation returns
+ * `undefined` (no extra fields). Subclasses MAY override.
+ *
+ * The base adapter does NOT call this hook itself — it's a protected helper
+ * exposed for subclasses that override `generate()` to reuse the request-body
+ * construction. Kept as an instance method so each subclass can branch on its
+ * own `instanceof` without touching the base path.
+ */
+export type ResponseHeaderParser = (response: Response) => Partial<AdapterMeta> | undefined;
 
 export class OpenAICompatAdapter implements ModelAdapter {
   readonly modelName: string;
+  /**
+   * Provider discriminator stamped onto every emitted `AdapterMeta.provider`.
+   * Subclasses pass their own (`'lm_studio'`, `'omlx'`, `'openrouter'`); the
+   * default `'openai_compat'` covers the bare-base case where a caller wires
+   * up `OpenAICompatAdapter` directly against a generic OpenAI-API server.
+   */
+  protected readonly provider: string;
 
   constructor(
     private readonly model: string,
     private readonly baseUrl: string,
     private readonly apiKey: string = 'local',
     private readonly extraHeaders: Record<string, string> = {},
+    provider: string = 'openai_compat',
   ) {
     this.modelName = model;
+    this.provider = provider;
   }
 
-  async generate(prompt: string, system?: string): Promise<string> {
+  async generate(prompt: string, system?: string): Promise<AdapterResult> {
     const messages: Array<{ role: string; content: string }> = [];
 
     if (system !== undefined) {
@@ -29,6 +66,8 @@ export class OpenAICompatAdapter implements ModelAdapter {
     }
 
     messages.push({ role: 'user', content: prompt });
+
+    const startedAt = Date.now();
 
     let response: Response;
     try {
@@ -58,6 +97,39 @@ export class OpenAICompatAdapter implements ModelAdapter {
     }
 
     const data = (await response.json()) as OpenAIChatResponse;
-    return data.choices[0].message.content;
+    const latencyMs = Date.now() - startedAt;
+
+    const meta: AdapterMeta = {
+      latencyMs,
+      provider: this.provider,
+    };
+    if (data.usage !== undefined) {
+      if (typeof data.usage.prompt_tokens === 'number') {
+        meta.promptTokens = data.usage.prompt_tokens;
+      }
+      if (typeof data.usage.completion_tokens === 'number') {
+        meta.completionTokens = data.usage.completion_tokens;
+      }
+    }
+
+    // Subclass hook: parse provider-specific response headers (cost,
+    // generation id, etc.). Returning `undefined` skips the merge cleanly.
+    const headerMeta = this.parseResponseHeaders(response);
+    if (headerMeta !== undefined) {
+      Object.assign(meta, headerMeta);
+    }
+
+    return { content: data.choices[0]!.message.content, meta };
+  }
+
+  /**
+   * Subclass-overridable hook for parsing response headers into AdapterMeta.
+   * Default: no extra fields. `OpenRouterAdapter` overrides to pull
+   * `X-OR-Cost` / `X-OR-Generation-Id`. Kept on the base so every subclass
+   * gets the latency/usage path "for free" without re-implementing the
+   * request body and error mapping.
+   */
+  protected parseResponseHeaders(_response: Response): Partial<AdapterMeta> | undefined {
+    return undefined;
   }
 }

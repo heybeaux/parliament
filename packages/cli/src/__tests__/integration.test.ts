@@ -31,26 +31,29 @@ vi.mock('@parliament/core', async (importOriginal) => {
         synthIdx++;
         // Synthesizer now expects a JSON-only response; second turn emits
         // consensus: true with confidence above the 0.7 threshold.
-        return synthIdx >= 2
-          ? JSON.stringify({
-              summary: 'A unifying synthesis emerges.',
-              confidence: 0.9,
-              consensus: true,
-              agreed: ['shared baseline'],
-              unresolved: [],
-            })
-          : JSON.stringify({
-              summary: 'Tentative synthesis.',
-              confidence: 0.4,
-              consensus: false,
-              agreed: [],
-              unresolved: ['major disagreement'],
-            });
+        return {
+          content:
+            synthIdx >= 2
+              ? JSON.stringify({
+                  summary: 'A unifying synthesis emerges.',
+                  confidence: 0.9,
+                  consensus: true,
+                  agreed: ['shared baseline'],
+                  unresolved: [],
+                })
+              : JSON.stringify({
+                  summary: 'Tentative synthesis.',
+                  confidence: 0.4,
+                  consensus: false,
+                  agreed: [],
+                  unresolved: ['major disagreement'],
+                }),
+        };
       }
-      if (/critic/i.test(sys)) return 'A targeted critique.';
-      if (/disruptor/i.test(sys)) return 'A disruption.';
-      if (/monitor/i.test(sys)) return 'OK';
-      return 'A reasoned proposal on the topic.';
+      if (/critic/i.test(sys)) return { content: 'A targeted critique.' };
+      if (/disruptor/i.test(sys)) return { content: 'A disruption.' };
+      if (/monitor/i.test(sys)) return { content: 'OK' };
+      return { content: 'A reasoned proposal on the topic.' };
     }),
   };
 

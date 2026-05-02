@@ -13,7 +13,10 @@ import { buildPromptHeader, enforceWordCap } from '../utils.js';
 // ---------------------------------------------------------------------------
 
 function makeAdapter(response: string): ModelAdapter {
-  return { modelName: 'test-model', generate: vi.fn().mockResolvedValue(response) };
+  return {
+    modelName: 'test-model',
+    generate: vi.fn().mockResolvedValue({ content: response }),
+  };
 }
 
 function makeBlackboard(overrides?: Partial<Blackboard>): Blackboard {
@@ -284,7 +287,9 @@ describe('SynthesizerAgent', () => {
     let i = 0;
     return {
       modelName: 'test-model',
-      generate: vi.fn(async () => responses[Math.min(i++, responses.length - 1)] ?? ''),
+      generate: vi.fn(async () => ({
+        content: responses[Math.min(i++, responses.length - 1)] ?? '',
+      })),
     };
   }
 

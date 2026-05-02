@@ -62,7 +62,7 @@ interface RecordingAdapter extends ModelAdapter {
 function makeAdapter(role: string, response: string, modelName = `mock-${role}`): RecordingAdapter {
   return {
     modelName,
-    generate: vi.fn(async () => response),
+    generate: vi.fn(async () => ({ content: response })),
   };
 }
 

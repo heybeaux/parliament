@@ -934,4 +934,105 @@ describe('DeliberationEngine', () => {
     expect(result.residueScore).toBeLessThanOrEqual(0.5);
     expect(result.split?.irreconcilable).toBe(false);
   });
+
+  // -------------------------------------------------------------------------
+  // PAR-23: AdapterMeta flow from agent.generate → recorded turn
+  // -------------------------------------------------------------------------
+
+  describe('PAR-23 — adapter telemetry survives the agent → recordTurn path', () => {
+    it('passes meta returned by AgentResult through to Turn.meta', async () => {
+      // Stamp a distinctive AdapterMeta on the proposer's AgentResult and
+      // assert the engine forwards it onto the persisted Turn record.
+      const proposerWithMeta: Agent = {
+        role: 'Proposer',
+        neurotype: 'structured',
+        modelName: 'test-model',
+        generate: vi.fn().mockResolvedValue({
+          content: 'Proposer content',
+          truncated: false,
+          meta: {
+            latencyMs: 999,
+            promptTokens: 5,
+            completionTokens: 10,
+            provider: 'openai_compat',
+          },
+        } satisfies AgentResult),
+      };
+
+      const config = makeConfig({
+        maxRounds: 1,
+        agents: {
+          ...makeConfig().agents,
+          proposer: proposerWithMeta,
+        },
+      });
+
+      const result = await engine.run('par23 topic', config);
+
+      const proposerTurn = result.turns.find((t) => t.agent === 'Proposer');
+      expect(proposerTurn).toBeDefined();
+      expect(proposerTurn!.meta).toMatchObject({
+        latencyMs: 999,
+        promptTokens: 5,
+        completionTokens: 10,
+        provider: 'openai_compat',
+      });
+    });
+
+    it('synthesizer turns carry both adapter telemetry AND the structured fields', async () => {
+      // SynthesizerAgent.generate returns a TurnMeta & SynthesizerMeta merged
+      // shape. The engine should persist that merged shape verbatim — no
+      // splitting, no dropping the adapter half.
+      const mergedSynth: ReturnType<typeof makeSynthesizerAgent> = {
+        role: 'Synthesizer',
+        neurotype: 'integrative',
+        generate: vi.fn().mockResolvedValue({
+          content: 'merged synthesis',
+          truncated: false,
+          confidence: 0.9,
+          meta: {
+            latencyMs: 1500,
+            promptTokens: 100,
+            completionTokens: 50,
+            provider: 'openrouter',
+            costUsd: 0.0021,
+            generationId: 'gen_synth_42',
+            confidence: 0.9,
+            consensus: true,
+            agreed: ['shared baseline'],
+            unresolved: [],
+          },
+        } satisfies SynthesizerResult),
+      };
+
+      const config = makeConfig({
+        maxRounds: 1,
+        confidenceThreshold: 0.7,
+        agents: {
+          ...makeConfig().agents,
+          synthesizer:
+            mergedSynth as unknown as import('../agents/synthesizer.js').SynthesizerAgent,
+        },
+      });
+
+      const result = await engine.run('merged-meta topic', config);
+
+      const synthTurn = result.turns.find((t) => t.agent === 'Synthesizer');
+      expect(synthTurn).toBeDefined();
+      expect(synthTurn!.meta).toMatchObject({
+        // Adapter telemetry preserved.
+        latencyMs: 1500,
+        promptTokens: 100,
+        completionTokens: 50,
+        provider: 'openrouter',
+        costUsd: 0.0021,
+        generationId: 'gen_synth_42',
+        // Synthesizer structured fields preserved.
+        confidence: 0.9,
+        consensus: true,
+        agreed: ['shared baseline'],
+        unresolved: [],
+      });
+    });
+  });
 });

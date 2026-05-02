@@ -325,7 +325,16 @@ function countWords(content: string): number {
 function buildSynthConfidenceByRound(turns: readonly Turn[]): Map<number, number> {
   const out = new Map<number, number>();
   for (const turn of turns) {
-    if (turn.agent === 'Synthesizer' && turn.meta !== undefined) {
+    // PAR-23: `turn.meta` now also carries adapter telemetry, so a
+    // synthesizer-shaped record may co-mingle latency/tokens with the
+    // structured fields. Guard explicitly on `confidence` being a number
+    // before reading — non-synth rows that picked up adapter meta only
+    // (and any future shape drift) leave `confidence` undefined.
+    if (
+      turn.agent === 'Synthesizer' &&
+      turn.meta !== undefined &&
+      typeof turn.meta.confidence === 'number'
+    ) {
       out.set(turn.round, turn.meta.confidence);
     }
   }
@@ -629,6 +638,9 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
 
         const adapter = createAdapter(neurotype.model, neurotype.provider);
         try {
+          // PAR-23: adapter.generate now returns AdapterResult; the
+          // healthcheck only cares whether the round-trip succeeded — we
+          // discard both the prose and the telemetry meta.
           await Promise.race([
             adapter.generate('ping', 'respond with ok'),
             new Promise<never>((_, reject) =>

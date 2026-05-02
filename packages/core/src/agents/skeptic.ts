@@ -1,7 +1,7 @@
 import type { ModelAdapter } from '../adapters/base.js';
 import type { Blackboard } from '../types.js';
 import type { Agent, AgentResult } from './base.js';
-import { buildPromptHeader, enforceWordCap } from './utils.js';
+import { buildPromptHeader, capWithMeta } from './utils.js';
 
 const SYSTEM_PROMPT =
   'You are a rigorous critic. Identify logical leaps, unsupported assumptions, and errors in the previous response. Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists.';
@@ -61,8 +61,9 @@ export class SkepticAgent implements Agent {
       ? `${header}\n\nDiscussion to critique:\n\n${recentTurns}`
       : header;
 
+    // PAR-23: forward adapter telemetry onto the returned AgentResult.
     const raw = await this.adapter.generate(userPrompt, SYSTEM_PROMPT);
-    const result = enforceWordCap(raw);
+    const result = capWithMeta(raw);
 
     // Only record a conflict when the Skeptic actually disagreed. Prior
     // behaviour pushed a conflict every turn unconditionally, which made

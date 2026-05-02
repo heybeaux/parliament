@@ -1,7 +1,7 @@
 import type { ModelAdapter } from '../adapters/base.js';
 import type { Blackboard } from '../types.js';
 import type { Agent, AgentResult } from './base.js';
-import { buildPromptHeader, enforceWordCap } from './utils.js';
+import { buildPromptHeader, capWithMeta } from './utils.js';
 
 export const TRANSLATOR_SYSTEM_PROMPT =
   'You are the Translator. You serve two functions: (1) surface load-bearing implicit assumptions in what other agents have just said, and (2) restate the conversation for non-experts. ' +
@@ -36,7 +36,8 @@ export class TranslatorAgent implements Agent {
       ? `${header}\n\nRecent discussion:\n\n${recentTurns}`
       : header;
 
+    // PAR-23: forward adapter telemetry onto the returned AgentResult.
     const raw = await this.adapter.generate(userPrompt, TRANSLATOR_SYSTEM_PROMPT);
-    return enforceWordCap(raw);
+    return capWithMeta(raw);
   }
 }

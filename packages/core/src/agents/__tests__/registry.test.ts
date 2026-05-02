@@ -21,7 +21,7 @@ const STAGE_1_NEUROTYPES = [
 ] as const;
 
 function makeAdapter(): ModelAdapter {
-  return { modelName: 'test-model', generate: vi.fn().mockResolvedValue('') };
+  return { modelName: 'test-model', generate: vi.fn().mockResolvedValue({ content: '' }) };
 }
 
 describe('built-in agent registry', () => {

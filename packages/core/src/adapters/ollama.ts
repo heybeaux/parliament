@@ -1,10 +1,22 @@
-import { type ModelAdapter, ModelConnectionError } from './base.js';
+import {
+  type AdapterMeta,
+  type AdapterResult,
+  type ModelAdapter,
+  ModelConnectionError,
+} from './base.js';
 
 interface OllamaChatResponse {
   message: {
     role: string;
     content: string;
   };
+  /**
+   * Ollama's native equivalents of OpenAI `usage.prompt_tokens` /
+   * `usage.completion_tokens`. Optional on the wire — older builds may omit
+   * them, so read defensively.
+   */
+  prompt_eval_count?: number;
+  eval_count?: number;
 }
 
 export class OllamaAdapter implements ModelAdapter {
@@ -17,7 +29,7 @@ export class OllamaAdapter implements ModelAdapter {
     this.modelName = model;
   }
 
-  async generate(prompt: string, system?: string): Promise<string> {
+  async generate(prompt: string, system?: string): Promise<AdapterResult> {
     const messages: Array<{ role: string; content: string }> = [];
 
     if (system !== undefined) {
@@ -25,6 +37,8 @@ export class OllamaAdapter implements ModelAdapter {
     }
 
     messages.push({ role: 'user', content: prompt });
+
+    const startedAt = Date.now();
 
     let response: Response;
     try {
@@ -51,6 +65,23 @@ export class OllamaAdapter implements ModelAdapter {
     }
 
     const data = (await response.json()) as OllamaChatResponse;
-    return data.message.content;
+    const latencyMs = Date.now() - startedAt;
+
+    // PAR-23: latency + provider always; tokens populated when Ollama
+    // returns them. Cost is intentionally omitted — local execution is
+    // free, and emitting a sentinel zero would be confusable with a
+    // hosted-but-zero-cost call.
+    const meta: AdapterMeta = {
+      latencyMs,
+      provider: 'ollama',
+    };
+    if (typeof data.prompt_eval_count === 'number') {
+      meta.promptTokens = data.prompt_eval_count;
+    }
+    if (typeof data.eval_count === 'number') {
+      meta.completionTokens = data.eval_count;
+    }
+
+    return { content: data.message.content, meta };
   }
 }
