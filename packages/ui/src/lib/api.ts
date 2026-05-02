@@ -1,5 +1,5 @@
 import type {
-  DeliberationCreated,
+  DeliberationAccepted,
   DeliberationResult,
   DeliberationSummary,
   PresetsResponse,
@@ -36,7 +36,7 @@ export async function startDeliberation(
     config?: DeliberateOptions;
   },
   signal?: AbortSignal,
-): Promise<DeliberationCreated> {
+): Promise<DeliberationAccepted> {
   const preset = options?.preset?.trim();
   const context = options?.context?.trim();
   const config = options?.config;
@@ -51,7 +51,11 @@ export async function startDeliberation(
     }),
     signal,
   });
-  return jsonOrThrow<DeliberationCreated>(res);
+  // PAR-18: server now returns 202 Accepted with `{id, status: 'in_flight'}`
+  // immediately and runs the engine in the background. The full
+  // `DeliberationResult` is no longer in this response — callers must
+  // either open the SSE stream (PAR-26) or poll `GET /deliberate/:id`.
+  return jsonOrThrow<DeliberationAccepted>(res);
 }
 
 /**
