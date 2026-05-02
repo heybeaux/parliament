@@ -22,6 +22,17 @@ function formatConvergenceDelta(delta: number | null | undefined): string {
   return `+${abs}`;
 }
 
+/**
+ * Format a millisecond latency for the PAR-24 footer chip. Sub-second values
+ * stay in `ms` so 800ms doesn't collapse to a misleading `0.8s`; everything
+ * above one second renders as `N.Ns` so a typical 12-second turn shows as
+ * `12.0s` rather than `12000ms`.
+ */
+function formatLatencyMs(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
 export function TurnCard({ turn, index }: Props) {
   const style = roleStyle(turn.agent);
   const time = new Date(turn.timestamp).toLocaleTimeString([], {
@@ -51,6 +62,19 @@ export function TurnCard({ turn, index }: Props) {
         : deltaValue < 0
           ? 'text-amber-300/80'
           : 'text-zinc-400';
+
+  // PAR-24 — per-turn telemetry footer. Each field renders independently so
+  // a fully-local turn (latency + tokens, no cost) collapses the cost chip
+  // while still showing the rest, and a pre-PAR-23 turn (no `meta` at all)
+  // collapses the entire row.
+  const hasLatency = typeof turn.meta?.latencyMs === 'number';
+  const hasTokens =
+    typeof turn.meta?.promptTokens === 'number' &&
+    typeof turn.meta?.completionTokens === 'number';
+  const hasCost = typeof turn.meta?.costUsd === 'number';
+  const hasProvider =
+    typeof turn.meta?.provider === 'string' && turn.meta.provider.length > 0;
+  const showMeta = hasLatency || hasTokens || hasCost || hasProvider;
 
   return (
     <motion.div
@@ -146,6 +170,57 @@ export function TurnCard({ turn, index }: Props) {
             </span>
           )}
         </div>
+
+        {/* PAR-24 — per-turn telemetry footer (latency / tokens / cost /
+             provider). Sits beneath the existing time/OSI footer, matching
+             the muted enrichment-row aesthetic above. Each chip renders
+             independently so a local-only turn collapses the cost chip and
+             a pre-PAR-23 turn (no `meta`) collapses the whole row. */}
+        {showMeta && (
+          <div
+            data-testid="turn-meta"
+            className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-zinc-500"
+          >
+            {hasLatency && (
+              <span
+                className="tabular-nums text-zinc-500/80"
+                title="latency"
+                aria-label={`latency: ${formatLatencyMs(turn.meta!.latencyMs!)}`}
+              >
+                {formatLatencyMs(turn.meta!.latencyMs!)}
+              </span>
+            )}
+            {hasTokens && (
+              <span
+                className="tabular-nums text-zinc-500/80"
+                title="tokens (prompt → completion)"
+                aria-label={`tokens: ${turn.meta!.promptTokens} prompt, ${turn.meta!.completionTokens} completion`}
+              >
+                {turn.meta!.promptTokens}
+                {' \u2192 '}
+                {turn.meta!.completionTokens}
+              </span>
+            )}
+            {hasCost && (
+              <span
+                className="tabular-nums text-zinc-500/80"
+                title="cost (USD)"
+                aria-label={`cost: $${turn.meta!.costUsd!.toFixed(4)} USD`}
+              >
+                ${turn.meta!.costUsd!.toFixed(4)}
+              </span>
+            )}
+            {hasProvider && (
+              <span
+                className="font-mono text-zinc-500/80"
+                title="provider"
+                aria-label={`provider: ${turn.meta!.provider}`}
+              >
+                {turn.meta!.provider}
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </motion.div>
   );

@@ -78,6 +78,41 @@ export interface Turn {
    * when the entire transcript lacks the signal.
    */
   residue_remaining?: number;
+  /**
+   * PAR-23/24 — per-turn telemetry attached by the adapter (latency, tokens,
+   * cost) and threaded through the engine onto `Turn.meta`. All fields
+   * optional; pre-PAR-23 transcripts omit the entire `meta` object. The
+   * TurnCard footer renders chips per field present, and the result-view
+   * header sums these across all turns that have meta. UI consumers must
+   * tolerate an absent `meta` and an absent inner field.
+   */
+  meta?: TurnMeta;
+}
+
+/**
+ * PAR-23/24 — adapter telemetry mirrored from `@parliament/core`'s `TurnMeta`.
+ * Only the consumer-relevant fields are mirrored here (the synthesizer's
+ * structured fields aren't needed for the TurnCard footer). All fields are
+ * optional so consumers must guard each one independently.
+ */
+export interface TurnMeta {
+  /** Wall-clock duration of the adapter `generate` call, in milliseconds. */
+  latencyMs?: number;
+  /** Prompt-side token count reported by the provider, when available. */
+  promptTokens?: number;
+  /** Completion-side token count reported by the provider, when available. */
+  completionTokens?: number;
+  /**
+   * Cost in USD as reported by the provider. OpenRouter populates this from
+   * the `X-OR-Cost` response header. Local providers leave this absent so the
+   * TurnCard cost chip and the deliberation-totals cost chip both hide for
+   * fully-local runs.
+   */
+  costUsd?: number;
+  /** Stable provider discriminator string (`omlx`, `openrouter`, `ollama`, …). */
+  provider?: string;
+  /** Provider-side generation id useful for trace lookups. */
+  generationId?: string;
 }
 
 /**

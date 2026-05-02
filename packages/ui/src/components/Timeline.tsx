@@ -79,6 +79,66 @@ function formatElapsed(sec: number): string {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
+/**
+ * PAR-24 — format a millisecond compute total for the deliberation-totals row.
+ * Sub-second totals stay in `ms`; everything above one second renders as
+ * `N.Ns`, matching the per-turn TurnCard chip's formatter.
+ */
+function formatLatencyMs(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+interface DeliberationTotals {
+  latencyMs: number;
+  promptTokens: number;
+  completionTokens: number;
+  costUsd: number;
+  hasAnyLatency: boolean;
+  hasAnyTokens: boolean;
+  hasAnyCost: boolean;
+}
+
+/**
+ * PAR-24 — sum the per-turn telemetry across all turns that carry `meta`.
+ * Only fields that at least one turn populated render in the totals row;
+ * a fully-local Ollama run (no `costUsd` anywhere) collapses the cost chip
+ * but keeps latency + tokens. A run where nothing has any `meta` (legacy
+ * transcript, or omlx-only with telemetry disabled) collapses the whole row.
+ *
+ * "Total compute" is the straight sum across turns — for parallel-block
+ * presets (Jury) the siblings overlap in wall-clock time, so this slightly
+ * overcounts real elapsed seconds. We surface `result.completed_at -
+ * result.started_at` separately as "duration" on the result banner; the
+ * totals row pairs naturally with token / cost sums (both are also straight
+ * sums) so consistency wins over wall-clock accuracy.
+ */
+function computeDeliberationTotals(turns: Turn[]): DeliberationTotals {
+  return turns.reduce<DeliberationTotals>(
+    (acc, t) => ({
+      latencyMs: acc.latencyMs + (t.meta?.latencyMs ?? 0),
+      promptTokens: acc.promptTokens + (t.meta?.promptTokens ?? 0),
+      completionTokens: acc.completionTokens + (t.meta?.completionTokens ?? 0),
+      costUsd: acc.costUsd + (t.meta?.costUsd ?? 0),
+      hasAnyLatency: acc.hasAnyLatency || typeof t.meta?.latencyMs === 'number',
+      hasAnyTokens:
+        acc.hasAnyTokens ||
+        (typeof t.meta?.promptTokens === 'number' &&
+          typeof t.meta?.completionTokens === 'number'),
+      hasAnyCost: acc.hasAnyCost || typeof t.meta?.costUsd === 'number',
+    }),
+    {
+      latencyMs: 0,
+      promptTokens: 0,
+      completionTokens: 0,
+      costUsd: 0,
+      hasAnyLatency: false,
+      hasAnyTokens: false,
+      hasAnyCost: false,
+    },
+  );
+}
+
 function durationSeconds(startedAt: string, completedAt: string): number | null {
   const s = Date.parse(startedAt);
   const c = Date.parse(completedAt);
@@ -156,6 +216,14 @@ export function Timeline({ result, running, elapsedSec, topic }: Props) {
   // it's an inspection layer that never dominates the transcript.
   const [observabilityOpen, setObservabilityOpen] = useState(false);
 
+  // PAR-24 — sum per-turn telemetry across the deliberation. Only renders the
+  // chip for fields that at least one turn populated; on a legacy transcript
+  // (no `meta` anywhere) the row collapses entirely.
+  const totals = result ? computeDeliberationTotals(result.turns) : null;
+  const showTotals =
+    totals !== null &&
+    (totals.hasAnyLatency || totals.hasAnyTokens || totals.hasAnyCost);
+
   return (
     <section className="space-y-5">
       {/* Section header */}
@@ -207,6 +275,57 @@ export function Timeline({ result, running, elapsedSec, topic }: Props) {
             )}
           </div>
           <p className="text-lg font-medium text-zinc-100">{topic}</p>
+
+          {/* PAR-24 — deliberation totals: total compute / tokens / cost
+               summed across turns with `meta`. Hides entirely when no
+               turn supplied any telemetry; per-field chips hide
+               independently (e.g. fully-local runs keep latency/tokens
+               but drop cost). */}
+          {showTotals && totals && (
+            <div
+              data-testid="deliberation-totals"
+              className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-zinc-500"
+            >
+              {totals.hasAnyLatency && (
+                <span
+                  className="tabular-nums text-zinc-500/80"
+                  title="Sum across all turns; parallel turns may overlap in wall-clock time."
+                  aria-label={`total compute: ${formatLatencyMs(totals.latencyMs)} (sum across turns)`}
+                >
+                  <span className="mr-1 uppercase tracking-wider text-zinc-500/70">
+                    Compute
+                  </span>
+                  {formatLatencyMs(totals.latencyMs)}
+                </span>
+              )}
+              {totals.hasAnyTokens && (
+                <span
+                  className="tabular-nums text-zinc-500/80"
+                  title="total tokens (prompt → completion)"
+                  aria-label={`total tokens: ${totals.promptTokens} prompt, ${totals.completionTokens} completion`}
+                >
+                  <span className="mr-1 uppercase tracking-wider text-zinc-500/70">
+                    Tokens
+                  </span>
+                  {totals.promptTokens}
+                  {' \u2192 '}
+                  {totals.completionTokens}
+                </span>
+              )}
+              {totals.hasAnyCost && (
+                <span
+                  className="tabular-nums text-zinc-500/80"
+                  title="total cost (USD)"
+                  aria-label={`total cost: $${totals.costUsd.toFixed(4)} USD`}
+                >
+                  <span className="mr-1 uppercase tracking-wider text-zinc-500/70">
+                    Cost
+                  </span>
+                  ${totals.costUsd.toFixed(4)}
+                </span>
+              )}
+            </div>
+          )}
         </motion.div>
       )}
 
