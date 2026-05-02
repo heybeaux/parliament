@@ -100,6 +100,7 @@ export async function getTranscript(file: string): Promise<DeliberationResult> {
     totalRounds: (raw['total_rounds'] ?? raw['totalRounds'] ?? 0) as number,
     started_at: (raw['started_at'] ?? fallbackTimestamp) as string,
     completed_at: (raw['completed_at'] ?? fallbackTimestamp) as string,
+    events: (raw['events'] ?? []) as DeliberationResult['events'],
   };
 }
 

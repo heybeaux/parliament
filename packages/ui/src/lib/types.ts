@@ -39,7 +39,8 @@ export interface Turn {
    * synthesizer rounds. The server's `EnrichedTurn` narrows the engine's
    * `0`-when-unmeasurable convention to `null` so the UI can render
    * `—` for round-1 / no-prior-synthesis turns. Pre-Stage-3 transcripts
-   * may omit the field entirely (the badge hides in that case).
+   * may omit the field entirely (the badge hides in that case). The Stage 3
+   * Observability panel also binds to this field for the confidence sparkline.
    */
   convergence_delta?: number | null;
   /**
@@ -51,6 +52,36 @@ export interface Turn {
    * transcripts omit it and continue rendering as a vertical stack.
    */
   parallel_group?: string | null;
+}
+
+/**
+ * Mirrors `SystemEventKind` from `@parliament/core`. Kept as a string union so
+ * the UI can render unknown lifecycle kinds without type-narrowing breakage —
+ * any future kind added by the engine still parses.
+ */
+export type SystemEventKind =
+  | 'red_agent.injection'
+  | 'sentry.echo'
+  | 'round_start'
+  | 'round_end'
+  | 'parallel_block_start'
+  | 'parallel_block_end'
+  | 'synthesis_attempt'
+  | 'consensus_reached'
+  | 'termination';
+
+/**
+ * Out-of-band engine event surfaced by the Stage 3 Observability panel.
+ * Mirrors the server-side shape; the panel only requires `round`, `kind`,
+ * `message` to render — `timestamp` and `data` are optional for back-compat
+ * with stored deliberations recorded before PAR-10.
+ */
+export interface SystemEvent {
+  round: number;
+  kind: SystemEventKind;
+  message: string;
+  timestamp?: string;
+  data?: unknown;
 }
 
 export interface Conflict {
@@ -86,6 +117,12 @@ export interface DeliberationResult {
   started_at: string;
   /** ISO8601 timestamp captured immediately before the deliberation returned. */
   completed_at: string;
+  /**
+   * Out-of-band system events captured during deliberation (PAR-10).
+   * Optional for stored deliberations recorded before the events stream
+   * landed; UI consumers should treat an absent field as `[]`.
+   */
+  events?: SystemEvent[];
 }
 
 export interface DeliberationCreated extends DeliberationResult {
