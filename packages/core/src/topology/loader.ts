@@ -1,5 +1,5 @@
 import { isBuiltinNeurotype, BUILTIN_AGENT_IDS } from '../agents/registry.js';
-import { BUILTIN_PRESETS, isBuiltinPreset } from './presets.js';
+import { BUILTIN_PRESETS } from './presets.js';
 import {
   DEFAULT_NEUROTYPE_TEMPERATURE,
   FALLBACK_PRESET_ID,

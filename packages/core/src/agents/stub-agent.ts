@@ -26,6 +26,7 @@ export class StubNeurotypeAgent implements Agent {
     this.modelName = adapter.modelName;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async generate(_blackboard: Blackboard): Promise<AgentResult> {
     return {
       content: `[${this.role} stub — implementation pending]`,

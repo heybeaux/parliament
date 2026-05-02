@@ -8,11 +8,8 @@ import {
   ModelConnectionError,
   TopologyValidationError,
   createAdapter,
-  buildAgentsFromConfig,
   loadConfig,
   loadTopologyConfig,
-  ProposerAgent,
-  SkepticAgent,
   SynthesizerAgent,
   RedAgent,
   SentryAgent,
@@ -23,7 +20,6 @@ import {
 } from '@parliament/core';
 import type {
   Agent,
-  DeliberationConfig,
   DeliberationResult,
   SystemEvent,
   TopologyConfig,
@@ -60,45 +56,24 @@ const DeliberateBodySchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
-// Agent factory helpers
+// Topology runtime wiring
 // ---------------------------------------------------------------------------
-
-/**
- * Constructs a full DeliberationConfig.agents object from parliament.toml.
- * Each role maps to the appropriate typed agent class.
- *
- * Note: All Parliament agent classes have their system prompts hardcoded
- * internally — only the adapter is required at construction time.
- */
-function buildAgents(): DeliberationConfig['agents'] {
-  const config = loadConfig();
-  const agentDefs = buildAgentsFromConfig(
-    ['proposer', 'skeptic', 'synthesizer', 'redAgent', 'sentry'],
-    (model, provider) => createAdapter(model, provider),
-    config,
-  );
-
-  const defMap = Object.fromEntries(agentDefs.map((d) => [d.name, d]));
-
-  const get = (role: string) => {
-    const def = defMap[role];
-    if (!def) throw new Error(`Parliament: missing agent definition for role "${role}"`);
-    return def;
-  };
-
-  const defaults = config.parliament ?? DEFAULT_PARLIAMENT_DEFAULTS;
-
-  return {
-    proposer: new ProposerAgent(get('proposer').adapter),
-    skeptic: new SkepticAgent(get('skeptic').adapter),
-    synthesizer: new SynthesizerAgent(get('synthesizer').adapter),
-    redAgent: new RedAgent(get('redAgent').adapter),
-    sentry: new SentryAgent(get('sentry').adapter, {
-      osiEnabled: defaults.osi_enabled,
-      osiSimilarityThreshold: defaults.osi_threshold,
-    }),
-  };
-}
+//
+// The server is a thin shell over the topology runtime: every deliberation —
+// including the default Debate preset — flows through
+// `DeliberationEngine.runTopology`. The legacy hardcoded five-agent pipeline
+// (Proposer/Skeptic/Synthesizer/RedAgent/Sentry, fixed wiring) lives only in
+// the engine's own byte-identical-debate regression test now.
+//
+// Three pieces of structural infrastructure remain instantiated directly here
+// because the topology runtime takes them as separate inputs (they are
+// orthogonal to the preset's `steps`):
+//   - Synthesizer — runs end-of-round across every preset.
+//   - RedAgent    — out-of-band stress probe at `redAgentInterval`.
+//   - Sentry      — out-of-band echo-collapse detector after every step.
+//
+// Sentry deliberately never appears in any preset's `steps` array; the
+// topology loader rejects presets that try to reference it.
 
 /**
  * Resolve a topology preset by ID, applying request-override semantics.
@@ -125,8 +100,47 @@ function resolveActiveTopology(
 }
 
 /**
+ * Construct the structural-infrastructure trio (Synthesizer / RedAgent /
+ * Sentry) the topology runtime needs as separate inputs. These are NOT part
+ * of any preset's `steps` — they run unconditionally across every preset.
+ *
+ * Each agent's adapter is resolved from the matching `[neurotypes.<role>]`
+ * entry in `parliament.toml`. A missing neurotype block surfaces as a clear
+ * configuration error rather than a silent default.
+ */
+function buildStructuralAgents(): {
+  synthesizer: SynthesizerAgent;
+  redAgent: RedAgent;
+  sentry: SentryAgent;
+} {
+  const config = loadConfig();
+  const defaults = config.parliament ?? DEFAULT_PARLIAMENT_DEFAULTS;
+
+  const adapterFor = (role: 'synthesizer' | 'redAgent' | 'sentry') => {
+    const neurotype = config.neurotypes[role];
+    if (!neurotype) {
+      throw new Error(
+        `Parliament: missing [neurotypes.${role}] entry in parliament.toml; ` +
+          `the topology runtime needs this for the structural-infrastructure ${role}.`,
+      );
+    }
+    return createAdapter(neurotype.model, neurotype.provider);
+  };
+
+  return {
+    synthesizer: new SynthesizerAgent(adapterFor('synthesizer')),
+    redAgent: new RedAgent(adapterFor('redAgent')),
+    sentry: new SentryAgent(adapterFor('sentry'), {
+      osiEnabled: defaults.osi_enabled,
+      osiSimilarityThreshold: defaults.osi_threshold,
+    }),
+  };
+}
+
+/**
  * Construct a full TopologyDeliberationConfig from parliament.toml + the
- * resolved topology. Reuses the existing structural-infrastructure agents.
+ * resolved topology. Builds a per-step neurotype resolver and the structural
+ * synthesizer/redAgent/sentry trio.
  */
 function buildTopologyDeliberationConfig(
   topology: TopologyConfig,
@@ -135,9 +149,7 @@ function buildTopologyDeliberationConfig(
   const config = loadConfig();
   const defaults = config.parliament ?? DEFAULT_PARLIAMENT_DEFAULTS;
 
-  // Build typed agents for the structural-infrastructure trio (synth/red/sentry)
-  // exactly the same way buildAgents() does.
-  const structuralAgents = buildAgents();
+  const structural = buildStructuralAgents();
 
   // Resolver: per-step, instantiate the appropriate Agent class.
   // Built-in neurotype IDs (proposer, skeptic, historian, ...) come from
@@ -163,9 +175,9 @@ function buildTopologyDeliberationConfig(
     confidenceThreshold: overrides.confidenceThreshold ?? defaults.confidence_threshold,
     topology,
     resolveNeurotype,
-    synthesizer: structuralAgents.synthesizer,
-    redAgent: structuralAgents.redAgent,
-    sentry: structuralAgents.sentry,
+    synthesizer: structural.synthesizer,
+    redAgent: structural.redAgent,
+    sentry: structural.sentry,
   };
 }
 
@@ -565,9 +577,10 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
   // Preset precedence (per Stage 1 elaboration decision):
   //   request.preset > [topology].active in parliament.toml > Debate fallback.
   //
-  // When `preset` is supplied OR a non-Debate preset is active in config, the
-  // route runs through `runTopology()`. The legacy `run()` path is kept ONLY
-  // for the default Debate preset to preserve byte-identical Debate output.
+  // Every deliberation — including the default Debate preset — flows through
+  // `runTopology()`. The legacy hardcoded five-agent `run()` path is gone;
+  // `runTopology(active=debate)` is byte-identical to the pre-refactor Debate
+  // pipeline (pinned by the engine's `byte-identical-debate.test.ts`).
   // -------------------------------------------------------------------------
   app.post('/deliberate', async (c) => {
     let body: unknown;
@@ -584,7 +597,7 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
 
     const { topic, preset: requestPreset, config: configOverrides } = parsed.data;
 
-    let topology: TopologyConfig | null = null;
+    let topology: TopologyConfig;
     try {
       topology = loadTopologyConfig();
     } catch (err) {
@@ -611,33 +624,15 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
       );
     }
 
-    const useTopologyPath =
-      requestPreset !== undefined || resolvedTopology.activePreset.id !== 'debate';
-
     const engine = new DeliberationEngine();
     let result;
     try {
-      if (useTopologyPath) {
-        const topologyConfig = buildTopologyDeliberationConfig(resolvedTopology, {
-          maxRounds: configOverrides?.maxRounds,
-          redAgentInterval: configOverrides?.redAgentInterval,
-          confidenceThreshold: configOverrides?.confidenceThreshold,
-        });
-        result = await engine.runTopology(topic, topologyConfig);
-      } else {
-        // Legacy Debate path — unchanged. Preserves byte-identical output for
-        // the default preset until the topology runtime fully supersedes it.
-        const agents = buildAgents();
-        const defaults = loadConfig().parliament ?? DEFAULT_PARLIAMENT_DEFAULTS;
-        const deliberationConfig: DeliberationConfig = {
-          maxRounds: configOverrides?.maxRounds ?? defaults.max_rounds,
-          redAgentInterval: configOverrides?.redAgentInterval ?? defaults.red_agent_interval,
-          confidenceThreshold:
-            configOverrides?.confidenceThreshold ?? defaults.confidence_threshold,
-          agents,
-        };
-        result = await engine.run(topic, deliberationConfig);
-      }
+      const topologyConfig = buildTopologyDeliberationConfig(resolvedTopology, {
+        maxRounds: configOverrides?.maxRounds,
+        redAgentInterval: configOverrides?.redAgentInterval,
+        confidenceThreshold: configOverrides?.confidenceThreshold,
+      });
+      result = await engine.runTopology(topic, topologyConfig);
     } catch (err) {
       return c.json(
         { error: `Deliberation failed: ${err instanceof Error ? err.message : String(err)}` },

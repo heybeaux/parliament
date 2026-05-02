@@ -62,7 +62,6 @@ const DEFAULT_CONFIG_FILENAME = 'parliament.toml';
 export function findRepoRoot(start: string = process.cwd()): string {
   let dir = resolve(start);
   // Stop when dirname() returns the same path (filesystem root reached).
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     if (existsSync(resolve(dir, '.git'))) return dir;
     if (existsSync(resolve(dir, 'pnpm-workspace.yaml'))) return dir;

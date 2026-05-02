@@ -227,6 +227,7 @@ vi.mock('@parliament/core', async (importOriginal) => {
         }));
       },
     ),
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     createAdapter: vi.fn().mockImplementation((_model: string) => {
       // The route builds one adapter per agent. We discriminate by the system
       // prompt baked into each agent class so a single factory can drive all
