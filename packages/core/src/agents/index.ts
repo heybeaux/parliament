@@ -33,6 +33,7 @@ export { SteelmannerAgent } from './steelmanner.js';
 export { DevilsAdvocateAgent } from './devils-advocate.js';
 export { LateralistAgent } from './lateralist.js';
 export { TranslatorAgent } from './translator.js';
+export { AdversaryAgent } from './adversary.js';
 
 // Built-in neurotype registry.
 export type { AgentFactory } from './registry.js';

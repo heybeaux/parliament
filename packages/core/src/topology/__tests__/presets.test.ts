@@ -66,10 +66,15 @@ const PRESET_SPECS: ReadonlyArray<{
     expectedSteps: ['proposer'],
     expectedParallelSteps: ['skeptic', 'empiricist', 'steelmanner', 'devils-advocate'],
   },
+  {
+    id: 'adversarial',
+    name: 'Adversarial Analysis',
+    expectedSteps: ['proposer', 'adversary', 'empiricist', 'pragmatist'],
+  },
 ];
 
 describe('built-in preset registry', () => {
-  it('registers exactly the seven Stage 1 + Stage 4 built-in presets', () => {
+  it('registers all built-in presets declared in PRESET_SPECS', () => {
     expect(new Set(BUILTIN_PRESET_IDS)).toEqual(new Set(PRESET_SPECS.map((p) => p.id)));
   });
 

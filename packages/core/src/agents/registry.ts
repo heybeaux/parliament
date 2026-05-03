@@ -10,6 +10,7 @@ import { SteelmannerAgent } from './steelmanner.js';
 import { DevilsAdvocateAgent } from './devils-advocate.js';
 import { LateralistAgent } from './lateralist.js';
 import { TranslatorAgent } from './translator.js';
+import { AdversaryAgent } from './adversary.js';
 
 /**
  * ----------------------------------------------------------------------------
@@ -84,6 +85,7 @@ export const BUILTIN_AGENT_REGISTRY: Readonly<Record<string, AgentFactory>> = Ob
   'devils-advocate': (adapter, options) => new DevilsAdvocateAgent(adapter, options),
   lateralist: (adapter, options) => new LateralistAgent(adapter, options),
   translator: (adapter, options) => new TranslatorAgent(adapter, options),
+  adversary: (adapter, options) => new AdversaryAgent(adapter, options),
 });
 
 /** All known built-in neurotype IDs, in registration order. */

@@ -18,6 +18,7 @@ const STAGE_1_NEUROTYPES = [
   'devils-advocate',
   'lateralist',
   'translator',
+  'adversary',
 ] as const;
 
 function makeAdapter(): ModelAdapter {
@@ -25,7 +26,7 @@ function makeAdapter(): ModelAdapter {
 }
 
 describe('built-in agent registry', () => {
-  it('registers the eight Stage 1 neurotypes', () => {
+  it('registers all neurotypes declared in STAGE_1_NEUROTYPES', () => {
     for (const id of STAGE_1_NEUROTYPES) {
       expect(BUILTIN_AGENT_REGISTRY).toHaveProperty(id);
       expect(isBuiltinNeurotype(id)).toBe(true);

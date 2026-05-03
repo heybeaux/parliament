@@ -152,6 +152,32 @@ const JURY_PRESET: TopologyPreset = Object.freeze({
 });
 
 /**
+ * Adversarial Analysis — a software-engineering-flavoured threat-modelling
+ * deliberation. The Proposer states the feature/decision; the Adversary
+ * imagines it has shipped and enumerates the highest-leverage failure mode;
+ * the Empiricist tests whether the threat-model rests on real evidence; the
+ * Pragmatist constrains by what is actually feasible to mitigate; the
+ * Synthesizer reconciles. Distinct from `star-chamber` (multi-critic
+ * interrogation of the stated thesis) — Adversarial assumes the thesis
+ * SHIPS and asks what breaks.
+ */
+const ADVERSARIAL_PRESET: TopologyPreset = Object.freeze({
+  id: 'adversarial',
+  name: 'Adversarial Analysis',
+  description:
+    'A failure-mode-first deliberation: the Proposer states the feature or decision, the Adversary imagines it has shipped and surfaces the highest-leverage failure mode, the Empiricist tests whether the threat-model rests on real evidence, and the Pragmatist constrains by what is actually feasible to mitigate before the Synthesizer reconciles.',
+  best_for:
+    'Software-development decisions about new features or next-best-steps where the interesting answer is what breaks first when this ships — failure modes, hidden costs, exploitable assumptions, and the early-warning signal worth monitoring.',
+  isBuiltin: true,
+  steps: Object.freeze([
+    Object.freeze({ id: 'proposer', neurotype: 'proposer', optional: false }),
+    Object.freeze({ id: 'adversary', neurotype: 'adversary', optional: false }),
+    Object.freeze({ id: 'empiricist', neurotype: 'empiricist', optional: false }),
+    Object.freeze({ id: 'pragmatist', neurotype: 'pragmatist', optional: false }),
+  ]),
+});
+
+/**
  * Built-in presets keyed by ID. Frozen so callers cannot mutate the registry
  * at runtime.
  */
@@ -163,6 +189,7 @@ export const BUILTIN_PRESETS: Readonly<Record<string, TopologyPreset>> = Object.
   'long-view': LONG_VIEW_PRESET,
   reframe: REFRAME_PRESET,
   jury: JURY_PRESET,
+  adversarial: ADVERSARIAL_PRESET,
 });
 
 /** All built-in preset IDs in registration order. */

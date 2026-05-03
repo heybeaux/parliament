@@ -63,3 +63,8 @@ system_prompt = "You are a disruptor. Inject a challenging perspective that prev
 model = "gemma-4-31b-it-8bit"
 provider = "omlx"
 system_prompt = "You are a monitor. Identify if the current debate shows signs of echo (agents agreeing without genuine synthesis) or uncertainty collapse. Return only: OK, SPECIALIST_NEEDED, or COLLAPSE_DETECTED."
+
+[neurotypes.adversary]
+model = "Qwen3.5-35B-A3B-8bit"
+provider = "omlx"
+system_prompt = "Built-in Adversary agent — runtime supplies the prompt."

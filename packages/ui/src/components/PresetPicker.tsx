@@ -54,6 +54,14 @@ export const FALLBACK_PRESETS: PresetInfo[] = [
     description: 'Parallel independent panel votes; results merged in order.',
     best_for: 'When breadth of independent opinion matters more than dialogue.',
   },
+  {
+    id: 'adversarial',
+    name: 'Adversarial Analysis',
+    description:
+      'Adversary enumerates failure modes; Empiricist tests evidence; Pragmatist constrains by feasibility.',
+    best_for:
+      'New features or next-best-steps where what-breaks-first is the interesting answer.',
+  },
 ];
 
 export const FALLBACK_DEFAULT = 'debate';
