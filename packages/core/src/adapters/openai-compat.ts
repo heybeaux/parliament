@@ -112,8 +112,13 @@ export class OpenAICompatAdapter implements ModelAdapter {
       }
     }
 
-    // Subclass hook: parse provider-specific response headers (cost,
-    // generation id, etc.). Returning `undefined` skips the merge cleanly.
+    // Subclass hooks: parse provider-specific fields from the response body
+    // and headers. Body merges first (cheaper), then headers can override.
+    // Returning `undefined` skips the merge cleanly.
+    const bodyMeta = this.parseResponseBody(data as unknown as Record<string, unknown>);
+    if (bodyMeta !== undefined) {
+      Object.assign(meta, bodyMeta);
+    }
     const headerMeta = this.parseResponseHeaders(response);
     if (headerMeta !== undefined) {
       Object.assign(meta, headerMeta);
@@ -124,12 +129,27 @@ export class OpenAICompatAdapter implements ModelAdapter {
 
   /**
    * Subclass-overridable hook for parsing response headers into AdapterMeta.
-   * Default: no extra fields. `OpenRouterAdapter` overrides to pull
-   * `X-OR-Cost` / `X-OR-Generation-Id`. Kept on the base so every subclass
-   * gets the latency/usage path "for free" without re-implementing the
-   * request body and error mapping.
+   * Default: no extra fields. Subclasses MAY override.
+   *
+   * Note for OpenRouter callers: cost is in the response body, not headers
+   * (PAR-30 fix). Use {@link parseResponseBody} for cost; this hook is for
+   * fields that genuinely live only in headers.
    */
   protected parseResponseHeaders(_response: Response): Partial<AdapterMeta> | undefined {
+    return undefined;
+  }
+
+  /**
+   * Subclass-overridable hook for parsing the parsed JSON body into
+   * AdapterMeta. Default: no extra fields. `OpenRouterAdapter` overrides to
+   * pull `usage.cost` and the response `id` (generation id). Body is the raw
+   * decoded JSON; the base has already extracted `choices[0].message.content`
+   * and `usage.prompt_tokens`/`usage.completion_tokens` into `meta`, so
+   * subclasses should only return *additional* fields.
+   */
+  protected parseResponseBody(
+    _body: Record<string, unknown>,
+  ): Partial<AdapterMeta> | undefined {
     return undefined;
   }
 }
