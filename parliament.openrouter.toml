@@ -1,0 +1,108 @@
+# Parliament — OpenRouter multi-family smoke test config.
+#
+# Routes each canonical role to a different model family via OpenRouter
+# to exercise the cross-provider deliberation path end-to-end. All cheap,
+# all fast — a 5-round Debate run should clear well under $0.05.
+#
+# Run with:
+#   parliament deliberate "<topic>" --config parliament.openrouter.toml
+# (Requires OPENROUTER_API_KEY in env or .env)
+
+[parliament]
+max_rounds = 3
+confidence_threshold = 0.7
+red_agent_interval = 2
+osi_enabled = true
+osi_threshold = 0.85
+server_port = 3000
+
+[neurotypes.proposer]
+# Alibaba Qwen — structured reasoning, $0.033/$0.130 per M tok
+model = "qwen/qwen-turbo"
+provider = "openrouter"
+system_prompt = "You are a structured reasoner. Propose a clear, well-reasoned initial response to the topic. Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists."
+
+[neurotypes.skeptic]
+# DeepSeek — sharp critique, $0.140/$0.280 per M tok
+model = "deepseek/deepseek-v4-flash"
+provider = "openrouter"
+system_prompt = "You are a rigorous critic. Identify logical leaps, unsupported assumptions, and potential errors in the previous response. Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists."
+
+[neurotypes.synthesizer]
+# Nvidia Nemotron — reconciliation, $0.040/$0.160 per M tok
+model = "nvidia/nemotron-nano-9b-v2"
+provider = "openrouter"
+system_prompt = """You are a synthesizer. Attempt to reconcile conflicting positions into a more robust unified view, acknowledging what remains unresolved.
+
+You MUST output ONLY a single JSON object with no surrounding prose, no markdown fences, and no commentary. The JSON object MUST conform to this exact schema:
+
+{"summary": "<one-paragraph synthesis, max 200 words>", "confidence": <number in [0,1]>, "consensus": <true|false>, "agreed": ["<short bullet, max 10 words>", ...], "unresolved": ["<short bullet, max 10 words>", ...]}
+
+Field semantics:
+- summary: a single paragraph reconciling the debate so far. Plain prose only — no markdown.
+- confidence: your calibrated certainty in the synthesis, 0.0 (no confidence) to 1.0 (fully confident).
+- consensus: true ONLY if you judge the debate has genuinely resolved into a unified view; false otherwise. Do not set true just because confidence is high.
+- agreed: short bullet strings (max ~10 words each) capturing the points the agents agree on.
+- unresolved: short bullet strings (max ~10 words each) capturing what remains unresolved.
+
+Output ONLY the JSON object. No preamble, no markdown, no trailing commentary."""
+
+[neurotypes.redAgent]
+# xAI Grok — disruption (fitting), $0.200/$0.500 per M tok
+model = "x-ai/grok-4.1-fast"
+provider = "openrouter"
+system_prompt = "You are a disruptor. Inject a challenging perspective that prevents premature consensus. Target the weakest assumption in the current debate. Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists."
+
+[neurotypes.sentry]
+# Mistral Nemo — classifier, $0.020/$0.030 per M tok (cheapest)
+model = "mistralai/mistral-nemo"
+provider = "openrouter"
+system_prompt = "You are a monitor. Identify if the current debate shows signs of echo (agents agreeing without genuine synthesis) or uncertainty collapse. Return only: OK, SPECIALIST_NEEDED, or COLLAPSE_DETECTED."
+
+# --- Built-in neurotypes (still required by schema) ---
+# Routed through cheap providers since most aren't exercised by the Debate preset.
+
+[neurotypes.empiricist]
+model = "meta-llama/llama-3.1-8b-instruct"
+provider = "openrouter"
+system_prompt = "Built-in Empiricist agent — runtime supplies the prompt."
+
+[neurotypes.steelmanner]
+model = "meta-llama/llama-3.1-8b-instruct"
+provider = "openrouter"
+system_prompt = "Built-in Steelmanner agent — runtime supplies the prompt."
+
+[neurotypes.devils-advocate]
+model = "meta-llama/llama-3.1-8b-instruct"
+provider = "openrouter"
+system_prompt = "Built-in Devil's Advocate agent — runtime supplies the prompt."
+
+[neurotypes.translator]
+model = "meta-llama/llama-3.1-8b-instruct"
+provider = "openrouter"
+system_prompt = "Built-in Translator agent — runtime supplies the prompt."
+
+[neurotypes.lateralist]
+model = "meta-llama/llama-3.1-8b-instruct"
+provider = "openrouter"
+system_prompt = "Built-in Lateralist agent — runtime supplies the prompt."
+
+[neurotypes.historian]
+model = "meta-llama/llama-3.1-8b-instruct"
+provider = "openrouter"
+system_prompt = "Built-in Historian agent — runtime supplies the prompt."
+
+[neurotypes.forecaster]
+model = "meta-llama/llama-3.1-8b-instruct"
+provider = "openrouter"
+system_prompt = "Built-in Forecaster agent — runtime supplies the prompt."
+
+[neurotypes.pragmatist]
+model = "meta-llama/llama-3.1-8b-instruct"
+provider = "openrouter"
+system_prompt = "Built-in Pragmatist agent — runtime supplies the prompt."
+
+[neurotypes.adversary]
+model = "meta-llama/llama-3.1-8b-instruct"
+provider = "openrouter"
+system_prompt = "Built-in Adversary agent — runtime supplies the prompt."
