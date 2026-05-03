@@ -604,18 +604,27 @@ describe('OpenRouterAdapter', () => {
   });
 
   // -------------------------------------------------------------------------
-  // PAR-23: meta telemetry
+  // PAR-30: meta telemetry — body-based cost, body-or-header generation id
+  //
+  // Replaces the original PAR-23 tests, which were written against assumed
+  // `X-OR-Cost` / `X-OR-Generation-Id` headers that do not exist on the live
+  // OpenRouter API. Real shape (verified 2026-05-02 via direct probe):
+  //
+  //   header  x-generation-id: gen-1777773347-Jz7XIWDdPEhCkYSHctwz
+  //   body    {"id":"gen-...","usage":{"prompt_tokens":11,"completion_tokens":3,
+  //                                    "cost":3.4e-7,
+  //                                    "cost_details":{...}}}
   // -------------------------------------------------------------------------
 
-  it('PAR-23: parses X-OR-Cost and X-OR-Generation-Id into AdapterMeta', async () => {
+  it('PAR-30: parses usage.cost (body) and id (body) into AdapterMeta', async () => {
     globalThis.fetch = makeFetchOk(
       {
+        id: 'gen-1777773347-Jz7XIWDdPEhCkYSHctwz',
         choices: [{ message: { role: 'assistant', content: 'ok' } }],
-        usage: { prompt_tokens: 8, completion_tokens: 16 },
+        usage: { prompt_tokens: 8, completion_tokens: 16, cost: 3.4e-7 },
       },
       {
-        'X-OR-Cost': '0.0042',
-        'X-OR-Generation-Id': 'gen_abc123',
+        'x-generation-id': 'gen-1777773347-Jz7XIWDdPEhCkYSHctwz',
       },
     );
 
@@ -626,13 +635,13 @@ describe('OpenRouterAdapter', () => {
     const result = await adapter.generate('hi');
 
     expect(result.meta!.provider).toBe('openrouter');
-    expect(result.meta!.costUsd).toBe(0.0042);
-    expect(result.meta!.generationId).toBe('gen_abc123');
+    expect(result.meta!.costUsd).toBe(3.4e-7);
+    expect(result.meta!.generationId).toBe('gen-1777773347-Jz7XIWDdPEhCkYSHctwz');
     expect(result.meta!.promptTokens).toBe(8);
     expect(result.meta!.completionTokens).toBe(16);
   });
 
-  it('PAR-23: leaves costUsd undefined (not NaN) when X-OR-Cost is absent', async () => {
+  it('PAR-30: leaves costUsd / generationId undefined when body lacks them', async () => {
     globalThis.fetch = makeFetchOk({
       choices: [{ message: { role: 'assistant', content: 'ok' } }],
     });
@@ -648,13 +657,11 @@ describe('OpenRouterAdapter', () => {
     expect(result.meta!.generationId).toBeUndefined();
   });
 
-  it('PAR-23: leaves costUsd undefined when X-OR-Cost is unparseable', async () => {
-    globalThis.fetch = makeFetchOk(
-      {
-        choices: [{ message: { role: 'assistant', content: 'ok' } }],
-      },
-      { 'X-OR-Cost': 'not-a-number' },
-    );
+  it('PAR-30: leaves costUsd undefined when usage.cost is non-numeric junk', async () => {
+    globalThis.fetch = makeFetchOk({
+      choices: [{ message: { role: 'assistant', content: 'ok' } }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, cost: 'banana' },
+    });
 
     const adapter = new OpenRouterAdapter(
       'anthropic/claude-3.5-sonnet',
@@ -663,8 +670,40 @@ describe('OpenRouterAdapter', () => {
     const result = await adapter.generate('hi');
 
     expect(result.meta!.costUsd).toBeUndefined();
-    // No NaN should leak through.
     expect(Number.isNaN(result.meta!.costUsd as unknown as number)).toBe(false);
+  });
+
+  it('PAR-30: parses usage.cost when it arrives as a numeric string', async () => {
+    globalThis.fetch = makeFetchOk({
+      choices: [{ message: { role: 'assistant', content: 'ok' } }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, cost: '0.0042' },
+    });
+
+    const adapter = new OpenRouterAdapter(
+      'anthropic/claude-3.5-sonnet',
+      'sk-or-test',
+    );
+    const result = await adapter.generate('hi');
+
+    expect(result.meta!.costUsd).toBe(0.0042);
+  });
+
+  it('PAR-30: falls back to x-generation-id header when body has no id', async () => {
+    globalThis.fetch = makeFetchOk(
+      {
+        choices: [{ message: { role: 'assistant', content: 'ok' } }],
+        // Note: no top-level `id` in body — header should fill in.
+      },
+      { 'x-generation-id': 'gen-from-header-only' },
+    );
+
+    const adapter = new OpenRouterAdapter(
+      'anthropic/claude-3.5-sonnet',
+      'sk-or-test',
+    );
+    const result = await adapter.generate('hi');
+
+    expect(result.meta!.generationId).toBe('gen-from-header-only');
   });
 });
 
