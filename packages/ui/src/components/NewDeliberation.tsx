@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { PresetPicker, FALLBACK_DEFAULT } from './PresetPicker';
+import { SampleQuestions } from './SampleQuestions';
+import type { SampleQuestion } from '../lib/sampleQuestions';
 
 interface Props {
   /**
@@ -38,6 +40,12 @@ export function NewDeliberation({ onSubmit, disabled }: Props) {
     setTopic('');
     setContext('');
     setContextExpanded(false);
+  }
+
+  function handlePickSample(sample: SampleQuestion) {
+    if (disabled) return;
+    setTopic(sample.topic);
+    setPreset(sample.presetId);
   }
 
   return (
@@ -177,6 +185,8 @@ export function NewDeliberation({ onSubmit, disabled }: Props) {
               </div>
             )}
           </div>
+
+          <SampleQuestions onPick={handlePickSample} disabled={disabled} />
         </div>
       </div>
     </motion.form>
