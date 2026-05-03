@@ -214,12 +214,19 @@ async function runDeliberate(topic: string, opts: DeliberateOptions): Promise<vo
   const redModel = cfg.neurotypes['redAgent']?.model ?? 'mistral';
   const sentryModel = cfg.neurotypes['sentry']?.model ?? 'llama3.2';
 
-  const synthesizer = new SynthesizerAgent(createAdapter(synthModel));
-  const redAgent = new RedAgent(createAdapter(redModel));
-  const sentry = new SentryAgent(createAdapter(sentryModel), {
-    osiEnabled: defaults.osi_enabled,
-    osiSimilarityThreshold: defaults.osi_threshold,
-  });
+  const synthesizer = new SynthesizerAgent(
+    createAdapter(synthModel, cfg.neurotypes['synthesizer']?.provider),
+  );
+  const redAgent = new RedAgent(
+    createAdapter(redModel, cfg.neurotypes['redAgent']?.provider),
+  );
+  const sentry = new SentryAgent(
+    createAdapter(sentryModel, cfg.neurotypes['sentry']?.provider),
+    {
+      osiEnabled: defaults.osi_enabled,
+      osiSimilarityThreshold: defaults.osi_threshold,
+    },
+  );
 
   const engine = new DeliberationEngine();
 
@@ -291,8 +298,12 @@ async function runDeliberate(topic: string, opts: DeliberateOptions): Promise<vo
     const proposerModel = opts.modelProposer ?? cfg.neurotypes['proposer']?.model ?? 'llama3.2';
     const skepticModel = opts.modelSkeptic ?? cfg.neurotypes['skeptic']?.model ?? 'mistral';
 
-    const proposer = new ProposerAgent(createAdapter(proposerModel));
-    const skeptic = new SkepticAgent(createAdapter(skepticModel));
+    const proposer = new ProposerAgent(
+      createAdapter(proposerModel, cfg.neurotypes['proposer']?.provider),
+    );
+    const skeptic = new SkepticAgent(
+      createAdapter(skepticModel, cfg.neurotypes['skeptic']?.provider),
+    );
 
     result = await engine.run(topic, {
       maxRounds,
