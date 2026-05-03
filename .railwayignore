@@ -1,9 +1,0 @@
-node_modules
-.turbo
-.claude
-dist
-*.db
-*.db-shm
-*.db-wal
-transcripts
-.git
