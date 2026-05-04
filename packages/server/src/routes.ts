@@ -50,6 +50,7 @@ import { inflightBroker, type InflightEvent } from './inflight.js';
 import { loadServerConfig, type ServerConfig } from './config.js';
 import { corsMiddleware } from './middleware/cors.js';
 import { bearerAuth } from './middleware/auth.js';
+import { idempotency } from './middleware/idempotency.js';
 import { rateLimit } from './middleware/rateLimit.js';
 import { testKeyThrottle } from './middleware/keyThrottle.js';
 import {
@@ -697,6 +698,22 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
       return;
     }
     return throttleMiddleware(c, next);
+  });
+
+  // -------------------------------------------------------------------------
+  // PAR-34 — Idempotency-Key middleware on POST endpoints. Opt-in: requests
+  // without the header pass through. Skipped on `/dashboard/*` because
+  // those endpoints are admin-gated and their semantics (key issuance,
+  // revocation) don't compose with replay caching. See
+  // `middleware/idempotency.ts` for the lock + replay design.
+  // -------------------------------------------------------------------------
+  const idempotencyMiddleware = idempotency(db);
+  app.use('*', async (c, next) => {
+    if (c.req.method !== 'POST' || c.req.path.startsWith('/dashboard/')) {
+      await next();
+      return;
+    }
+    return idempotencyMiddleware(c, next);
   });
 
   // -------------------------------------------------------------------------
