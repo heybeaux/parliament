@@ -7,7 +7,9 @@ import type { Database } from 'better-sqlite3';
 import {
   DeliberationEngine,
   ModelConnectionError,
+  Retrying5xxAdapter,
   TopologyValidationError,
+  UpstreamProviderError,
   buildFallbackAdapter,
   createAdapter,
   loadConfig,
@@ -26,12 +28,14 @@ import type {
   DeliberationResult,
   DeliberationSource,
   DeliberationStatus,
+  ModelAdapter,
   NeurotypeResolverContext,
   SystemEvent,
   TopologyConfig,
   TopologyDeliberationConfig,
   TopologyStep,
   Turn,
+  UpstreamErrorContext,
 } from '@parliament/core';
 import {
   getDeliberation,
@@ -117,6 +121,40 @@ const DeliberateBodySchema = z.object({
       maxSourceWords: z.number().int().positive().optional(),
     })
     .optional(),
+  /**
+   * PAR-32 / PRD D2 — opt-in transformations. All flags default to `false`,
+   * preserving Parliament's "error-forwarding by default" contract: upstream
+   * provider failures surface verbatim to the caller with the upstream
+   * status, body, and request_id intact rather than being silently retried,
+   * masked, or rewritten.
+   *
+   * Enabling a flag is a deliberate choice the caller makes to trade
+   * fidelity for ergonomics — see field comments for the specific trade.
+   */
+  transform: z
+    .object({
+      /**
+       * When `true`, retry the upstream call exactly once with a short
+       * (~250ms) delay if the first attempt fails with HTTP 5xx. Off by
+       * default because retries can mask intermittent provider issues that
+       * the operator should know about (e.g. a model that's been silently
+       * downgraded under capacity pressure).
+       *
+       * 4xx responses (auth, validation, model-not-found) are never
+       * retried — they're deterministic.
+       */
+      retry_on_upstream_500: z.boolean().optional(),
+      /**
+       * Reserved for v1.0 — when `true`, the synthesizer's output is
+       * coerced to a JSON-schema-validated shape with one validation-retry
+       * loop. Off by default because the validator adds latency and may
+       * fail on otherwise-useful prose. The flag is accepted now so SDK
+       * authors can wire it without a breaking change later; the behaviour
+       * gate lands with the synthesizer schema work in M2.
+       */
+      structured_output: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -172,7 +210,17 @@ function resolveActiveTopology(
  * entry in `parliament.toml`. A missing neurotype block surfaces as a clear
  * configuration error rather than a silent default.
  */
-function buildStructuralAgents(): {
+function buildStructuralAgents(
+  /**
+   * PAR-32 / PRD D2 — adapter factory the caller passes through so the
+   * structural agents (synthesizer / redAgent / sentry) inherit any
+   * adapter decoration (e.g. `transform.retry_on_upstream_500`) the
+   * deliberation request opted in to. Default factory (`createAdapter`)
+   * preserves the pre-PAR-32 unwrapped behaviour for the few non-route
+   * call sites that don't pass one.
+   */
+  factory: (model: string, provider?: string) => ModelAdapter = createAdapter,
+): {
   synthesizer: SynthesizerAgent;
   redAgent: RedAgent;
   sentry: SentryAgent;
@@ -188,7 +236,7 @@ function buildStructuralAgents(): {
           `the topology runtime needs this for the structural-infrastructure ${role}.`,
       );
     }
-    return createAdapter(neurotype.model, neurotype.provider);
+    return factory(neurotype.model, neurotype.provider);
   };
 
   return {
@@ -218,12 +266,24 @@ function buildTopologyDeliberationConfig(
     sources?: DeliberationSource[];
     /** PAR-17: per-source word cap forwarded from the request body. */
     maxSourceWords?: number;
+    /**
+     * PAR-32 / PRD D2 — optional decorator applied to every adapter the
+     * resolver constructs. Used to opt the deliberation into the
+     * `transform.retry_on_upstream_500` retry-on-5xx wrapper. Default
+     * (`undefined`) leaves adapters unwrapped — no retries — preserving
+     * the error-forwarding default.
+     */
+    adapterDecorator?: (adapter: ModelAdapter) => ModelAdapter;
   },
 ): TopologyDeliberationConfig {
   const config = loadConfig();
   const defaults = config.parliament ?? DEFAULT_PARLIAMENT_DEFAULTS;
 
-  const structural = buildStructuralAgents();
+  const decorate = overrides.adapterDecorator ?? ((a: ModelAdapter) => a);
+  const decoratedFactory = (model: string, provider?: string): ModelAdapter =>
+    decorate(createAdapter(model, provider));
+
+  const structural = buildStructuralAgents(decoratedFactory);
 
   // Resolver: per-step, instantiate the appropriate Agent class.
   // Built-in neurotype IDs (proposer, skeptic, historian, ...) come from
@@ -246,8 +306,8 @@ function buildTopologyDeliberationConfig(
         `Parliament: step "${step.id}" references neurotype "${step.neurotype}" but no [neurotypes.${step.neurotype}] entry exists in parliament.toml`,
       );
     }
-    const adapter = createAdapter(neurotype.model, neurotype.provider);
-    const fallbackAdapter = buildFallbackAdapter(neurotype, createAdapter);
+    const adapter = decoratedFactory(neurotype.model, neurotype.provider);
+    const fallbackAdapter = buildFallbackAdapter(neurotype, decoratedFactory);
     const options: AgentRuntimeOptions = {};
     if (fallbackAdapter !== undefined) {
       options.fallbackAdapter = fallbackAdapter;
@@ -758,7 +818,17 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
       context: requestContext,
       sources: requestSources,
       config: configOverrides,
+      transform: transformFlags,
     } = parsed.data;
+
+    // PAR-32 / PRD D2: only `retry_on_upstream_500: true` engages the
+    // 5xx-retry decorator. Default `undefined`/`false` leaves adapters
+    // unwrapped — callers see upstream errors verbatim. `structured_output`
+    // is accepted but unwired in v1.0 (see schema comment).
+    const adapterDecorator =
+      transformFlags?.retry_on_upstream_500 === true
+        ? (adapter: ModelAdapter) => new Retrying5xxAdapter(adapter)
+        : undefined;
 
     let topology: TopologyConfig;
     try {
@@ -811,6 +881,7 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
         ...(configOverrides?.maxSourceWords !== undefined
           ? { maxSourceWords: configOverrides.maxSourceWords }
           : {}),
+        ...(adapterDecorator !== undefined ? { adapterDecorator } : {}),
       });
     } catch (err) {
       return c.json(
@@ -896,8 +967,15 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
         inflightBroker.publish(id, { type: 'status', status: 'completed' });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        // PAR-32 / PRD D2: when the underlying failure was an upstream
+        // provider HTTP error, preserve the structured upstream context
+        // (provider/status/body/requestId) onto both the persisted row
+        // and the terminal SSE event so callers can react to provider
+        // failures without parsing the human-readable message.
+        const upstream =
+          err instanceof UpstreamProviderError ? err.upstream : undefined;
         try {
-          markFailed(db, id, message);
+          markFailed(db, id, message, upstream);
         } catch (persistErr) {
           console.error(
             `Parliament: failed to mark deliberation ${id} failed:`,
@@ -908,6 +986,7 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
           type: 'status',
           status: 'failed',
           error: message,
+          ...(upstream !== undefined ? { upstream } : {}),
         });
       }
     })();
@@ -1080,6 +1159,11 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
         if (initial.error !== undefined) {
           payload['error'] = initial.error;
         }
+        // PAR-32 / PRD D2: forward upstream provider context verbatim
+        // when the run failed because of an upstream HTTP error.
+        if (initial.upstream !== undefined) {
+          payload['upstream'] = initial.upstream;
+        }
         await stream.writeSSE({
           event: 'status',
           data: JSON.stringify(payload),
@@ -1140,6 +1224,9 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
         if (recheck.error !== undefined) {
           payload['error'] = recheck.error;
         }
+        if (recheck.upstream !== undefined) {
+          payload['upstream'] = recheck.upstream;
+        }
         await stream.writeSSE({ event: 'status', data: JSON.stringify(payload) });
         unsubscribe();
         return;
@@ -1171,6 +1258,9 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
             const payload: Record<string, unknown> = { status: next.status };
             if (next.error !== undefined) {
               payload['error'] = next.error;
+            }
+            if (next.upstream !== undefined) {
+              payload['upstream'] = next.upstream;
             }
             await stream.writeSSE({
               event: 'status',

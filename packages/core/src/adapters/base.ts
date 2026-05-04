@@ -70,3 +70,53 @@ export class ModelConnectionError extends Error {
     this.name = 'ModelConnectionError';
   }
 }
+
+/**
+ * Structured context preserved verbatim from an upstream provider's failure
+ * response. Surfaces on every layer of the stack — adapter throw → engine
+ * propagation → DB row → SSE `error` event → API JSON envelope — so callers
+ * never see an upstream failure flattened to a single string (PAR-32, PRD D2).
+ *
+ * `body` is the raw upstream response body, truncated to a safe ceiling
+ * (4 KiB) to keep persistence cheap; full body lives in adapter logs only.
+ */
+export interface UpstreamErrorContext {
+  /** Stable provider key (`'openrouter'`, `'ollama'`, `'lm_studio'`, `'omlx'`, `'openai_compat'`). */
+  provider: string;
+  /** HTTP status returned by the upstream. */
+  status: number;
+  /** Raw upstream response body (text), truncated to 4 KiB. */
+  body: string;
+  /**
+   * Provider request id, when surfaced. OpenRouter uses `x-generation-id`;
+   * OpenAI proper uses `x-request-id`. Absent on providers that don't return one.
+   */
+  requestId?: string;
+}
+
+/**
+ * Subclass of {@link ModelConnectionError} that carries the structured
+ * `UpstreamErrorContext` block. Existing failover semantics (engine retries
+ * once on a configured fallback adapter when `err instanceof
+ * ModelConnectionError`) continue to apply because of the inheritance — only
+ * the surfaced shape gets richer (PAR-32, PRD D2).
+ */
+export class UpstreamProviderError extends ModelConnectionError {
+  constructor(message: string, public readonly upstream: UpstreamErrorContext) {
+    super(message);
+    this.name = 'UpstreamProviderError';
+  }
+}
+
+/**
+ * Truncate an upstream response body to a safe ceiling for persistence and
+ * wire transmission. 4 KiB is large enough to capture every error envelope
+ * we've seen from OpenRouter / Ollama / LM Studio while keeping DB rows and
+ * SSE event payloads small. Truncation is signaled with a trailing
+ * `… [truncated, N total]` marker so the operator knows logs are the source
+ * of truth for the full body.
+ */
+export function truncateUpstreamBody(body: string, maxBytes = 4096): string {
+  if (body.length <= maxBytes) return body;
+  return `${body.slice(0, maxBytes)}… [truncated, ${body.length} total]`;
+}
