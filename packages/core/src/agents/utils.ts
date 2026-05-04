@@ -20,6 +20,18 @@ export const CONTEXT_HEADING = '## Background';
 export const SOURCES_HEADING = '## Sources';
 
 /**
+ * Stable heading for the recalled-memory block (PAR-38). Sits AFTER the
+ * `## Background` context section and BEFORE the `## Sources` block when both
+ * are present. Pinned as a constant so the engine + tests share a single
+ * wire shape and old client builds without memory-awareness keep parsing.
+ *
+ * The block is explicitly tagged "past decisions" so the Skeptic neurotype
+ * can challenge stale entries naturally — memory is an input, not ground
+ * truth.
+ */
+export const MEMORY_HEADING = '## Memory';
+
+/**
  * Default per-source word cap applied at prompt-construction time when no
  * explicit `maxSourceWords` is supplied on the deliberation config.
  *
@@ -148,6 +160,7 @@ export function buildPromptHeader(
   topic: string,
   context?: string,
   sources?: readonly DeliberationSource[],
+  memory?: string,
   maxSourceWords: number = DEFAULT_MAX_SOURCE_WORDS,
 ): string {
   const today = new Date().toISOString().slice(0, 10);
@@ -158,11 +171,15 @@ export function buildPromptHeader(
   ].join('\n');
 
   const trimmedContext = context?.trim();
+  const trimmedMemory = memory?.trim();
   const sourcesBlock = buildSourcesBlock(sources, maxSourceWords);
 
   const sections: string[] = [];
   if (trimmedContext !== undefined && trimmedContext.length > 0) {
     sections.push(`${CONTEXT_HEADING}\n\n${trimmedContext}`);
+  }
+  if (trimmedMemory !== undefined && trimmedMemory.length > 0) {
+    sections.push(`${MEMORY_HEADING}\n\n${trimmedMemory}`);
   }
   if (sourcesBlock !== null) {
     sections.push(sourcesBlock);

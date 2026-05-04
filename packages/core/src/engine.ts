@@ -14,6 +14,8 @@ import type { SentryAgent } from './agents/sentry.js';
 import type { TopologyConfig, TopologyStep } from './topology/index.js';
 import { executeParallelBlock } from './topology/parallel.js';
 import { DEFAULT_MAX_SOURCE_WORDS } from './agents/utils.js';
+import type { MemoryProvider, MemoryOutcome } from './memory.js';
+import { formatMemoryFragments } from './memory.js';
 
 export interface DeliberationConfig {
   /** Maximum number of deliberation rounds. Default: 5. */
@@ -55,6 +57,23 @@ export interface DeliberationConfig {
    * detect it.
    */
   maxSourceWords?: number;
+  /**
+   * PAR-38 — Optional memory provider. When set, the engine calls
+   * `recall()` once before round 1 (formatted output is written onto
+   * `blackboard.memory` and surfaced in every agent's prompt under a
+   * `## Memory` heading) and fires `remember()` after the deliberation
+   * terminates. Both calls are wrapped in try/catch — a flaky provider
+   * never blocks deliberation.
+   */
+  memoryProvider?: MemoryProvider;
+  /**
+   * PAR-38 — Per-account scoping forwarded to the memory provider as the
+   * `x-am-agent-id` tenant header. Required when `memoryProvider` is set;
+   * ignored otherwise.
+   */
+  memoryAgentId?: string;
+  /** PAR-38 — Max recall fragments. Default 5. */
+  memoryRecallLimit?: number;
   agents: {
     proposer: Agent;
     skeptic: Agent;
@@ -197,6 +216,14 @@ export interface TopologyDeliberationConfig {
    * so a misbehaving sink cannot interrupt the deliberation.
    */
   onEvent?: (event: SystemEvent) => void;
+  /**
+   * PAR-38 — Optional memory provider. See {@link DeliberationConfig.memoryProvider}.
+   */
+  memoryProvider?: MemoryProvider;
+  /** PAR-38 — Per-account scoping forwarded as the provider's tenant id. */
+  memoryAgentId?: string;
+  /** PAR-38 — Max recall fragments. Default 5. */
+  memoryRecallLimit?: number;
 }
 
 
@@ -234,6 +261,89 @@ function normalizeSources(
     if (src.kind !== undefined) result.kind = src.kind;
     return result;
   });
+}
+
+/**
+ * PAR-38 — Calls `provider.recall()` and writes the formatted result onto
+ * `blackboard.memory` so every non-Sentry agent's `buildPromptHeader` call
+ * surfaces it under the `## Memory` heading. Failures are logged via
+ * `console.warn` and swallowed: a flaky memory backend must never block
+ * deliberation. No-op when no provider/agent-id is configured, or when the
+ * provider returns zero fragments.
+ */
+async function attachMemoryRecall(
+  blackboard: Blackboard,
+  provider: MemoryProvider | undefined,
+  agentId: string | undefined,
+  limit: number,
+): Promise<void> {
+  if (provider === undefined || agentId === undefined || agentId.length === 0) {
+    return;
+  }
+  try {
+    const fragments = await provider.recall(blackboard.topic, { limit, agentId });
+    const formatted = formatMemoryFragments(fragments);
+    if (formatted.length > 0) {
+      blackboard.memory = formatted;
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // eslint-disable-next-line no-console
+    console.warn(`[parliament] memory.recall failed: ${message}`);
+  }
+}
+
+/**
+ * PAR-38 — Fire-and-forget call to `provider.remember()` after the
+ * deliberation terminates. Returns immediately; the promise is detached so
+ * a slow memory write cannot delay the engine resolving its result. Failures
+ * surface via `console.warn` from the detached chain.
+ */
+function dispatchMemoryRemember(
+  outcome: MemoryOutcome,
+  provider: MemoryProvider | undefined,
+  agentId: string | undefined,
+): void {
+  if (provider === undefined || agentId === undefined || agentId.length === 0) {
+    return;
+  }
+  void provider.remember(outcome, { agentId }).catch((err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    // eslint-disable-next-line no-console
+    console.warn(`[parliament] memory.remember failed: ${message}`);
+  });
+}
+
+/**
+ * PAR-38 — Builds the `MemoryOutcome` payload for `remember()`. Pulls the
+ * distinct agent role labels out of the blackboard turns in first-seen
+ * order so the persisted record reflects which neurotypes actually
+ * participated (vs. the steady-state preset roster).
+ */
+function buildMemoryOutcome(
+  topic: string,
+  terminationReason: TerminationReason,
+  synthesis: string | null,
+  residueScore: number,
+  totalRounds: number,
+  turns: Turn[],
+): MemoryOutcome {
+  const seen = new Set<string>();
+  const agents: string[] = [];
+  for (const turn of turns) {
+    if (!seen.has(turn.agent)) {
+      seen.add(turn.agent);
+      agents.push(turn.agent);
+    }
+  }
+  return {
+    topic,
+    terminationReason,
+    synthesis,
+    residueScore,
+    totalRounds,
+    agents,
+  };
 }
 
 /**
@@ -481,6 +591,16 @@ export class DeliberationEngine {
       ...(normalizedSources !== undefined ? { sources: normalizedSources } : {}),
     };
 
+    // PAR-38: pull recall fragments from the memory provider before round 1
+    // so every agent's prompt header sees the `## Memory` block on its first
+    // turn. Fail-soft.
+    await attachMemoryRecall(
+      blackboard,
+      config.memoryProvider,
+      config.memoryAgentId,
+      config.memoryRecallLimit ?? 5,
+    );
+
     let terminationReason: TerminationReason = 'max_rounds';
     let synthesis: string | null = null;
     let totalRounds = 0;
@@ -682,10 +802,27 @@ export class DeliberationEngine {
 
     const completedAt = new Date().toISOString();
 
+    // PAR-38: persist the deliberation outcome via the memory provider.
+    // Fire-and-forget so a slow `remember()` never delays the resolved
+    // promise; failures surface via console.warn from the detached chain.
+    dispatchMemoryRemember(
+      buildMemoryOutcome(
+        topic,
+        terminationReason,
+        synthesis,
+        residueScore,
+        totalRounds,
+        blackboard.turns,
+      ),
+      config.memoryProvider,
+      config.memoryAgentId,
+    );
+
     return {
       topic,
       ...(normalizedContext !== undefined ? { context: normalizedContext } : {}),
       ...(normalizedSources !== undefined ? { sources: normalizedSources } : {}),
+      ...(blackboard.memory !== undefined ? { memory: blackboard.memory } : {}),
       turns: blackboard.turns,
       conflicts: blackboard.conflicts,
       residueScore,
@@ -773,6 +910,16 @@ export class DeliberationEngine {
       ...(normalizedContext !== undefined ? { context: normalizedContext } : {}),
       ...(normalizedSources !== undefined ? { sources: normalizedSources } : {}),
     };
+
+    // PAR-38: same recall flow as `run()` — fail-soft, no-op when no
+    // provider is configured. Must run BEFORE round 1 so the first
+    // step's prompt header surfaces the `## Memory` block.
+    await attachMemoryRecall(
+      blackboard,
+      config.memoryProvider,
+      config.memoryAgentId,
+      config.memoryRecallLimit ?? 5,
+    );
 
     let terminationReason: TerminationReason = 'max_rounds';
     let synthesis: string | null = null;
@@ -1137,6 +1284,21 @@ export class DeliberationEngine {
 
     const completedAt = new Date().toISOString();
 
+    // PAR-38: persist the deliberation outcome via the memory provider.
+    // Fire-and-forget — see `run()` for rationale.
+    dispatchMemoryRemember(
+      buildMemoryOutcome(
+        topic,
+        terminationReason,
+        synthesis,
+        residueScore,
+        totalRounds,
+        blackboard.turns,
+      ),
+      config.memoryProvider,
+      config.memoryAgentId,
+    );
+
     return {
       topic,
       // PAR-20: stamp the preset id that produced this deliberation so the
@@ -1149,6 +1311,7 @@ export class DeliberationEngine {
       preset: topology.activePreset.id,
       ...(normalizedContext !== undefined ? { context: normalizedContext } : {}),
       ...(normalizedSources !== undefined ? { sources: normalizedSources } : {}),
+      ...(blackboard.memory !== undefined ? { memory: blackboard.memory } : {}),
       turns: blackboard.turns,
       conflicts: blackboard.conflicts,
       residueScore,

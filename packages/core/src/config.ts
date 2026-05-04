@@ -5,6 +5,12 @@ import type { AgentDefinition } from './debate.js';
 import type { ModelAdapter } from './adapters/base.js';
 import { loadTopology, type LoadTopologyOptions } from './topology/loader.js';
 import type { TopologyConfig } from './topology/types.js';
+import {
+  EngramMemoryProvider,
+  NoopMemoryProvider,
+  type MemoryLayer,
+  type MemoryProvider,
+} from './memory.js';
 
 export interface NeurotypeConfig {
   model: string;
@@ -61,9 +67,44 @@ export const DEFAULT_PARLIAMENT_DEFAULTS: ParliamentDefaults = {
   server_port: 3000,
 };
 
+/**
+ * PAR-38 — Memory provider configuration parsed from the optional `[memory]`
+ * table.
+ *
+ * Default (no table, or `provider = "none"`) leaves memory wiring inactive —
+ * the engine sees `memoryProvider: undefined` and skips all recall/remember
+ * calls. `provider = "engram"` turns on the Engram adapter; the rest of the
+ * fields configure it.
+ *
+ * Endpoint and agent_id MUST be set when `provider = "engram"`. Validation
+ * surfaces a clear error rather than silently degrading to noop.
+ */
+export type MemoryProviderKind = 'none' | 'noop' | 'engram';
+
+export interface MemoryConfig {
+  provider: MemoryProviderKind;
+  /** Engram base URL — required when provider === 'engram'. */
+  endpoint?: string;
+  /** Optional bearer token forwarded as `authorization: Bearer <token>`. */
+  api_key?: string;
+  /**
+   * Per-account scoping passed to the provider as `x-am-agent-id`. Required
+   * when provider === 'engram'. The CLI / server may also override this from
+   * a request-time tenant id.
+   */
+  agent_id?: string;
+  /** Max recall fragments per deliberation. Default 5. */
+  recall_limit?: number;
+  /** Layers to filter recall against. Default ['INSIGHT', 'PROJECT']. */
+  layers?: MemoryLayer[];
+}
+
+export const DEFAULT_MEMORY_CONFIG: MemoryConfig = { provider: 'none' };
+
 export interface ParliamentTomlConfig {
   neurotypes: Record<string, NeurotypeConfig>;
   parliament: ParliamentDefaults;
+  memory: MemoryConfig;
 }
 
 const DEFAULT_CONFIG_FILENAME = 'parliament.toml';
@@ -238,8 +279,111 @@ function validateConfig(raw: unknown, configPath: string): ParliamentTomlConfig 
   }
 
   const parliament = mergeParliamentDefaults(top['parliament']);
+  const memory = parseMemoryConfig(top['memory'], configPath);
 
-  return { neurotypes, parliament };
+  return { neurotypes, parliament, memory };
+}
+
+/**
+ * PAR-38 — parses the optional `[memory]` table. Missing table → noop default.
+ * `provider = "engram"` requires `endpoint` and `agent_id`.
+ */
+function parseMemoryConfig(raw: unknown, configPath: string): MemoryConfig {
+  if (raw === undefined || raw === null) {
+    return { ...DEFAULT_MEMORY_CONFIG };
+  }
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(
+      `Parliament: [memory] in "${configPath}" must be a TOML table`,
+    );
+  }
+
+  const entry = raw as Record<string, unknown>;
+  const providerRaw = entry['provider'];
+  let provider: MemoryProviderKind = 'none';
+  if (typeof providerRaw === 'string') {
+    if (providerRaw === 'none' || providerRaw === 'noop' || providerRaw === 'engram') {
+      provider = providerRaw;
+    } else {
+      throw new Error(
+        `Parliament: [memory] provider in "${configPath}" must be one of "none", "noop", or "engram" (got "${providerRaw}")`,
+      );
+    }
+  }
+
+  const out: MemoryConfig = { provider };
+
+  if (typeof entry['endpoint'] === 'string') out.endpoint = entry['endpoint'];
+  if (typeof entry['api_key'] === 'string') out.api_key = entry['api_key'];
+  if (typeof entry['agent_id'] === 'string') out.agent_id = entry['agent_id'];
+  if (typeof entry['recall_limit'] === 'number') {
+    out.recall_limit = entry['recall_limit'];
+  }
+  if (Array.isArray(entry['layers'])) {
+    const validLayers: readonly MemoryLayer[] = [
+      'IDENTITY',
+      'PROJECT',
+      'SESSION',
+      'TASK',
+      'INSIGHT',
+    ];
+    const layers: MemoryLayer[] = [];
+    for (const layer of entry['layers']) {
+      if (typeof layer !== 'string') {
+        throw new Error(
+          `Parliament: [memory] layers in "${configPath}" must be strings`,
+        );
+      }
+      const upper = layer.toUpperCase() as MemoryLayer;
+      if (!validLayers.includes(upper)) {
+        throw new Error(
+          `Parliament: [memory] layer "${layer}" in "${configPath}" is not one of ${validLayers.join(', ')}`,
+        );
+      }
+      layers.push(upper);
+    }
+    if (layers.length > 0) out.layers = layers;
+  }
+
+  if (provider === 'engram') {
+    if (out.endpoint === undefined || out.endpoint.length === 0) {
+      throw new Error(
+        `Parliament: [memory] provider = "engram" requires an "endpoint" in "${configPath}"`,
+      );
+    }
+    if (out.agent_id === undefined || out.agent_id.length === 0) {
+      throw new Error(
+        `Parliament: [memory] provider = "engram" requires an "agent_id" in "${configPath}"`,
+      );
+    }
+  }
+
+  return out;
+}
+
+/**
+ * PAR-38 — instantiates the memory provider declared by the parsed
+ * {@link MemoryConfig}. Returns `undefined` for `provider = "none"` so the
+ * engine sees a missing field (matching the `memoryProvider?: MemoryProvider`
+ * contract on `DeliberationConfig`); `provider = "noop"` returns a
+ * `NoopMemoryProvider` instance for tests that want to assert the
+ * recall/remember surface is exercised without hitting a network.
+ */
+export function buildMemoryProvider(config: MemoryConfig): MemoryProvider | undefined {
+  switch (config.provider) {
+    case 'none':
+      return undefined;
+    case 'noop':
+      return new NoopMemoryProvider();
+    case 'engram': {
+      const opts: ConstructorParameters<typeof EngramMemoryProvider>[0] = {
+        endpoint: config.endpoint!,
+      };
+      if (config.api_key !== undefined) opts.apiKey = config.api_key;
+      if (config.layers !== undefined) opts.layers = config.layers;
+      return new EngramMemoryProvider(opts);
+    }
+  }
 }
 
 function mergeParliamentDefaults(raw: unknown): ParliamentDefaults {

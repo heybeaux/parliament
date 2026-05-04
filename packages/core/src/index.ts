@@ -38,6 +38,8 @@ export type {
   NeurotypeConfig,
   ParliamentTomlConfig,
   ParliamentDefaults,
+  MemoryConfig,
+  MemoryProviderKind,
 } from './config.js';
 export {
   loadConfig,
@@ -48,7 +50,9 @@ export {
   resetConfigCache,
   buildAgentsFromConfig,
   buildFallbackAdapter,
+  buildMemoryProvider,
   DEFAULT_PARLIAMENT_DEFAULTS,
+  DEFAULT_MEMORY_CONFIG,
 } from './config.js';
 
 export {
@@ -81,6 +85,7 @@ export {
   StubNeurotypeAgent,
   CONTEXT_HEADING,
   SOURCES_HEADING,
+  MEMORY_HEADING,
   CITATION_INSTRUCTION,
   DEFAULT_MAX_SOURCE_WORDS,
   buildPromptHeader,
@@ -130,3 +135,19 @@ export {
   OSI_CONVERGENCE_THRESHOLD,
   MIN_TURNS_PER_ROLE_FOR_ECHO_CHECK,
 } from './osi.js';
+
+export type {
+  MemoryLayer,
+  MemoryFragment,
+  MemoryOutcome,
+  RecallOptions,
+  RememberOptions,
+  MemoryProvider,
+  EngramMemoryProviderConfig,
+} from './memory.js';
+export {
+  NoopMemoryProvider,
+  EngramMemoryProvider,
+  formatOutcomeForMemory,
+  formatMemoryFragments,
+} from './memory.js';

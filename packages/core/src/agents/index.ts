@@ -15,6 +15,7 @@ export { SentryAgent } from './sentry.js';
 export {
   CONTEXT_HEADING,
   SOURCES_HEADING,
+  MEMORY_HEADING,
   CITATION_INSTRUCTION,
   DEFAULT_MAX_SOURCE_WORDS,
   buildPromptHeader,

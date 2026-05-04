@@ -25,6 +25,7 @@ export class SteelmannerAgent extends AgentBase {
       blackboard.topic,
       blackboard.context,
       blackboard.sources,
+      blackboard.memory,
     );
     const userPrompt = recentTurns.length > 0
       ? `${header}\n\nRecent discussion to steelman against:\n\n${recentTurns}`

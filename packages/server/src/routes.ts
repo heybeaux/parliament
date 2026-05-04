@@ -12,6 +12,7 @@ import {
   TopologyValidationError,
   UpstreamProviderError,
   buildFallbackAdapter,
+  buildMemoryProvider,
   createAdapter,
   loadConfig,
   loadTopologyConfig,
@@ -291,6 +292,14 @@ function buildTopologyDeliberationConfig(
      * the error-forwarding default.
      */
     adapterDecorator?: (adapter: ModelAdapter) => ModelAdapter;
+    /**
+     * PAR-38 — optional per-request override for the memory tenant id. Used
+     * by the request handler to forward the calling account's id as the
+     * provider's `x-am-agent-id` header so memory recall is isolated by
+     * tenant. Falls back to the [memory].agent_id from parliament.toml when
+     * omitted.
+     */
+    memoryAgentIdOverride?: string;
   },
 ): TopologyDeliberationConfig {
   const config = loadConfig();
@@ -356,6 +365,26 @@ function buildTopologyDeliberationConfig(
   }
   if (overrides.maxSourceWords !== undefined) {
     out.maxSourceWords = overrides.maxSourceWords;
+  }
+  // PAR-38: build the memory provider declared by [memory] in parliament.toml
+  // and stitch in the agent id (per-request override beats config default).
+  // When provider is "none", the [memory] block is missing entirely (older
+  // toml fixtures), or the agent id resolves to undefined, the engine sees
+  // a missing field and skips the recall/remember calls entirely —
+  // preserving the pre-PAR-38 behaviour for OSS users.
+  const memoryConfig = config.memory ?? { provider: 'none' as const };
+  const memoryProvider = buildMemoryProvider(memoryConfig);
+  const memoryAgentId =
+    overrides.memoryAgentIdOverride !== undefined &&
+    overrides.memoryAgentIdOverride.length > 0
+      ? overrides.memoryAgentIdOverride
+      : memoryConfig.agent_id;
+  if (memoryProvider !== undefined && memoryAgentId !== undefined) {
+    out.memoryProvider = memoryProvider;
+    out.memoryAgentId = memoryAgentId;
+    if (memoryConfig.recall_limit !== undefined) {
+      out.memoryRecallLimit = memoryConfig.recall_limit;
+    }
   }
   return out;
 }
@@ -998,6 +1027,12 @@ export function createRouter(
       );
     }
 
+    // PAR-38: resolve the calling account's id early so we can forward it as
+    // the memory provider's `x-am-agent-id` (per-tenant scoping). Same
+    // OSS_ACCOUNT_ID coalescing rule used below for the placeholder row.
+    const callerAccountId =
+      (c.get(AUTH_CTX_ACCOUNT_ID) as string | undefined) ?? OSS_ACCOUNT_ID;
+
     // Build the topology config eagerly so any structural-config error
     // (missing neurotype block, etc.) surfaces synchronously — that's a
     // 500-class server problem the client should know about before we
@@ -1023,6 +1058,10 @@ export function createRouter(
           ? { maxSourceWords: configOverrides.maxSourceWords }
           : {}),
         ...(adapterDecorator !== undefined ? { adapterDecorator } : {}),
+        // PAR-38: per-request tenant override → x-am-agent-id on the
+        // memory provider. Falls back to [memory].agent_id from the TOML
+        // config inside buildTopologyDeliberationConfig when omitted.
+        memoryAgentIdOverride: callerAccountId,
       });
     } catch (err) {
       return c.json(
@@ -1034,12 +1073,10 @@ export function createRouter(
     const id = crypto.randomUUID();
 
     // PAR-36 — stamp the owning account on the row so the list endpoint
-    // can scope its results. When bearerAuth was a pass-through (empty
-    // api_keys table on OSS), `authAccountId` is unset and we coalesce to
-    // the OSS synthetic account so existing self-host installs keep
-    // showing their full history under one identity.
-    const accountId =
-      (c.get(AUTH_CTX_ACCOUNT_ID) as string | undefined) ?? OSS_ACCOUNT_ID;
+    // can scope its results. We resolved this above as `callerAccountId`
+    // for the PAR-38 memory tenant header; reuse the same value here so
+    // both surfaces always agree.
+    const accountId = callerAccountId;
 
     // Persist the placeholder row BEFORE returning so a client that
     // immediately polls `GET /deliberate/:id` sees `status: 'in_flight'`

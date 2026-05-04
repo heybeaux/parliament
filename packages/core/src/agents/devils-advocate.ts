@@ -69,6 +69,7 @@ export class DevilsAdvocateAgent extends AgentBase {
       blackboard.topic,
       blackboard.context,
       blackboard.sources,
+      blackboard.memory,
     );
     const round1 = isRoundOne(blackboard.turns);
     const systemPrompt = round1
