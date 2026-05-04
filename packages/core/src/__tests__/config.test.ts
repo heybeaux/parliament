@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import type { ModelAdapter } from '../adapters/base.js';
 import {
   buildFallbackAdapter,
+  buildMemoryProvider,
+  DEFAULT_MEMORY_CONFIG,
   loadConfig,
   resolveConfigPath,
   resetConfigCache,
@@ -12,6 +14,7 @@ import {
   getNeurotype,
   findRepoRoot,
 } from '../config.js';
+import { EngramMemoryProvider, NoopMemoryProvider } from '../memory.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -422,5 +425,126 @@ describe('findRepoRoot', () => {
     const result = findRepoRoot(isolated);
     expect(typeof result).toBe('string');
     expect(result.length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PAR-38 — [memory] block parsing + buildMemoryProvider
+// ---------------------------------------------------------------------------
+
+describe('loadConfig [memory] (PAR-38)', () => {
+  let tmpDir: string;
+  let originalEnv: string | undefined;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'parliament-test-'));
+    originalEnv = process.env['PARLIAMENT_CONFIG'];
+    delete process.env['PARLIAMENT_CONFIG'];
+    resetConfigCache();
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+    if (originalEnv !== undefined) {
+      process.env['PARLIAMENT_CONFIG'] = originalEnv;
+    } else {
+      delete process.env['PARLIAMENT_CONFIG'];
+    }
+    resetConfigCache();
+  });
+
+  it('defaults to provider = "none" when no [memory] table is present', () => {
+    const path = writeTempToml(tmpDir, VALID_TOML);
+    const config = loadConfig(path);
+    expect(config.memory).toEqual({ ...DEFAULT_MEMORY_CONFIG });
+  });
+
+  it('parses provider = "noop" without requiring endpoint or agent_id', () => {
+    const path = writeTempToml(
+      tmpDir,
+      `${VALID_TOML}\n[memory]\nprovider = "noop"\n`,
+    );
+    const config = loadConfig(path);
+    expect(config.memory.provider).toBe('noop');
+  });
+
+  it('parses a full engram block with optional fields', () => {
+    const path = writeTempToml(
+      tmpDir,
+      `${VALID_TOML}\n[memory]\nprovider = "engram"\nendpoint = "https://engram.example.com"\napi_key = "secret"\nagent_id = "tenant-1"\nrecall_limit = 8\nlayers = ["INSIGHT", "PROJECT", "TASK"]\n`,
+    );
+    const config = loadConfig(path);
+    expect(config.memory).toEqual({
+      provider: 'engram',
+      endpoint: 'https://engram.example.com',
+      api_key: 'secret',
+      agent_id: 'tenant-1',
+      recall_limit: 8,
+      layers: ['INSIGHT', 'PROJECT', 'TASK'],
+    });
+  });
+
+  it('rejects an unknown provider value', () => {
+    const path = writeTempToml(
+      tmpDir,
+      `${VALID_TOML}\n[memory]\nprovider = "redis"\n`,
+    );
+    expect(() => loadConfig(path)).toThrow(/provider in/);
+  });
+
+  it('rejects engram provider without endpoint', () => {
+    const path = writeTempToml(
+      tmpDir,
+      `${VALID_TOML}\n[memory]\nprovider = "engram"\nagent_id = "t"\n`,
+    );
+    expect(() => loadConfig(path)).toThrow(/requires an "endpoint"/);
+  });
+
+  it('rejects engram provider without agent_id', () => {
+    const path = writeTempToml(
+      tmpDir,
+      `${VALID_TOML}\n[memory]\nprovider = "engram"\nendpoint = "https://x"\n`,
+    );
+    expect(() => loadConfig(path)).toThrow(/requires an "agent_id"/);
+  });
+
+  it('rejects an unknown layer name', () => {
+    const path = writeTempToml(
+      tmpDir,
+      `${VALID_TOML}\n[memory]\nprovider = "engram"\nendpoint = "https://x"\nagent_id = "t"\nlayers = ["WORLD"]\n`,
+    );
+    expect(() => loadConfig(path)).toThrow(/layer "WORLD"/);
+  });
+
+  it('rejects [memory] declared as an array of tables', () => {
+    // [[memory]] turns the value into an array — our parser explicitly
+    // rejects non-table shapes.
+    const path = writeTempToml(
+      tmpDir,
+      `${VALID_TOML}\n[[memory]]\nprovider = "noop"\n`,
+    );
+    expect(() => loadConfig(path)).toThrow(/must be a TOML table/);
+  });
+});
+
+describe('buildMemoryProvider (PAR-38)', () => {
+  it('returns undefined for provider = "none" so the engine sees a missing field', () => {
+    expect(buildMemoryProvider({ provider: 'none' })).toBeUndefined();
+  });
+
+  it('returns a NoopMemoryProvider for provider = "noop"', () => {
+    const provider = buildMemoryProvider({ provider: 'noop' });
+    expect(provider).toBeInstanceOf(NoopMemoryProvider);
+  });
+
+  it('returns an EngramMemoryProvider for provider = "engram"', () => {
+    const provider = buildMemoryProvider({
+      provider: 'engram',
+      endpoint: 'https://engram.example.com',
+      api_key: 'secret',
+      agent_id: 'tenant-1',
+      layers: ['INSIGHT'],
+    });
+    expect(provider).toBeInstanceOf(EngramMemoryProvider);
   });
 });

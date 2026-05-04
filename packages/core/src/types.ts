@@ -389,6 +389,13 @@ export interface DeliberationResult {
    * old client builds keep parsing.
    */
   sources?: DeliberationSource[];
+  /**
+   * Optional formatted memory block (PAR-38). When the engine ran with a
+   * `MemoryProvider` configured, the formatted recall block is echoed back
+   * here so callers can render the same `## Memory` section that agents
+   * saw. Pre-PAR-38 stored deliberations omit this field.
+   */
+  memory?: string;
   turns: Turn[];
   conflicts: Conflict[];
   /** Weighted fraction of unresolved conflicts, 0–1. 0 = all resolved. */
@@ -474,6 +481,17 @@ export interface Blackboard {
    * `Blackboard` literals without sources.
    */
   sources?: DeliberationSource[];
+  /**
+   * Optional formatted memory block (PAR-38). The engine writes the
+   * pre-debate `MemoryProvider.recall()` output here, formatted via
+   * `formatMemoryFragments`, so every non-Sentry agent's `buildPromptHeader`
+   * call renders the same `## Memory` section. Carried separately from
+   * `metadata` so the prompt-builder can read it directly without parsing.
+   *
+   * Optional for back-compat with existing test mocks that construct
+   * `Blackboard` literals without memory.
+   */
+  memory?: string;
   turns: Turn[];
   conflicts: Conflict[];
   metadata: Record<string, unknown>;

@@ -23,6 +23,7 @@ export class LateralistAgent extends AgentBase {
       blackboard.topic,
       blackboard.context,
       blackboard.sources,
+      blackboard.memory,
     );
     const userPrompt = recentTurns.length > 0
       ? `${header}\n\nRecent discussion:\n\n${recentTurns}`

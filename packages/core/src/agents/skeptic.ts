@@ -50,6 +50,7 @@ export class SkepticAgent extends AgentBase {
       blackboard.topic,
       blackboard.context,
       blackboard.sources,
+      blackboard.memory,
     );
     const userPrompt = recentTurns.length > 0
       ? `${header}\n\nDiscussion to critique:\n\n${recentTurns}`
