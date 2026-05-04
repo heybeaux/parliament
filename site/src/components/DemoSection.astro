@@ -1,0 +1,154 @@
+---
+---
+
+<section id="demo" class="demo-section">
+  <div class="section-label">Real Output</div>
+  <h2>See the deliberation.</h2>
+  <p class="section-desc">
+    An actual Parliament run on a real architectural decision. 
+    Not mock data — a real deliberation with real tradeoffs.
+  </p>
+
+  <div class="demo-card">
+    <div class="demo-header">
+      <span class="demo-topic">Topic: Should Endeavour integrate Parliament as a self-deliberation layer?</span>
+      <span class="demo-meta">5 rounds · Jury preset · Residue: 1.0 · Irreconcilable split</span>
+    </div>
+
+    <div class="transcript">
+      <div class="turn">
+        <span class="agent proposer">Proposer</span>
+        <p>Endeavour should implement Parliament as a conditional, triggered layer rather than a default pipeline. Given the compute constraints of Apple Silicon, a permanent multi-agent overhead would degrade performance for routine tasks. However, the synergy between Parliament and Engram shared memory pools creates a unique opportunity for high-stakes meta-reasoning.</p>
+      </div>
+      <div class="turn">
+        <span class="agent skeptic">Skeptic</span>
+        <p>The Proposer assumes the Opinion Shift Index reliably detects internal stagnation. This is an unsupported leap. Running specialized agents alongside Qwen 35B on Apple Silicon risks thermal throttling regardless of frequency. Without distinct model architectures, cognitive postures may converge rather than diverge.</p>
+      </div>
+      <div class="turn">
+        <span class="agent redagent">Red Agent</span>
+        <p>You are not building a parliament; you are building a choir of identical voices arguing over bandwidth until the chip throttles. The real risk is not latency but hallucination amplification through redundant context loading. If the underlying weights remain static, the diversity is just variance in sampling, not epistemic growth.</p>
+      </div>
+      <div class="turn">
+        <span class="agent skeptic">Skeptic</span>
+        <p>RedAgent commits a logical error by asserting identical model weights preclude cognitive divergence, ignoring stochastic sampling parameters like temperature that ensure output variance even with shared priors. The debate lacks empirical grounding — no benchmarks quantify attention budget dilution or thermal throttling thresholds.</p>
+      </div>
+    </div>
+
+    <div class="demo-footer">
+      <p class="split-notice">
+        <strong>Result: Irreconcilable split.</strong> Parliament correctly identified that this question 
+        cannot be resolved by reasoning alone — it needs empirical data. The debate surfaced considerations 
+        a single-model pipeline would have missed entirely.
+      </p>
+    </div>
+  </div>
+</section>
+
+<style>
+  .demo-section {
+    text-align: center;
+  }
+
+  .section-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    margin-bottom: 1rem;
+  }
+
+  h2 {
+    font-size: clamp(1.75rem, 4vw, 2.5rem);
+    font-weight: 700;
+    margin-bottom: 1rem;
+  }
+
+  .section-desc {
+    font-size: 1.1rem;
+    color: var(--text-muted);
+    max-width: 550px;
+    margin: 0 auto 3rem;
+  }
+
+  .demo-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    text-align: left;
+    max-width: 800px;
+    margin: 0 auto;
+  }
+
+  .demo-header {
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .demo-topic {
+    font-weight: 600;
+    font-size: 0.95rem;
+  }
+
+  .demo-meta {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-family: monospace;
+  }
+
+  .transcript {
+    padding: 1.25rem 1.5rem;
+  }
+
+  .turn {
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .turn:last-child {
+    border-bottom: none;
+  }
+
+  .agent {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.15rem 0.5rem;
+    border-radius: 3px;
+    margin-bottom: 0.5rem;
+  }
+
+  .agent.proposer { background: rgba(96, 165, 250, 0.15); color: #60a5fa; }
+  .agent.skeptic { background: rgba(248, 113, 113, 0.15); color: #f87171; }
+  .agent.redagent { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+
+  .turn p {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+    margin: 0;
+  }
+
+  .demo-footer {
+    padding: 1rem 1.5rem;
+    border-top: 1px solid var(--border);
+    background: rgba(239, 68, 68, 0.05);
+  }
+
+  .split-notice {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin: 0;
+    line-height: 1.5;
+  }
+
+  .split-notice strong {
+    color: var(--red);
+  }
+</style>

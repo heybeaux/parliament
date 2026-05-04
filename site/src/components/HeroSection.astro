@@ -1,0 +1,268 @@
+---
+---
+
+<div class="hero">
+  <div class="hero-content">
+    <h1 class="headline">
+      "If you're the smartest model<br />in the room,<br />
+      <span class="highlight">you're in the wrong room."</span>
+    </h1>
+    <p class="subhead">
+      Parliament gives AI agents the one thing bigger models can't buy — 
+      <strong>diverse perspectives</strong>. Structured disagreement that catches blind 
+      spots, surfaces tradeoffs, and makes your systems think before they act.
+    </p>
+    <div class="cta-group">
+      <a href="#demo" class="btn btn-primary">See it in action</a>
+      <a href="https://github.com/heybeaux/parliament" class="btn btn-secondary" target="_blank" rel="noopener">
+        View on GitHub
+      </a>
+    </div>
+  </div>
+
+  <div class="split-screen">
+    <div class="panel single-model">
+      <div class="panel-label">
+        <span class="dot red"></span>
+        Single Model
+      </div>
+      <div class="panel-content">
+        <p class="answer">Based on the requirements, adopting a four-day work week would improve employee satisfaction and reduce overhead costs. The data shows a 20% productivity increase in pilot programs. Recommended for immediate implementation.</p>
+        <div class="confidence-badge">Confidence: 94%</div>
+        <div class="blindspot">⚠ Blind spot: ignores coordination costs, client expectations, and industry-specific constraints</div>
+      </div>
+    </div>
+
+    <div class="panel parliament">
+      <div class="panel-label">
+        <span class="dot green"></span>
+        Parliament
+      </div>
+      <div class="panel-content">
+        <div class="turn proposer">
+          <strong>Proposer:</strong> Four-day week boosts morale, cuts costs by 20%, and pilot data shows productivity gains...
+        </div>
+        <div class="turn skeptic">
+          <strong>Skeptic:</strong> But the pilots excluded client-facing teams. What about coverage gaps and SLA breaches?
+        </div>
+        <div class="turn empiricist">
+          <strong>Empiricist:</strong> Of 12 studies, 8 measured satisfaction — only 3 measured actual output. Evidence is mixed.
+        </div>
+        <div class="turn pragmatist">
+          <strong>Pragmatist:</strong> Start with a 3-month pilot in non-client teams. Measure output, not hours.
+        </div>
+        <div class="turn synthesis">
+          <strong>Synthesis:</strong> Conditional yes — pilot with specific teams, measure outcomes, expand based on data.
+          <span class="residue">Residue: 0.3 · Consensus reached</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tagline">
+    <p class="tagline-text">Better reasoning, not better models.</p>
+  </div>
+</div>
+
+<style>
+  .hero {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 6rem 2rem 4rem;
+    text-align: center;
+    position: relative;
+  }
+
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  .headline {
+    font-size: clamp(2rem, 5vw, 3.5rem);
+    font-weight: 700;
+    line-height: 1.2;
+    margin-bottom: 1.5rem;
+    max-width: 800px;
+  }
+
+  .highlight {
+    color: var(--accent);
+    text-shadow: 0 0 40px var(--accent-glow);
+  }
+
+  .subhead {
+    font-size: clamp(1rem, 2.5vw, 1.25rem);
+    color: var(--text-muted);
+    max-width: 640px;
+    margin-bottom: 2rem;
+  }
+
+  .subhead strong {
+    color: var(--text);
+  }
+
+  .cta-group {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 4rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .btn {
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 1rem;
+    transition: all 0.2s;
+    display: inline-block;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: white;
+  }
+
+  .btn-primary:hover {
+    box-shadow: 0 0 24px var(--accent-glow);
+    opacity: 1;
+  }
+
+  .btn-secondary {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+
+  .btn-secondary:hover {
+    border-color: var(--accent);
+    opacity: 1;
+  }
+
+  .split-screen {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    max-width: 900px;
+    width: 100%;
+    margin-bottom: 3rem;
+  }
+
+  @media (max-width: 768px) {
+    .split-screen {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .panel {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    text-align: left;
+  }
+
+  .panel-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  .dot.red { background: var(--red); }
+  .dot.green { background: var(--green); box-shadow: 0 0 8px rgba(34, 197, 94, 0.5); }
+
+  .panel-content {
+    font-size: 0.9rem;
+  }
+
+  .single-model .answer {
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+
+  .confidence-badge {
+    display: inline-block;
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--red);
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    margin-top: 0.75rem;
+    font-weight: 600;
+  }
+
+  .blindspot {
+    margin-top: 0.75rem;
+    padding: 0.5rem;
+    background: rgba(245, 158, 11, 0.1);
+    border-radius: 4px;
+    font-size: 0.75rem;
+    color: var(--amber);
+  }
+
+  .parliament .turn {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+    line-height: 1.4;
+    color: var(--text-muted);
+  }
+
+  .parliament .turn:last-of-type {
+    border-bottom: none;
+  }
+
+  .parliament .turn strong {
+    color: var(--text);
+  }
+
+  .parliament .turn.proposer strong { color: #60a5fa; }
+  .parliament .turn.skeptic strong { color: #f87171; }
+  .parliament .turn.empiricist strong { color: #a78bfa; }
+  .parliament .turn.pragmatist strong { color: #34d399; }
+
+  .residue {
+    display: inline-block;
+    background: rgba(34, 197, 94, 0.15);
+    color: var(--green);
+    padding: 0.15rem 0.4rem;
+    border-radius: 3px;
+    font-size: 0.7rem;
+    margin-left: 0.25rem;
+  }
+
+  .tagline {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: 0.02em;
+  }
+
+  .tagline-text {
+    opacity: 0.6;
+  }
+</style>

@@ -1,0 +1,127 @@
+---
+---
+
+<section class="stack-section">
+  <div class="section-label">The Full Stack</div>
+  <h2>The complete agent lifecycle.</h2>
+  <p class="section-desc">
+    Where Parliament fits in the heybeaux ecosystem — five layers, each answering a different question.
+  </p>
+
+  <div class="stack">
+    <div class="stack-item">
+      <span class="stack-label">ACR</span>
+      <span class="stack-desc">what agents CAN do</span>
+      <span class="stack-tag">Capabilities</span>
+    </div>
+    <div class="connector"></div>
+    <div class="stack-item">
+      <span class="stack-label">AWM</span>
+      <span class="stack-desc">what agents WILL do</span>
+      <span class="stack-tag">Planning</span>
+    </div>
+    <div class="connector"></div>
+    <div class="stack-item highlight">
+      <span class="stack-label">Parliament</span>
+      <span class="stack-desc">whether they SHOULD do it</span>
+      <span class="stack-tag">Judgment</span>
+    </div>
+    <div class="connector"></div>
+    <div class="stack-item">
+      <span class="stack-label">Engram</span>
+      <span class="stack-desc">what agents DID</span>
+      <span class="stack-tag">Memory</span>
+    </div>
+    <div class="connector"></div>
+    <div class="stack-item">
+      <span class="stack-label">Forge</span>
+      <span class="stack-desc">how it all flows</span>
+      <span class="stack-tag">Orchestration</span>
+    </div>
+  </div>
+</section>
+
+<style>
+  .stack-section {
+    text-align: center;
+  }
+
+  .section-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--green);
+    margin-bottom: 1rem;
+  }
+
+  h2 {
+    font-size: clamp(1.75rem, 4vw, 2.5rem);
+    font-weight: 700;
+    margin-bottom: 1rem;
+  }
+
+  .section-desc {
+    font-size: 1.1rem;
+    color: var(--text-muted);
+    max-width: 550px;
+    margin: 0 auto 3rem;
+  }
+
+  .stack {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    max-width: 500px;
+    margin: 0 auto;
+  }
+
+  .stack-item {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.25rem 2rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+    width: 100%;
+    transition: border-color 0.2s;
+  }
+
+  .stack-item:hover {
+    border-color: var(--accent);
+  }
+
+  .stack-item.highlight {
+    border-color: var(--accent);
+    box-shadow: 0 0 24px var(--accent-glow);
+    background: rgba(99, 102, 241, 0.08);
+  }
+
+  .stack-label {
+    font-size: 1.1rem;
+    font-weight: 700;
+  }
+
+  .stack-desc {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+  }
+
+  .stack-tag {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    opacity: 0.7;
+  }
+
+  .connector {
+    width: 2px;
+    height: 1.5rem;
+    background: var(--border);
+  }
+</style>

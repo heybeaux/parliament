@@ -1,0 +1,117 @@
+---
+---
+
+<section class="solution-section">
+  <div class="section-label">The Solution</div>
+  <h2>You don't need a smarter model.</h2>
+  <h2 class="accent">You need a smarter process.</h2>
+
+  <p class="section-desc">
+    Parliament puts multiple AI agents with different cognitive postures in a room to 
+    debate a topic on a shared blackboard. They argue, they challenge, they synthesize — 
+    until they reach consensus, surface an irreconcilable split, or hit a timeout.
+  </p>
+
+  <div class="features">
+    <div class="feature">
+      <h3>Neurotypes</h3>
+      <p>Thirteen specialized deliberation postures — Proposer, Skeptic, Empiricist, Historian, Forecaster, Pragmatist, Lateralist, and more. Each brings a different lens to the same problem.</p>
+    </div>
+    <div class="feature">
+      <h3>Topology Presets</h3>
+      <p>Compose neurotypes into reusable deliberation shapes. <code>jury</code> for avoiding framing bias. <code>long-view</code> for long-term consequences. <code>reframe</code> for stuck thinking.</p>
+    </div>
+    <div class="feature">
+      <h3>Echo Detection</h3>
+      <p>The Sentry monitors for agreement loops. The Opinion Shift Index tracks whether agents are actually moving or just repeating themselves. Premature consensus gets disrupted by the Red Agent.</p>
+    </div>
+    <div class="feature">
+      <h3>Local-First</h3>
+      <p>Runs on oMLX with local models. Privacy-preserving, no API keys needed. Multi-provider support for Ollama, LM Studio, and OpenAI-compatible backends.</p>
+    </div>
+  </div>
+
+  <blockquote class="quote">
+    <p>"Parliament isn't about chaining agents. It's about putting them in a room and letting them disagree productively."</p>
+  </blockquote>
+</section>
+
+<style>
+  .solution-section {
+    text-align: center;
+  }
+
+  .section-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--green);
+    margin-bottom: 1rem;
+  }
+
+  h2 {
+    font-size: clamp(1.75rem, 4vw, 2.5rem);
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+  }
+
+  .accent {
+    color: var(--accent);
+    text-shadow: 0 0 40px var(--accent-glow);
+  }
+
+  .section-desc {
+    font-size: 1.1rem;
+    color: var(--text-muted);
+    max-width: 600px;
+    margin: 0 auto 3rem;
+  }
+
+  .features {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 1.5rem;
+    text-align: left;
+    margin-bottom: 3rem;
+  }
+
+  .feature {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+  }
+
+  .feature h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    color: var(--accent);
+  }
+
+  .feature p {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+
+  .feature code {
+    background: rgba(99, 102, 241, 0.15);
+    color: var(--accent);
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    font-size: 0.85em;
+  }
+
+  .quote {
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 1.5rem 2rem;
+    border-left: 3px solid var(--accent);
+    text-align: left;
+    font-style: italic;
+    color: var(--text-muted);
+    font-size: 1.05rem;
+  }
+</style>

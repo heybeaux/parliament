@@ -1,0 +1,97 @@
+---
+---
+
+<section class="problem-section">
+  <div class="section-label">The Problem</div>
+  <h2>AI agents are impulsive.</h2>
+  <p class="section-desc">
+    They get a task. They execute. No pause. No deliberation. No "should I actually do this?"
+  </p>
+
+  <div class="grid">
+    <div class="card">
+      <div class="card-icon">🔲</div>
+      <h3>Blind spots</h3>
+      <p>The model doesn't know what it doesn't know. It can't see its own gaps.</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">🔄</div>
+      <h3>No productive self-debate</h3>
+      <p>A single model can't argue with itself. Chain-of-thought is monologue, not dialogue.</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">📏</div>
+      <h3>Unexamined tradeoffs</h3>
+      <p>It won't surface tradeoffs it wasn't prompted to consider. You get what you ask for — nothing more.</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">🧠</div>
+      <h3>No institutional memory</h3>
+      <p>Every decision starts cold. Past mistakes, past wins — all forgotten next time.</p>
+    </div>
+  </div>
+</section>
+
+<style>
+  .problem-section {
+    text-align: center;
+  }
+
+  .section-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--red);
+    margin-bottom: 1rem;
+  }
+
+  h2 {
+    font-size: clamp(1.75rem, 4vw, 2.5rem);
+    font-weight: 700;
+    margin-bottom: 1rem;
+  }
+
+  .section-desc {
+    font-size: 1.1rem;
+    color: var(--text-muted);
+    max-width: 550px;
+    margin: 0 auto 3rem;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1.5rem;
+    text-align: left;
+  }
+
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    transition: border-color 0.2s;
+  }
+
+  .card:hover {
+    border-color: var(--accent);
+  }
+
+  .card-icon {
+    font-size: 1.5rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .card h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+
+  .card p {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+</style>
