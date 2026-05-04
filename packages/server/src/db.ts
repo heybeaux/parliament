@@ -103,6 +103,44 @@ export function initDb(path = 'parliament.db'): Database.Database {
     `CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys(prefix)`,
   );
 
+  // PAR-34: Idempotency-Key support on POST endpoints (M1 / T1.2).
+  //
+  // Stores at most one record per `(account_id, key)` tuple. The first
+  // request through with a given key creates a row in `lock_state =
+  // 'in_flight'`; once the handler returns, the row is rewritten with the
+  // captured response body/status and `lock_state = 'complete'`. Replays
+  // observe the row and either return the cached response (matching body)
+  // or 409 (different body). `expires_at` is the wall-clock TTL — the
+  // middleware treats any record whose `expires_at < now()` as evictable
+  // and overwrites it with the fresh request.
+  //
+  // The PRIMARY KEY is `(account_id, key)` so the in-flight lock is enforced
+  // by SQLite's atomic INSERT — a concurrent replay racing the first request
+  // either succeeds (it's the first writer) or fails with a unique-violation
+  // (and falls into the polling-wait branch to await completion).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS idempotency_records (
+      account_id        TEXT NOT NULL,
+      key               TEXT NOT NULL,
+      method            TEXT NOT NULL,
+      path              TEXT NOT NULL,
+      request_hash      TEXT NOT NULL,
+      lock_state        TEXT NOT NULL,
+      response_status   INTEGER,
+      response_body     TEXT,
+      response_headers  TEXT,
+      created_at        TEXT NOT NULL,
+      expires_at        TEXT NOT NULL,
+      PRIMARY KEY (account_id, key)
+    )
+  `);
+  // Eviction sweeps walk the `expires_at` axis — index it so the cleanup
+  // pass is sub-linear.
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_idempotency_records_expires
+       ON idempotency_records(expires_at)`,
+  );
+
   return db;
 }
 
