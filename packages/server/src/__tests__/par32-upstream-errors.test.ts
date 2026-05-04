@@ -27,6 +27,7 @@ import {
 import { Hono } from 'hono';
 import { initDb } from '../db.js';
 import { inflightBroker } from '../inflight.js';
+import type { RouterVariables } from '../routes.js';
 
 interface ScriptedRun {
   turns?: Turn[];
@@ -101,7 +102,7 @@ vi.mock('@parliament/core', async (importOriginal) => {
 
 const { createRouter } = await import('../routes.js');
 
-function makeApp(): { app: Hono; db: ReturnType<typeof initDb> } {
+function makeApp(): { app: Hono<RouterVariables>; db: ReturnType<typeof initDb> } {
   const db = initDb(':memory:');
   const app = createRouter(db);
   return { app, db };

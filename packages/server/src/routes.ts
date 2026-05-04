@@ -46,10 +46,16 @@ import {
   markCompleted,
   markFailed,
 } from './db.js';
+import {
+  listDeliberationsScoped,
+  decodeCursor,
+  DEFAULT_LIMIT,
+  MAX_LIMIT,
+} from './deliberations.js';
 import { inflightBroker, type InflightEvent } from './inflight.js';
 import { loadServerConfig, type ServerConfig } from './config.js';
 import { corsMiddleware } from './middleware/cors.js';
-import { bearerAuth } from './middleware/auth.js';
+import { bearerAuth, AUTH_CTX_ACCOUNT_ID } from './middleware/auth.js';
 import { idempotency } from './middleware/idempotency.js';
 import { rateLimit } from './middleware/rateLimit.js';
 import { testKeyThrottle } from './middleware/keyThrottle.js';
@@ -657,8 +663,24 @@ export interface CreateRouterOptions {
 
 export const ADMIN_KEY_ENV_VAR = 'PARLIAMENT_ADMIN_KEY';
 
-export function createRouter(db: Database, options: CreateRouterOptions = {}): Hono {
-  const app = new Hono();
+/**
+ * Hono context variables populated by middleware. Centralised here so handlers
+ * can read auth state via `c.get('authAccountId')` without re-stringing the
+ * literal or re-declaring the variable shape per-handler.
+ */
+export type RouterVariables = {
+  Variables: {
+    authAccountId: string;
+    authKeyId: string;
+    authKeyType: 'test' | 'live';
+  };
+};
+
+export function createRouter(
+  db: Database,
+  options: CreateRouterOptions = {},
+): Hono<RouterVariables> {
+  const app = new Hono<RouterVariables>();
   const serverConfig = options.serverConfig ?? loadServerConfig();
   const adminKey =
     options.adminKey !== undefined ? options.adminKey : process.env[ADMIN_KEY_ENV_VAR];
@@ -951,6 +973,14 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
 
     const id = crypto.randomUUID();
 
+    // PAR-36 — stamp the owning account on the row so the list endpoint
+    // can scope its results. When bearerAuth was a pass-through (empty
+    // api_keys table on OSS), `authAccountId` is unset and we coalesce to
+    // the OSS synthetic account so existing self-host installs keep
+    // showing their full history under one identity.
+    const accountId =
+      (c.get(AUTH_CTX_ACCOUNT_ID) as string | undefined) ?? OSS_ACCOUNT_ID;
+
     // Persist the placeholder row BEFORE returning so a client that
     // immediately polls `GET /deliberate/:id` sees `status: 'in_flight'`
     // and an empty turns array — never a 404 race.
@@ -966,6 +996,7 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
           ? { sources: requestSources }
           : {}),
         preset: resolvedTopology.activePreset.id,
+        accountId,
       });
     } catch (err) {
       return c.json(
@@ -1060,6 +1091,11 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
 
   // -------------------------------------------------------------------------
   // GET /deliberations — list all stored deliberation summaries (newest first).
+  //
+  // Legacy dashboard endpoint. NOT account-scoped — the dashboard is
+  // operator-only and shows the full local history. Public clients use
+  // `GET /v1/deliberations` (PAR-36) which IS scoped + paginated +
+  // filterable per the OpenAPI contract.
   // -------------------------------------------------------------------------
   app.get('/deliberations', (c) => {
     try {
@@ -1068,6 +1104,86 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
     } catch (err) {
       return c.json(
         { error: `Database error: ${err instanceof Error ? err.message : String(err)}` },
+        500,
+      );
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // GET /v1/deliberations — PAR-36 / M1 T1.5
+  //
+  // OpenAPI-contract list endpoint. Account-scoped via bearerAuth context
+  // (falls back to the OSS bucket when auth is disabled — matches PAR-33's
+  // self-host-parity stance). Cursor pagination, four filters, hard cap on
+  // `limit`. Response shape exactly matches `#/components/schemas/DeliberationList`.
+  // -------------------------------------------------------------------------
+  const ListQuerySchema = z.object({
+    limit: z.coerce.number().int().min(1).max(MAX_LIMIT).optional(),
+    cursor: z.string().min(1).optional(),
+    status: z.enum(['in_flight', 'completed', 'failed']).optional(),
+    preset: z.string().min(1).optional(),
+    created_after: z.string().datetime({ offset: true }).optional(),
+    created_before: z.string().datetime({ offset: true }).optional(),
+  });
+  app.get('/v1/deliberations', (c) => {
+    const parsed = ListQuerySchema.safeParse({
+      limit: c.req.query('limit'),
+      cursor: c.req.query('cursor'),
+      status: c.req.query('status'),
+      preset: c.req.query('preset'),
+      created_after: c.req.query('created_after'),
+      created_before: c.req.query('created_before'),
+    });
+    if (!parsed.success) {
+      return c.json(
+        {
+          error: {
+            code: 'invalid_request',
+            message: 'Invalid query parameter(s).',
+            issues: parsed.error.issues,
+          },
+        },
+        400,
+      );
+    }
+
+    // Pre-validate the cursor at the route layer so we can return a clean
+    // 400 instead of letting the helper silently return an empty page —
+    // a corrupt cursor is a client bug we want surfaced.
+    if (parsed.data.cursor !== undefined && decodeCursor(parsed.data.cursor) === null) {
+      return c.json(
+        {
+          error: {
+            code: 'invalid_request',
+            message: 'Cursor is malformed or expired. Restart pagination without `cursor`.',
+          },
+        },
+        400,
+      );
+    }
+
+    const accountId =
+      (c.get(AUTH_CTX_ACCOUNT_ID) as string | undefined) ?? OSS_ACCOUNT_ID;
+
+    try {
+      const page = listDeliberationsScoped(db, {
+        accountId,
+        limit: parsed.data.limit ?? DEFAULT_LIMIT,
+        cursor: parsed.data.cursor,
+        status: parsed.data.status,
+        preset: parsed.data.preset,
+        createdAfter: parsed.data.created_after,
+        createdBefore: parsed.data.created_before,
+      });
+      return c.json(page, 200);
+    } catch (err) {
+      return c.json(
+        {
+          error: {
+            code: 'internal_error',
+            message: `Database error: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        },
         500,
       );
     }

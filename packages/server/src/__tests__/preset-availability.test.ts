@@ -20,6 +20,7 @@ import {
   __resetPresetAvailabilityCache,
   __getPresetAvailabilityComputeCount,
 } from '../routes.js';
+import type { RouterVariables } from '../routes.js';
 import { DEFAULT_SERVER_CONFIG } from '../config.js';
 import { initDb } from '../db.js';
 
@@ -49,7 +50,7 @@ const { createRouter } = await import('../routes.js');
 // Test fixtures — minimal stand-ins for the real router dependencies.
 // ---------------------------------------------------------------------------
 
-function makeApp(): Hono {
+function makeApp(): Hono<RouterVariables> {
   return createRouter(initDb(':memory:'), {
     serverConfig: { ...DEFAULT_SERVER_CONFIG, cors_origins: ['http://localhost:5173'] },
   });
@@ -63,7 +64,7 @@ interface PresetEntry {
   parallel_steps?: Array<{ id: string; neurotype: string; optional: boolean }>;
 }
 
-async function fetchPresets(app: Hono): Promise<{
+async function fetchPresets(app: Hono<RouterVariables>): Promise<{
   presets: PresetEntry[];
   defaultPreset: string;
 }> {
