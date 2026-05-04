@@ -59,6 +59,8 @@ import { bearerAuth, AUTH_CTX_ACCOUNT_ID } from './middleware/auth.js';
 import { idempotency } from './middleware/idempotency.js';
 import { rateLimit } from './middleware/rateLimit.js';
 import { testKeyThrottle } from './middleware/keyThrottle.js';
+import { accountRateLimit } from './middleware/accountRateLimit.js';
+import { createSqliteEnvelopeCounter } from './accountLimiter.js';
 import {
   createApiKey,
   getApiKey,
@@ -659,6 +661,21 @@ export interface CreateRouterOptions {
    * works for any caller whose key already exists in the DB.
    */
   adminKey?: string | undefined;
+  /**
+   * PAR-35 — test-only override for the account rate-limit middleware.
+   * Production callers leave this unset; integration tests pin clock and
+   * envelope counts (and observe limiter rejections) by injecting their
+   * own values. Anything not specified falls back to the production wiring.
+   */
+  accountRateLimitOverrides?: {
+    counter?: import('./accountLimiter.js').EnvelopeCounter;
+    now?: () => number;
+    envelopeCacheTtlMs?: number;
+    onLimited?: (
+      kind: 'rate_limited' | 'usage_limit_exceeded' | 'concurrency_exceeded',
+      accountId: string,
+    ) => void;
+  };
 }
 
 export const ADMIN_KEY_ENV_VAR = 'PARLIAMENT_ADMIN_KEY';
@@ -673,6 +690,13 @@ export type RouterVariables = {
     authAccountId: string;
     authKeyId: string;
     authKeyType: 'test' | 'live';
+    /**
+     * PAR-35 — flip to `true` inside a fire-and-forget POST handler so
+     * the rate-limit middleware skips its automatic concurrency release.
+     * The handler is then responsible for calling `limiter.release`
+     * after the background work settles.
+     */
+    rateLimitDeferRelease: boolean;
   };
 };
 
@@ -720,6 +744,42 @@ export function createRouter(
       return;
     }
     return throttleMiddleware(c, next);
+  });
+
+  // -------------------------------------------------------------------------
+  // PAR-35 — account-scoped tier-aware rate limit (envelope + burst +
+  // concurrency). Emits the six X-RateLimit-* headers the OpenAPI spec
+  // requires; rejects with `429 rate_limited`, `429 usage_limit_exceeded`,
+  // or `409 concurrency_exceeded` per AC. Bypasses test keys (metered by
+  // keyThrottle) and OSS pass-through (no account on context).
+  // Skipped on `/dashboard/*` for the same reason as the layers above.
+  // -------------------------------------------------------------------------
+  const envelopeCounter =
+    options.accountRateLimitOverrides?.counter ?? createSqliteEnvelopeCounter(db, OSS_ACCOUNT_ID);
+  // Lazy-prepare the tier lookup so router construction with a stub `db`
+  // (turn-enrichment, some integration suites) doesn't crash up-front.
+  let accountTierStmt: ReturnType<typeof db.prepare<[string], { tier: string }>> | null = null;
+  const { middleware: accountLimitMiddleware, limiter: accountLimiter } = accountRateLimit({
+    counter: envelopeCounter,
+    resolveAccount: (accountId) => {
+      if (accountTierStmt === null) {
+        accountTierStmt = db.prepare<[string], { tier: string }>(
+          `SELECT tier FROM accounts WHERE id = ?`,
+        );
+      }
+      const row = accountTierStmt.get(accountId);
+      return row === undefined ? null : { tier: row.tier };
+    },
+    now: options.accountRateLimitOverrides?.now,
+    envelopeCacheTtlMs: options.accountRateLimitOverrides?.envelopeCacheTtlMs,
+    onLimited: options.accountRateLimitOverrides?.onLimited,
+  });
+  app.use('*', async (c, next) => {
+    if (c.req.path.startsWith('/dashboard/')) {
+      await next();
+      return;
+    }
+    return accountLimitMiddleware(c, next);
   });
 
   // -------------------------------------------------------------------------
@@ -1033,6 +1093,15 @@ export function createRouter(
       inflightBroker.publish(id, { type: 'event', event });
     };
 
+    // PAR-35 — defer concurrency release until the engine settles, since
+    // /deliberate returns 202 long before the work completes. The flag
+    // tells the rate-limit middleware to skip its `finally` release; the
+    // background block below calls `accountLimiter.release` instead.
+    const concurrencyAccountId = c.get('authAccountId');
+    if (concurrencyAccountId !== undefined) {
+      c.set('rateLimitDeferRelease', true);
+    }
+
     // Kick off the engine in the background. We deliberately do NOT
     // `await` this in the request handler — the whole point of PAR-18 is
     // that long Star Chamber-class runs don't block the POST response.
@@ -1078,6 +1147,14 @@ export function createRouter(
           error: message,
           ...(upstream !== undefined ? { upstream } : {}),
         });
+      } finally {
+        // PAR-35 — release the concurrency slot now that the deliberation
+        // is in a terminal state. Skipped for OSS pass-through (no
+        // accountId) and unlimited tiers (release is a no-op on missing
+        // state — the limiter clamps at zero).
+        if (concurrencyAccountId !== undefined) {
+          accountLimiter.release(concurrencyAccountId);
+        }
       }
     })();
 
