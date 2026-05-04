@@ -21,6 +21,7 @@ import {
 } from '@parliament/core';
 import type { ModelAdapter, DeliberationConfig } from '@parliament/core';
 import { initDb, saveDeliberation, getDeliberation } from '../db.js';
+import type { RouterVariables } from '../routes.js';
 
 // ---------------------------------------------------------------------------
 // Stubbed LLM adapter — drives agent output deterministically per role.
@@ -268,7 +269,7 @@ vi.mock('@parliament/core', async (importOriginal) => {
 const { createRouter } = await import('../routes.js');
 
 describe('REST API end-to-end (real engine + in-memory SQLite)', () => {
-  let app: Hono;
+  let app: Hono<RouterVariables>;
   let db: ReturnType<typeof initDb>;
 
   beforeEach(() => {

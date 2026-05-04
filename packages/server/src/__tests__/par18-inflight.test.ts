@@ -23,6 +23,7 @@ import type { DeliberationResult, SystemEvent, Turn } from '@parliament/core';
 import { Hono } from 'hono';
 import { initDb } from '../db.js';
 import { inflightBroker } from '../inflight.js';
+import type { RouterVariables } from '../routes.js';
 
 // ---------------------------------------------------------------------------
 // Engine mock — exposes a controllable onTurn/onEvent fan-out so each test
@@ -110,7 +111,7 @@ const { createRouter } = await import('../routes.js');
 // Fixtures
 // ---------------------------------------------------------------------------
 
-function makeApp(): { app: Hono; db: ReturnType<typeof initDb> } {
+function makeApp(): { app: Hono<RouterVariables>; db: ReturnType<typeof initDb> } {
   const db = initDb(':memory:');
   const app = createRouter(db);
   return { app, db };

@@ -63,6 +63,24 @@ export function initDb(path = 'parliament.db'): Database.Database {
     db.exec(`ALTER TABLE deliberations ADD COLUMN error TEXT`);
   }
 
+  // PAR-36 / M1 T1.5 — account scoping for the list endpoint. Pre-PAR-36
+  // rows have NULL here and are surfaced under the OSS synthetic account
+  // (`acct_oss_self_host`) by the list helper, so existing self-host
+  // installs see their full history without a one-time backfill script.
+  if (!colNames.has('account_id')) {
+    db.exec(`ALTER TABLE deliberations ADD COLUMN account_id TEXT`);
+  }
+  // Composite index drives the list endpoint's keyset pagination —
+  // `(account_id, created_at DESC, id DESC)` lets a `WHERE account_id = ?
+  // AND (created_at, id) < (?, ?)` range scan terminate at the first
+  // `LIMIT` rows without a sort. The third column on `id` makes the order
+  // deterministic when two rows share a `created_at` timestamp (sub-ms
+  // bursts hit this in tests).
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_deliberations_account_created
+       ON deliberations(account_id, created_at DESC, id DESC)`,
+  );
+
   // PAR-33: API key issuance & validation (M1 / T1.1).
   //
   // `accounts` is intentionally minimal at this milestone — it carries
@@ -224,6 +242,12 @@ export function createDeliberationRow(
      * out of scope.
      */
     sources?: readonly DeliberationSource[] | undefined;
+    /**
+     * PAR-36 — owning account for list-endpoint scoping. Optional so
+     * legacy callers (and OSS pass-through) can leave it NULL; the
+     * scoped list helper coalesces NULL to the OSS synthetic account.
+     */
+    accountId?: string | undefined;
   },
 ): void {
   const startedAt = new Date().toISOString();
@@ -240,8 +264,8 @@ export function createDeliberationRow(
   }
 
   const stmt = db.prepare(
-    `INSERT INTO deliberations (id, topic, result_json, created_at, context, status, error)
-     VALUES (?, ?, ?, ?, ?, ?, NULL)`,
+    `INSERT INTO deliberations (id, topic, result_json, created_at, context, status, error, account_id)
+     VALUES (?, ?, ?, ?, ?, ?, NULL, ?)`,
   );
   stmt.run(
     args.id,
@@ -250,6 +274,7 @@ export function createDeliberationRow(
     startedAt,
     args.context !== undefined && args.context !== '' ? args.context : null,
     'in_flight',
+    args.accountId ?? null,
   );
 }
 
@@ -393,6 +418,12 @@ export function saveDeliberation(
   id: string,
   topic: string,
   result: DeliberationResult,
+  /**
+   * PAR-36 — owning account for list scoping. Optional so legacy callers
+   * (CLI, tests pre-dating PAR-36) leave the column NULL and the OSS
+   * coalescing path picks them up.
+   */
+  accountId?: string | undefined,
 ): void {
   // Default the persisted status to `completed` so a one-shot caller's row
   // matches what the new background runner would produce.
@@ -402,8 +433,8 @@ export function saveDeliberation(
   };
 
   const stmt = db.prepare(
-    `INSERT INTO deliberations (id, topic, result_json, created_at, context, status, error)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO deliberations (id, topic, result_json, created_at, context, status, error, account_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   );
 
   stmt.run(
@@ -414,6 +445,7 @@ export function saveDeliberation(
     result.context ?? null,
     persisted.status,
     persisted.error ?? null,
+    accountId ?? null,
   );
 }
 
