@@ -63,6 +63,46 @@ export function initDb(path = 'parliament.db'): Database.Database {
     db.exec(`ALTER TABLE deliberations ADD COLUMN error TEXT`);
   }
 
+  // PAR-33: API key issuance & validation (M1 / T1.1).
+  //
+  // `accounts` is intentionally minimal at this milestone — it carries
+  // just enough state (id, tier, created_at) for an api_key to FK against
+  // a real owner. Billing/usage rows (T1.3, T2.x) attach via account_id.
+  // `tier` defaults to `'oss'` for self-host: any operator-created key
+  // belongs to a single synthetic account row whose tier is whatever
+  // the OSS deploy needs (no metering, no envelope).
+  //
+  // `api_keys` stores the argon2id hash of the secret half ONLY — the
+  // plaintext is never persisted. The `prefix` column carries the
+  // deterministic visible prefix (`pk_test_…` / `pk_live_…` plus the
+  // first 8 chars of the random secret) so the dashboard can display a
+  // recognizable handle without ever loading the secret. `revoked_at`
+  // is set-once: the route layer treats any non-NULL value as a hard
+  // permanent revoke (one-way, per AC).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS accounts (
+      id         TEXT PRIMARY KEY,
+      tier       TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )
+  `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS api_keys (
+      id            TEXT PRIMARY KEY,
+      account_id    TEXT NOT NULL REFERENCES accounts(id),
+      key_type      TEXT NOT NULL,
+      prefix        TEXT NOT NULL UNIQUE,
+      hashed_secret TEXT NOT NULL,
+      name          TEXT,
+      created_at    TEXT NOT NULL,
+      revoked_at    TEXT
+    )
+  `);
+  // Hot-path index: every authenticated request hits this lookup.
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys(prefix)`,
+  );
+
   return db;
 }
 

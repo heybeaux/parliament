@@ -15,13 +15,13 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Hono } from 'hono';
-import type { Database } from 'better-sqlite3';
 import type { TopologyConfig, TopologyPreset, UserNeurotypeConfig } from '@parliament/core';
 import {
   __resetPresetAvailabilityCache,
   __getPresetAvailabilityComputeCount,
 } from '../routes.js';
 import { DEFAULT_SERVER_CONFIG } from '../config.js';
+import { initDb } from '../db.js';
 
 // ---------------------------------------------------------------------------
 // Mock @parliament/core. The unmocked surface (BUILTIN_PRESETS,
@@ -49,12 +49,9 @@ const { createRouter } = await import('../routes.js');
 // Test fixtures — minimal stand-ins for the real router dependencies.
 // ---------------------------------------------------------------------------
 
-const stubDb = {} as Database;
-
 function makeApp(): Hono {
-  return createRouter(stubDb, {
+  return createRouter(initDb(':memory:'), {
     serverConfig: { ...DEFAULT_SERVER_CONFIG, cors_origins: ['http://localhost:5173'] },
-    apiKey: undefined,
   });
 }
 
