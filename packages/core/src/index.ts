@@ -12,8 +12,17 @@ export type {
   SentrySignal,
 } from './types.js';
 
-export type { AdapterMeta, AdapterResult, ModelAdapter } from './adapters/base.js';
-export { ModelConnectionError } from './adapters/base.js';
+export type {
+  AdapterMeta,
+  AdapterResult,
+  ModelAdapter,
+  UpstreamErrorContext,
+} from './adapters/base.js';
+export {
+  ModelConnectionError,
+  UpstreamProviderError,
+  truncateUpstreamBody,
+} from './adapters/base.js';
 export { OllamaAdapter } from './adapters/ollama.js';
 export { OpenAICompatAdapter } from './adapters/openai-compat.js';
 export { LMStudioAdapter } from './adapters/lm-studio.js';
@@ -23,6 +32,7 @@ export {
   type OpenRouterAdapterOptions,
 } from './adapters/openrouter.js';
 export { createAdapter } from './adapters/provider-factory.js';
+export { Retrying5xxAdapter } from './adapters/retry.js';
 
 export type {
   NeurotypeConfig,

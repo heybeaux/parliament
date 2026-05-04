@@ -431,6 +431,24 @@ export interface DeliberationResult {
    * lack this field; consumers must treat it as optional.
    */
   error?: string;
+  /**
+   * PAR-32 / PRD D2 — when the background runner failed because of an
+   * upstream provider error, the structured upstream context (provider,
+   * status, body, optional request id) is preserved here. Round-tripped
+   * verbatim by `GET /deliberate/:id` and forwarded onto the terminal
+   * SSE `status` event so callers see the upstream failure without
+   * having to parse the human-readable `error` string.
+   *
+   * Optional / additive — only present alongside `status: 'failed'`,
+   * and only when the failure originated from a provider HTTP error
+   * (bare connection failures still surface only via `error`).
+   */
+  upstream?: {
+    provider: string;
+    status: number;
+    body: string;
+    requestId?: string;
+  };
 }
 
 export interface Blackboard {

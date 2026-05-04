@@ -3,6 +3,8 @@ import {
   type AdapterResult,
   type ModelAdapter,
   ModelConnectionError,
+  UpstreamProviderError,
+  truncateUpstreamBody,
 } from './base.js';
 
 interface OllamaChatResponse {
@@ -59,8 +61,16 @@ export class OllamaAdapter implements ModelAdapter {
     }
 
     if (!response.ok) {
-      throw new ModelConnectionError(
+      // PAR-32 / PRD D2: preserve upstream body + status verbatim. Ollama
+      // doesn't surface a request-id header, so requestId stays absent.
+      const body = await response.text().catch(() => '');
+      throw new UpstreamProviderError(
         `Ollama request failed with status ${response.status}`,
+        {
+          provider: 'ollama',
+          status: response.status,
+          body: truncateUpstreamBody(body),
+        },
       );
     }
 

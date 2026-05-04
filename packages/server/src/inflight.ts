@@ -26,12 +26,28 @@
  *     today; if we ever shard, swap this module for a Redis pub/sub.
  */
 
-import type { DeliberationStatus, SystemEvent, Turn } from '@parliament/core';
+import type {
+  DeliberationStatus,
+  SystemEvent,
+  Turn,
+  UpstreamErrorContext,
+} from '@parliament/core';
 
 export type InflightEvent =
   | { type: 'turn'; turn: Turn }
   | { type: 'event'; event: SystemEvent }
-  | { type: 'status'; status: DeliberationStatus; error?: string };
+  | {
+      type: 'status';
+      status: DeliberationStatus;
+      error?: string;
+      /**
+       * PAR-32 / PRD D2 — when the deliberation failed because of an
+       * upstream provider error, the structured upstream context is
+       * preserved here. Forwarded onto SSE consumers verbatim so callers
+       * see provider, status, and body without parsing strings.
+       */
+      upstream?: UpstreamErrorContext;
+    };
 
 export type InflightSubscriber = (event: InflightEvent) => void;
 

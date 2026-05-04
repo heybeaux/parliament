@@ -30,12 +30,13 @@ function makeFetchError(message: string): typeof fetch {
   return vi.fn().mockRejectedValue(new Error(message));
 }
 
-function makeFetchNotOk(status: number): typeof fetch {
+function makeFetchNotOk(status: number, body = ''): typeof fetch {
   return vi.fn().mockResolvedValue({
     ok: false,
     status,
     headers: new Headers(),
     json: () => Promise.resolve({}),
+    text: () => Promise.resolve(body),
   } as unknown as Response);
 }
 

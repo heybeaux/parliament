@@ -5,6 +5,7 @@ import type {
   DeliberationStatus,
   SystemEvent,
   Turn,
+  UpstreamErrorContext,
 } from '@parliament/core';
 
 export { Database };
@@ -267,16 +268,26 @@ export function markCompleted(
  * when `runTopology()` throws in the background. The progressively-written
  * turns/events stay on the row so a client can read whatever partial
  * state existed at the time of the crash.
+ *
+ * PAR-32 / PRD D2 — when the failure originated from an upstream provider
+ * error, the caller passes structured `upstream` context which is
+ * persisted onto the result_json blob and round-tripped on
+ * `GET /deliberate/:id`. The schema needs no migration because the
+ * upstream context lives inside the existing `result_json` JSON column.
  */
 export function markFailed(
   db: Database.Database,
   id: string,
   errorMessage: string,
+  upstream?: UpstreamErrorContext,
 ): void {
   const current = readResultJson(db, id);
   if (current === null) return;
   current.status = 'failed';
   current.error = errorMessage;
+  if (upstream !== undefined) {
+    current.upstream = upstream;
+  }
   // Stamp completed_at so consumers reading partial state know when the
   // failure was observed.
   current.completed_at = new Date().toISOString();

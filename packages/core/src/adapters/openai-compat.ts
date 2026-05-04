@@ -3,6 +3,8 @@ import {
   type AdapterResult,
   type ModelAdapter,
   ModelConnectionError,
+  UpstreamProviderError,
+  truncateUpstreamBody,
 } from './base.js';
 
 interface OpenAIChatResponse {
@@ -91,8 +93,24 @@ export class OpenAICompatAdapter implements ModelAdapter {
     }
 
     if (!response.ok) {
-      throw new ModelConnectionError(
-        `OpenAI-compat request failed with status ${response.status}`,
+      // PAR-32 / PRD D2: preserve upstream context verbatim instead of
+      // flattening to a status-only string. Body is read as text (cheap; we
+      // already failed) and truncated to 4 KiB for safe persistence. The
+      // request-id header is surfaced when the provider returns one — every
+      // OpenAI-compatible provider we target uses one of two header names.
+      const body = await response.text().catch(() => '');
+      const requestId =
+        response.headers.get('x-request-id') ??
+        response.headers.get('x-generation-id') ??
+        undefined;
+      throw new UpstreamProviderError(
+        `${this.provider} request failed with status ${response.status}`,
+        {
+          provider: this.provider,
+          status: response.status,
+          body: truncateUpstreamBody(body),
+          ...(requestId !== undefined ? { requestId } : {}),
+        },
       );
     }
 
