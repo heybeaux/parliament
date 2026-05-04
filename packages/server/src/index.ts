@@ -3,9 +3,9 @@ import { dirname, resolve as resolvePath } from 'node:path';
 import { serve } from '@hono/node-server';
 import { loadConfig, DEFAULT_PARLIAMENT_DEFAULTS } from '@parliament/core';
 import { initDb } from './db.js';
-import { createRouter } from './routes.js';
+import { ADMIN_KEY_ENV_VAR, createRouter } from './routes.js';
 import { loadServerConfig, isPubliclyBound, DEFAULT_DB_PATH } from './config.js';
-import { API_KEY_ENV_VAR, API_KEY_UNSET_WARNING } from './middleware/auth.js';
+import { apiKeyCount } from './api-keys.js';
 
 function resolvePort(): number {
   if (process.env['PORT']) return parseInt(process.env['PORT'], 10);
@@ -17,11 +17,7 @@ function resolvePort(): number {
 }
 
 const serverConfig = loadServerConfig();
-const apiKey = process.env[API_KEY_ENV_VAR];
-
-if (!apiKey) {
-  console.warn(API_KEY_UNSET_WARNING);
-}
+const adminKey = process.env[ADMIN_KEY_ENV_VAR];
 
 if (
   isPubliclyBound(serverConfig.host) &&
@@ -56,7 +52,19 @@ if (!envPathPinned && dbPath === DEFAULT_DB_PATH) {
 }
 
 const db = initDb(dbPath);
-const app = createRouter(db, { serverConfig, apiKey });
+
+// PAR-33: warn when the API is exposed without any keys provisioned. An
+// empty `api_keys` table means the auth middleware passes every request
+// through (matches OSS self-host parity); calling that out at boot lets
+// operators see they're running unauthenticated.
+if (apiKeyCount(db) === 0) {
+  console.warn(
+    `Parliament: api_keys table is empty — API is unauthenticated. ` +
+      `Set ${ADMIN_KEY_ENV_VAR}=<secret> and POST to /dashboard/api/keys to provision keys.`,
+  );
+}
+
+const app = createRouter(db, { serverConfig, adminKey });
 
 const port = resolvePort();
 serve({ fetch: app.fetch, port, hostname: serverConfig.host }, (info) => {

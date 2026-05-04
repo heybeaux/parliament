@@ -1,6 +1,7 @@
+import { timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 import type { Database } from 'better-sqlite3';
@@ -35,7 +36,6 @@ import type {
   TopologyDeliberationConfig,
   TopologyStep,
   Turn,
-  UpstreamErrorContext,
 } from '@parliament/core';
 import {
   getDeliberation,
@@ -49,8 +49,16 @@ import {
 import { inflightBroker, type InflightEvent } from './inflight.js';
 import { loadServerConfig, type ServerConfig } from './config.js';
 import { corsMiddleware } from './middleware/cors.js';
-import { bearerAuth, API_KEY_ENV_VAR } from './middleware/auth.js';
+import { bearerAuth } from './middleware/auth.js';
 import { rateLimit } from './middleware/rateLimit.js';
+import { testKeyThrottle } from './middleware/keyThrottle.js';
+import {
+  createApiKey,
+  getApiKey,
+  listApiKeys,
+  OSS_ACCOUNT_ID,
+  revokeApiKey,
+} from './api-keys.js';
 
 // ---------------------------------------------------------------------------
 // Zod schemas
@@ -637,15 +645,22 @@ function getPresetAvailability(topology: TopologyConfig): {
 export interface CreateRouterOptions {
   /** Server config; defaults to loadServerConfig() at construction time. */
   serverConfig?: ServerConfig;
-  /** API key; defaults to process.env[PARLIAMENT_API_KEY] at construction time. */
-  apiKey?: string | undefined;
+  /**
+   * PAR-33 / M1 T1.1 — admin secret guarding `POST/DELETE /dashboard/api/keys`.
+   * Defaults to `process.env.PARLIAMENT_ADMIN_KEY`. When unset, the dashboard
+   * key-management endpoints return 403; the `/deliberate` surface still
+   * works for any caller whose key already exists in the DB.
+   */
+  adminKey?: string | undefined;
 }
+
+export const ADMIN_KEY_ENV_VAR = 'PARLIAMENT_ADMIN_KEY';
 
 export function createRouter(db: Database, options: CreateRouterOptions = {}): Hono {
   const app = new Hono();
   const serverConfig = options.serverConfig ?? loadServerConfig();
-  const apiKey =
-    options.apiKey !== undefined ? options.apiKey : process.env[API_KEY_ENV_VAR];
+  const adminKey =
+    options.adminKey !== undefined ? options.adminKey : process.env[ADMIN_KEY_ENV_VAR];
 
   // -------------------------------------------------------------------------
   // CORS — origin allowlist (defaults to localhost variants only).
@@ -653,9 +668,36 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
   app.use('*', corsMiddleware(serverConfig.cors_origins));
 
   // -------------------------------------------------------------------------
-  // Bearer auth — only enforced when PARLIAMENT_API_KEY is set.
+  // PAR-33 — DB-backed bearer auth. Empty `api_keys` table → unauthenticated
+  // pass-through (matches OSS self-host parity in API.md). Once any key is
+  // created, every non-OPTIONS request must carry `Authorization: Bearer pk_…`.
+  //
+  // Skipped on `/dashboard/*` because those endpoints carry their own admin
+  // secret in `Authorization: Bearer <PARLIAMENT_ADMIN_KEY>` and must remain
+  // reachable even after the first per-account key is created — otherwise
+  // the operator could lock themselves out of key management.
   // -------------------------------------------------------------------------
-  app.use('*', bearerAuth(apiKey));
+  const bearerAuthMiddleware = bearerAuth(db);
+  app.use('*', async (c, next) => {
+    if (c.req.path.startsWith('/dashboard/')) {
+      await next();
+      return;
+    }
+    return bearerAuthMiddleware(c, next);
+  });
+
+  // -------------------------------------------------------------------------
+  // PAR-33 — per-key throttle (10/min for test keys; live keys bypass).
+  // Skipped on `/dashboard/*` for the same reason as bearerAuth above.
+  // -------------------------------------------------------------------------
+  const throttleMiddleware = testKeyThrottle();
+  app.use('*', async (c, next) => {
+    if (c.req.path.startsWith('/dashboard/')) {
+      await next();
+      return;
+    }
+    return throttleMiddleware(c, next);
+  });
 
   // -------------------------------------------------------------------------
   // Per-IP rate limit on the expensive /deliberate POST path.
@@ -1276,6 +1318,154 @@ export function createRouter(db: Database, options: CreateRouterOptions = {}): H
         unsubscribe();
       }
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // PAR-33 / M1 T1.1 — Dashboard key-management endpoints.
+  //
+  // These live under `/dashboard/api/keys` so they don't collide with the
+  // user-facing `/v1/*` namespace. They're guarded by `PARLIAMENT_ADMIN_KEY`
+  // (set in env or passed via createRouter options) which is conceptually
+  // a separate authentication path from per-account bearer auth — the
+  // dashboard speaks to its own admin secret. Real dashboard auth ships
+  // with the dashboard surface (M3); for now this admin gate keeps the
+  // route safe when exposed outside localhost.
+  //
+  // Wire shape:
+  //   POST /dashboard/api/keys
+  //     body: { account_id?: string, key_type: 'test' | 'live', name?: string }
+  //     → 201 { id, key_type, prefix, name, created_at, secret }   ← secret ONCE
+  //   DELETE /dashboard/api/keys/:id
+  //     → 204 on success / first revoke; 404 if not found; 200 if already revoked
+  //   GET /dashboard/api/keys?account_id=…
+  //     → 200 { keys: [...] } without secrets, includes revoked rows
+  // -------------------------------------------------------------------------
+
+  function adminGate(c: Context): Response | undefined {
+    if (adminKey === undefined || adminKey === '') {
+      return c.json(
+        {
+          error: {
+            code: 'authentication_invalid',
+            message:
+              'Dashboard endpoints require PARLIAMENT_ADMIN_KEY to be set.',
+          },
+        },
+        403,
+      );
+    }
+    const header = c.req.header('Authorization') ?? '';
+    const match = header.match(/^Bearer\s+(.+)$/);
+    const presented = match ? match[1].trim() : '';
+    // Constant-time compare on equal-length buffers; mismatched lengths
+    // skip the compare but still reject.
+    const a = Buffer.from(presented);
+    const b = Buffer.from(adminKey);
+    const ok =
+      presented !== '' && a.length === b.length && timingSafeEqual(a, b);
+    if (!ok) {
+      return c.json(
+        {
+          error: {
+            code: 'authentication_invalid',
+            message: 'Invalid PARLIAMENT_ADMIN_KEY.',
+          },
+        },
+        403,
+      );
+    }
+    return undefined;
+  }
+
+  const CreateApiKeyBodySchema = z.object({
+    account_id: z.string().min(1).optional(),
+    key_type: z.enum(['test', 'live']),
+    name: z.string().min(1).max(120).optional(),
+  });
+
+  app.post('/dashboard/api/keys', async (c) => {
+    const denied = adminGate(c);
+    if (denied !== undefined) return denied;
+
+    let parsed: z.infer<typeof CreateApiKeyBodySchema>;
+    try {
+      parsed = CreateApiKeyBodySchema.parse(await c.req.json());
+    } catch (err) {
+      return c.json(
+        {
+          error: {
+            code: 'invalid_request',
+            message: err instanceof Error ? err.message : 'Invalid body',
+          },
+        },
+        400,
+      );
+    }
+
+    try {
+      const issued = await createApiKey(db, {
+        accountId: parsed.account_id,
+        keyType: parsed.key_type,
+        name: parsed.name,
+      });
+      return c.json(
+        {
+          id: issued.id,
+          account_id: issued.account_id,
+          key_type: issued.key_type,
+          prefix: issued.prefix,
+          name: issued.name,
+          created_at: issued.created_at,
+          // The secret is returned EXACTLY ONCE here. The persisted row
+          // stores only the argon2id hash; subsequent reads will not
+          // include `secret`.
+          secret: issued.secret,
+        },
+        201,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const code = message.startsWith('account not found')
+        ? 'invalid_request'
+        : 'internal_error';
+      const status = code === 'invalid_request' ? 400 : 500;
+      return c.json({ error: { code, message } }, status);
+    }
+  });
+
+  app.get('/dashboard/api/keys', (c) => {
+    const denied = adminGate(c);
+    if (denied !== undefined) return denied;
+    const accountId = c.req.query('account_id') ?? OSS_ACCOUNT_ID;
+    return c.json({ keys: listApiKeys(db, accountId) }, 200);
+  });
+
+  app.delete('/dashboard/api/keys/:id', (c) => {
+    const denied = adminGate(c);
+    if (denied !== undefined) return denied;
+    const id = c.req.param('id');
+    const existing = getApiKey(db, id);
+    if (existing === null) {
+      return c.json(
+        {
+          error: {
+            code: 'resource_not_found',
+            message: `Key ${id} not found.`,
+          },
+        },
+        404,
+      );
+    }
+    const revoked = revokeApiKey(db, id);
+    if (!revoked) {
+      // Already revoked. Idempotent success — return 200 with the row so
+      // the dashboard can re-render without surfacing an error.
+      return c.json(
+        { id, revoked_at: existing.revoked_at, already_revoked: true },
+        200,
+      );
+    }
+    return c.body(null, 204);
   });
 
   return app;
