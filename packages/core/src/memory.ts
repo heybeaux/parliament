@@ -83,9 +83,17 @@ export interface EngramMemoryProviderConfig {
   now?: () => Date;
 }
 
+/**
+ * Engram's recall response shape, matching the live API as of the pinned
+ * spec at integrations/engram/PIN.md. The `memories[].raw` field is the
+ * canonical content string; older Engram builds returned `content`/`text`
+ * — those are still accepted as fallbacks so a partial backend rollout
+ * doesn't break Parliament.
+ */
 interface EngramRecallResponse {
-  results?: Array<{
+  memories?: Array<{
     id?: string;
+    raw?: string;
     content?: string;
     text?: string;
     layer?: string;
@@ -93,13 +101,24 @@ interface EngramRecallResponse {
     createdAt?: string;
     created_at?: string;
   }>;
+  recallId?: string;
+  queryTokens?: number;
+  latencyMs?: number;
 }
 
 /**
- * Adapter for the Engram HTTP API. Maps `recall` → `POST /v1/memories/query`
- * and `remember` → `POST /v1/memories`. The Engram service authenticates with
- * the `x-am-agent-id` header (per-account tenant id); the optional `apiKey`
- * is forwarded as a bearer token when present.
+ * Adapter for the Engram HTTP API. Maps `recall` →
+ * `POST /v1/memories/query?agentId=<id>` and `remember` →
+ * `POST /v1/memories` with `x-am-agent-id`. Authenticates with the
+ * `X-AM-API-Key` header (per the OpenAPI spec at
+ * `integrations/engram/api-spec.json`).
+ *
+ * Contract notes (see integrations/engram/PIN.md for the full pin record):
+ * - `agentId` is a required query-string parameter on recall, NOT a header.
+ * - `X-AM-API-Key` is the auth header. Bearer auth is reserved for JWTs.
+ * - Recall response is `{ memories: [{ raw, ... }] }`, not `{ results }`.
+ * - `INSIGHT` is a runtime-valid layer even though the spec omits it; we
+ *   write deliberation outcomes to it.
  *
  * The adapter trusts the engine to call it inside a try/catch — it surfaces
  * errors verbatim so the engine can log them with the failing operation
@@ -121,7 +140,8 @@ export class EngramMemoryProvider implements MemoryProvider {
   }
 
   async recall(topic: string, opts: RecallOptions): Promise<MemoryFragment[]> {
-    const res = await this.fetchImpl(`${this.endpoint}/v1/memories/query`, {
+    const url = `${this.endpoint}/v1/memories/query?agentId=${encodeURIComponent(opts.agentId)}`;
+    const res = await this.fetchImpl(url, {
       method: 'POST',
       headers: this.buildHeaders(opts.agentId),
       body: JSON.stringify({
@@ -136,19 +156,19 @@ export class EngramMemoryProvider implements MemoryProvider {
     }
 
     const body = (await res.json()) as EngramRecallResponse;
-    const results = body.results ?? [];
-    return results
-      .filter((r) => typeof (r.content ?? r.text) === 'string')
-      .map((r) => ({
-        id: typeof r.id === 'string' ? r.id : '',
-        content: (r.content ?? r.text ?? '').trim(),
-        layer: this.normalizeLayer(r.layer),
-        score: typeof r.score === 'number' ? r.score : 0,
+    const memories = body.memories ?? [];
+    return memories
+      .filter((m) => typeof (m.raw ?? m.content ?? m.text) === 'string')
+      .map((m) => ({
+        id: typeof m.id === 'string' ? m.id : '',
+        content: (m.raw ?? m.content ?? m.text ?? '').trim(),
+        layer: this.normalizeLayer(m.layer),
+        score: typeof m.score === 'number' ? m.score : 0,
         createdAt:
-          typeof r.createdAt === 'string'
-            ? r.createdAt
-            : typeof r.created_at === 'string'
-              ? r.created_at
+          typeof m.createdAt === 'string'
+            ? m.createdAt
+            : typeof m.created_at === 'string'
+              ? m.created_at
               : this.now().toISOString(),
       }));
   }
@@ -159,8 +179,9 @@ export class EngramMemoryProvider implements MemoryProvider {
       method: 'POST',
       headers: this.buildHeaders(opts.agentId),
       body: JSON.stringify({
-        content: summary,
+        raw: summary,
         layer: 'INSIGHT',
+        source: 'AGENT_REFLECTION',
         metadata: {
           source: 'parliament',
           topic: outcome.topic,
@@ -183,7 +204,7 @@ export class EngramMemoryProvider implements MemoryProvider {
       'x-am-agent-id': agentId,
     };
     if (this.apiKey !== undefined && this.apiKey.length > 0) {
-      headers.authorization = `Bearer ${this.apiKey}`;
+      headers['x-am-api-key'] = this.apiKey;
     }
     return headers;
   }

@@ -243,13 +243,13 @@ function fakeFetch(response: { ok?: boolean; status?: number; body?: unknown }):
 }
 
 describe('EngramMemoryProvider.recall', () => {
-  it('POSTs to /v1/memories/query with topic, limit, layers and tenant header', async () => {
+  it('POSTs to /v1/memories/query?agentId=<id> with X-AM-API-Key auth and memories[].raw response', async () => {
     const { fn, calls } = fakeFetch({
       body: {
-        results: [
+        memories: [
           {
             id: 'mem-1',
-            content: 'A past decision.',
+            raw: 'A past decision.',
             layer: 'INSIGHT',
             score: 0.91,
             createdAt: '2026-04-01T12:00:00.000Z',
@@ -266,12 +266,18 @@ describe('EngramMemoryProvider.recall', () => {
     const fragments = await provider.recall('Should we ship?', { limit: 5, agentId: 'agent-42' });
 
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.url).toBe('https://engram.example.com/v1/memories/query');
+    // agentId is a query-string param per Engram's OpenAPI contract,
+    // not the x-am-agent-id header (which the recall route ignores).
+    expect(calls[0]!.url).toBe(
+      'https://engram.example.com/v1/memories/query?agentId=agent-42',
+    );
     expect(calls[0]!.init.method).toBe('POST');
     const headers = calls[0]!.init.headers as Record<string, string>;
     expect(headers['content-type']).toBe('application/json');
     expect(headers['x-am-agent-id']).toBe('agent-42');
-    expect(headers.authorization).toBe('Bearer secret-token');
+    // Auth is X-AM-API-Key, not Authorization: Bearer (Bearer is JWT-only).
+    expect(headers['x-am-api-key']).toBe('secret-token');
+    expect(headers.authorization).toBeUndefined();
     const body = JSON.parse(calls[0]!.init.body as string);
     expect(body).toEqual({
       query: 'Should we ship?',
@@ -290,8 +296,8 @@ describe('EngramMemoryProvider.recall', () => {
     ]);
   });
 
-  it('honours a custom layers list and omits the auth header when no apiKey set', async () => {
-    const { fn, calls } = fakeFetch({ body: { results: [] } });
+  it('honours a custom layers list and omits the api-key header when no apiKey set', async () => {
+    const { fn, calls } = fakeFetch({ body: { memories: [] } });
     const provider = new EngramMemoryProvider({
       endpoint: 'https://engram.example.com',
       layers: ['IDENTITY', 'TASK'],
@@ -301,18 +307,20 @@ describe('EngramMemoryProvider.recall', () => {
     await provider.recall('topic', { limit: 3, agentId: 'a' });
 
     const headers = calls[0]!.init.headers as Record<string, string>;
+    expect(headers['x-am-api-key']).toBeUndefined();
     expect(headers.authorization).toBeUndefined();
     const body = JSON.parse(calls[0]!.init.body as string);
     expect(body.layers).toEqual(['IDENTITY', 'TASK']);
   });
 
-  it('falls back to text/created_at when content/createdAt are missing', async () => {
+  it('falls back to content/text/created_at when raw/createdAt are missing', async () => {
     const { fn } = fakeFetch({
       body: {
-        results: [
+        memories: [
           {
             id: 'mem-2',
-            text: '   spaced prose   ',
+            // No `raw` — should fall back to `content`, then `text`.
+            content: '   spaced prose   ',
             layer: 'unknown-layer',
             score: 0.4,
             created_at: '2026-03-15T00:00:00.000Z',
@@ -342,18 +350,30 @@ describe('EngramMemoryProvider.recall', () => {
   });
 
   it('strips a single trailing slash from the endpoint', async () => {
-    const { fn, calls } = fakeFetch({ body: { results: [] } });
+    const { fn, calls } = fakeFetch({ body: { memories: [] } });
     const provider = new EngramMemoryProvider({
       endpoint: 'https://engram.example.com/',
       fetchImpl: fn,
     });
     await provider.recall('t', { limit: 1, agentId: 'a' });
-    expect(calls[0]!.url).toBe('https://engram.example.com/v1/memories/query');
+    expect(calls[0]!.url).toBe('https://engram.example.com/v1/memories/query?agentId=a');
+  });
+
+  it('URL-encodes agentIds with special characters', async () => {
+    const { fn, calls } = fakeFetch({ body: { memories: [] } });
+    const provider = new EngramMemoryProvider({
+      endpoint: 'https://engram.example.com',
+      fetchImpl: fn,
+    });
+    await provider.recall('t', { limit: 1, agentId: 'tenant a/b' });
+    expect(calls[0]!.url).toBe(
+      'https://engram.example.com/v1/memories/query?agentId=tenant%20a%2Fb',
+    );
   });
 });
 
 describe('EngramMemoryProvider.remember', () => {
-  it('POSTs to /v1/memories with the formatted summary + structured metadata', async () => {
+  it('POSTs to /v1/memories with raw + layer + source + structured metadata and X-AM-API-Key', async () => {
     const { fn, calls } = fakeFetch({ body: {} });
     const provider = new EngramMemoryProvider({
       endpoint: 'https://engram.example.com',
@@ -376,11 +396,17 @@ describe('EngramMemoryProvider.remember', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toBe('https://engram.example.com/v1/memories');
     expect(calls[0]!.init.method).toBe('POST');
+    const headers = calls[0]!.init.headers as Record<string, string>;
+    expect(headers['x-am-api-key']).toBe('t');
+    expect(headers['x-am-agent-id']).toBe('agent-7');
     const body = JSON.parse(calls[0]!.init.body as string);
     expect(body.layer).toBe('INSIGHT');
-    expect(body.content).toContain('Topic: X?');
-    expect(body.content).toContain('Outcome: consensus after 2 rounds (residue 0.10)');
-    expect(body.content).toContain('Synthesis: Yes.');
+    expect(body.source).toBe('AGENT_REFLECTION');
+    // Engram's CreateMemoryDto uses `raw`; `content` is documented as a
+    // back-compat alias but `raw` is canonical.
+    expect(body.raw).toContain('Topic: X?');
+    expect(body.raw).toContain('Outcome: consensus after 2 rounds (residue 0.10)');
+    expect(body.raw).toContain('Synthesis: Yes.');
     expect(body.metadata).toEqual({
       source: 'parliament',
       topic: 'X?',
