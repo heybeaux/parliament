@@ -14,7 +14,13 @@ server_port = 3000
 provider = "engram"
 endpoint = "http://localhost:3002"
 api_key = "eng_kit_local_dev_2026"
-agent_id = "parliament-bench"
+# The local dev key is bound to the "bench_agent_local" agent in Engram; the
+# server-side identity wins on writes regardless of what we send in the
+# query string / x-am-agent-id header. Keeping config and reality aligned
+# avoids confusion when reading the persisted records back. See PAR-44 for
+# provisioning a dedicated parliament-bench agent + key for multi-tenant
+# isolation testing in Tier 2.
+agent_id = "bench_agent_local"
 recall_limit = 5
 layers = ["INSIGHT", "PROJECT"]
 
