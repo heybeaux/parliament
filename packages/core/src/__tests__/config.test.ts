@@ -120,14 +120,39 @@ system_prompt = "Missing model field."
     expect(() => loadConfig(path)).toThrow(/missing a string "model" field/);
   });
 
-  it('throws when a neurotype is missing the system_prompt field', () => {
+  // PAR-40 — `system_prompt` is now optional. Built-in agents fall back to
+  // the SYSTEM_PROMPT constant in their class file when the config omits it,
+  // letting bench/test configs lean on the OSS defaults (which carry the
+  // memory-engagement and memory-continuity clauses) without copy-pasting
+  // the whole prompt block.
+  it('accepts a neurotype that omits system_prompt (falls back to built-in default at runtime)', () => {
+    const bench = `
+[neurotypes.skeptic]
+model = "qwen3.5:latest"
+provider = "ollama"
+`;
+    const path = writeTempToml(tmpDir, bench);
+    const cfg = loadConfig(path);
+    expect(cfg.neurotypes['skeptic']).toEqual({
+      model: 'qwen3.5:latest',
+      provider: 'ollama',
+    });
+    // Crucially: no `system_prompt` key materialised on the parsed config —
+    // downstream `buildAgentsFromConfig` reads the absence and skips wiring
+    // an explicit override on AgentDefinition.systemPrompt, leaving the
+    // agent's class-level SYSTEM_PROMPT constant in effect.
+    expect(cfg.neurotypes['skeptic']).not.toHaveProperty('system_prompt');
+  });
+
+  it('still rejects a neurotype that supplies a non-string system_prompt', () => {
     const bad = `
 [neurotypes.proposer]
 model = "llama3.2"
+system_prompt = 42
 `;
     const path = writeTempToml(tmpDir, bad);
     expect(() => loadConfig(path)).toThrow(
-      /missing a string "system_prompt" field/,
+      /non-string "system_prompt" field/,
     );
   });
 

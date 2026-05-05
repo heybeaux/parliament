@@ -68,14 +68,21 @@ export interface TopologyPreset {
 /**
  * A user-defined neurotype declaration (`[neurotypes.<id>]`).
  *
- * Per the topology spec, `model` and `system_prompt` are required; everything
- * else is optional with documented defaults.
+ * `model` is always required. `system_prompt` is required for *user-defined*
+ * neurotypes (no class default exists for them) but optional for built-in
+ * neurotypes — those fall back to the SYSTEM_PROMPT constant in their
+ * `agents/<id>.ts` file when omitted (PAR-40). The loader enforces this
+ * split: presence is checked only when `isBuiltinNeurotype(id)` is false.
  */
 export interface UserNeurotypeConfig {
   /** Model adapter identifier — passed to the adapter factory at runtime. */
   model: string;
-  /** Posture-defining system prompt. */
-  system_prompt: string;
+  /**
+   * Posture-defining system prompt. Required for user-defined neurotype
+   * IDs; optional for built-in IDs (the agent class supplies a default at
+   * runtime when this field is absent).
+   */
+  system_prompt?: string;
   /** Optional human-readable description. */
   description?: string;
   /**

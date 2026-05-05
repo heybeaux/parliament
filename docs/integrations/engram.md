@@ -102,6 +102,28 @@ auth context overrides this default. See
    to match the new contract — but remember, the mocks aren't authoritative,
    the integration test is.
 
+## Neurotype / memory contract
+
+Recall is plumbing; *interrogation of recalled context* is what makes memory
+useful. Each neurotype has a defined relationship to the `## Memory` block
+the engine injects on the blackboard before round 1:
+
+| Neurotype | Relationship to `## Memory` | Encoded in |
+|---|---|---|
+| **Proposer** | Memory-blind by design — first-mover, no need to interrogate the past | default prompt (no memory clause) |
+| **Skeptic** | Engages explicitly: challenge stale entries, note relevant context, or flag if a prior decision shouldn't influence the current debate | `packages/core/src/agents/skeptic.ts` SYSTEM_PROMPT |
+| **Synthesizer** | Makes the relationship explicit: notes whether the current synthesis is *consistent with*, *refines*, or *overrides* the prior decision | `packages/core/src/agents/synthesizer.ts` SYSTEM_PROMPT |
+| **RedAgent** | May target a stale prior decision as the weakest assumption (no explicit prompt clause; the disruptor brief is general enough) | default prompt |
+| **Sentry** | Memory-blind — its job is structural collapse detection, not memory | not applicable (no model adapter call) |
+
+Memory is **context, not constraint** — a recalled past decision can be
+superseded if the current debate warrants it. The Skeptic and Synthesizer
+clauses are deliberately worded to grant that latitude rather than treat
+recalled outcomes as ground truth.
+
+If you add a new neurotype, decide its memory contract during the prompt
+design phase. Add a row to this table when you do.
+
 ## Anti-patterns to avoid
 
 - **Don't** add a second mocked test that asserts the new contract without

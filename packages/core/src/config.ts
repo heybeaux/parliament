@@ -14,7 +14,19 @@ import {
 
 export interface NeurotypeConfig {
   model: string;
-  system_prompt: string;
+  /**
+   * Optional system prompt override. Built-in neurotypes (Proposer, Skeptic,
+   * Synthesizer, RedAgent, etc.) ship with a default prompt baked into the
+   * agent class — when this field is omitted, the built-in default is used
+   * at runtime. User-defined neurotypes in topology presets MUST supply a
+   * system_prompt (the topology loader enforces that separately) because no
+   * default exists for them.
+   *
+   * PAR-40 — making this optional lets configs lean on the OSS default
+   * Skeptic / Synthesizer prompts (which now carry memory-engagement and
+   * memory-continuity clauses) without copy-pasting the whole prompt block.
+   */
+  system_prompt?: string;
   /** Provider override for this neurotype: 'ollama' | 'lm_studio' | 'omlx'. Inherits global default if omitted. */
   provider?: string;
   /**
@@ -254,15 +266,24 @@ function validateConfig(raw: unknown, configPath: string): ParliamentTomlConfig 
         `Parliament: neurotype "${role}" is missing a string "model" field`,
       );
     }
-    if (typeof entry['system_prompt'] !== 'string') {
+    // PAR-40 — `system_prompt` is now optional. When omitted, built-in
+    // agents fall back to the SYSTEM_PROMPT constant in their class file.
+    // Validate the type only when the field is present — a non-string here
+    // is still a misconfiguration we want to surface loudly.
+    if (
+      entry['system_prompt'] !== undefined &&
+      typeof entry['system_prompt'] !== 'string'
+    ) {
       throw new Error(
-        `Parliament: neurotype "${role}" is missing a string "system_prompt" field`,
+        `Parliament: neurotype "${role}" has a non-string "system_prompt" field`,
       );
     }
 
     neurotypes[role] = {
       model: entry['model'],
-      system_prompt: entry['system_prompt'],
+      ...(typeof entry['system_prompt'] === 'string'
+        ? { system_prompt: entry['system_prompt'] }
+        : {}),
       ...(typeof entry['provider'] === 'string' ? { provider: entry['provider'] } : {}),
       // PAR-25 — opt-in failover. `fallback_provider` is the trigger; when
       // absent every other failover branch is skipped. `fallback_model` is
@@ -481,7 +502,12 @@ export function buildAgentsFromConfig(
       neurotype: role,
       model: neurotype.model,
       adapter: adapterFactory(neurotype.model, neurotype.provider),
-      systemPrompt: neurotype.system_prompt,
+      // PAR-40 — `system_prompt` is now optional in the TOML config; only
+      // surface it when supplied so AgentDefinition.systemPrompt stays
+      // strictly `string | undefined` (not the empty string).
+      ...(neurotype.system_prompt !== undefined
+        ? { systemPrompt: neurotype.system_prompt }
+        : {}),
     };
   });
 }

@@ -3,7 +3,9 @@ import type { ModelAdapter } from '../../adapters/base.js';
 import {
   BUILTIN_AGENT_REGISTRY,
   BUILTIN_AGENT_IDS,
+  STRUCTURAL_BUILTIN_NEUROTYPES,
   createBuiltinAgent,
+  hasBuiltinDefaultPrompt,
   isBuiltinNeurotype,
 } from '../registry.js';
 
@@ -52,6 +54,20 @@ describe('built-in agent registry', () => {
   it('createBuiltinAgent throws on unknown IDs and lists the known ones', () => {
     expect(() => createBuiltinAgent('nope', makeAdapter())).toThrow(/Unknown built-in neurotype "nope"/);
     expect(() => createBuiltinAgent('nope', makeAdapter())).toThrow(/historian/);
+  });
+
+  // PAR-40 — `hasBuiltinDefaultPrompt` is the gate that decides whether a
+  // `[neurotypes.<id>]` block may omit `system_prompt`. Structural
+  // infrastructure (synthesizer/redAgent/sentry) lives outside
+  // BUILTIN_AGENT_REGISTRY but ships class-level SYSTEM_PROMPT constants and
+  // so MUST be allowed to omit the override.
+  it('hasBuiltinDefaultPrompt accepts both registry built-ins and structural built-ins', () => {
+    expect(hasBuiltinDefaultPrompt('skeptic')).toBe(true);
+    expect(hasBuiltinDefaultPrompt('proposer')).toBe(true);
+    for (const id of STRUCTURAL_BUILTIN_NEUROTYPES) {
+      expect(hasBuiltinDefaultPrompt(id)).toBe(true);
+    }
+    expect(hasBuiltinDefaultPrompt('user-defined-thing')).toBe(false);
   });
 
   it('every Stage 1 agent reports its neurotype ID matching its registry key', () => {
