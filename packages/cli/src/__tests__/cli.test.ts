@@ -172,6 +172,7 @@ vi.mock('@parliament/core', () => {
       neurotype: ntId,
     })),
     buildAgentsFromConfig: vi.fn().mockReturnValue([]),
+    buildMemoryProvider: vi.fn().mockReturnValue(undefined),
     createAdapter: vi.fn().mockReturnValue({}),
     DeliberationEngine: vi.fn().mockImplementation(() => ({
       run: mockRun,
