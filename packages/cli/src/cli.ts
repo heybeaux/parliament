@@ -29,6 +29,7 @@ import {
   TopologyValidationError,
   isBuiltinNeurotype,
   createBuiltinAgent,
+  buildMemoryProvider,
   DEFAULT_PARLIAMENT_DEFAULTS,
 } from '@parliament/core';
 import type {
@@ -230,6 +231,25 @@ async function runDeliberate(topic: string, opts: DeliberateOptions): Promise<vo
 
   const engine = new DeliberationEngine();
 
+  // PAR-38 follow-up: mirror the server's `buildTopologyDeliberationConfig`
+  // memory wiring. Without this the CLI parses `[memory]` from parliament.toml
+  // but never constructs a provider, so recall/remember silently no-op even
+  // when the user has Engram configured. Build the provider here so both the
+  // topology and legacy paths receive it consistently.
+  const memoryConfig = cfg.memory ?? { provider: 'none' as const };
+  const memoryProvider = buildMemoryProvider(memoryConfig);
+  const memoryAgentId = memoryConfig.agent_id;
+  const memoryOpts =
+    memoryProvider !== undefined && memoryAgentId !== undefined
+      ? {
+          memoryProvider,
+          memoryAgentId,
+          ...(memoryConfig.recall_limit !== undefined
+            ? { memoryRecallLimit: memoryConfig.recall_limit }
+            : {}),
+        }
+      : {};
+
   // Load the topology config once; we need it both to know the active preset
   // (so we can stay on the legacy path when it's "debate" and no override was
   // supplied) and to feed `runTopology` when we route through topology mode.
@@ -291,6 +311,7 @@ async function runDeliberate(topic: string, opts: DeliberateOptions): Promise<vo
       ...(context !== undefined ? { context } : {}),
       ...(sources !== undefined ? { sources } : {}),
       ...(maxSourceWords !== undefined ? { maxSourceWords } : {}),
+      ...memoryOpts,
     });
   } else {
     // Legacy 5-agent path — preserved byte-identically for the default Debate
@@ -313,6 +334,7 @@ async function runDeliberate(topic: string, opts: DeliberateOptions): Promise<vo
       ...(context !== undefined ? { context } : {}),
       ...(sources !== undefined ? { sources } : {}),
       ...(maxSourceWords !== undefined ? { maxSourceWords } : {}),
+      ...memoryOpts,
     });
   }
 
