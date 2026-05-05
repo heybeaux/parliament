@@ -229,11 +229,24 @@ export class EngramMemoryProvider implements MemoryProvider {
  * Formats a deliberation outcome into the prose body Engram stores. The
  * `metadata` field carries the structured fields; the `content` is the
  * human-readable summary that future `recall()` calls match against.
+ *
+ * Past-tense, plain-English framing matters here. PAR-43 surfaced that the
+ * earlier status-line format ("max_rounds after 2 rounds (residue 1.00)")
+ * read like a *system invariant on the current run* to the Skeptic agent —
+ * it called the new deliberation "logically invalid within the system
+ * state" because it confused a historical termination reason for a live
+ * procedural cap. The prose below tells the agent what *happened* (past),
+ * not what *is* (present), and translates the enum + numeric residue into
+ * language the agent reads as context rather than constraint.
  */
 export function formatOutcomeForMemory(outcome: MemoryOutcome): string {
   const lines = [
     `Topic: ${outcome.topic}`,
-    `Outcome: ${outcome.terminationReason} after ${outcome.totalRounds} round${outcome.totalRounds === 1 ? '' : 's'} (residue ${outcome.residueScore.toFixed(2)})`,
+    `Previously deliberated: ${describeTerminationOutcome(
+      outcome.terminationReason,
+      outcome.totalRounds,
+      outcome.residueScore,
+    )}`,
   ];
   if (outcome.synthesis !== null && outcome.synthesis.trim().length > 0) {
     lines.push(`Synthesis: ${outcome.synthesis.trim()}`);
@@ -242,6 +255,45 @@ export function formatOutcomeForMemory(outcome: MemoryOutcome): string {
     lines.push(`Participants: ${outcome.agents.join(', ')}`);
   }
   return lines.join('\n');
+}
+
+/**
+ * Maps a `MemoryOutcome.terminationReason` + round count + residue score to
+ * a single past-tense sentence describing what happened in the prior debate.
+ * Unrecognized termination reasons fall through to a generic "ended" phrasing
+ * so the agent still sees coherent prose if the enum grows.
+ */
+function describeTerminationOutcome(
+  terminationReason: string,
+  totalRounds: number,
+  residueScore: number,
+): string {
+  const roundWord = totalRounds === 1 ? 'round' : 'rounds';
+  const residueQualifier = describeResidue(residueScore);
+  switch (terminationReason) {
+    case 'consensus':
+      return `the agents reached consensus after ${totalRounds} ${roundWord}${residueQualifier}.`;
+    case 'max_rounds':
+      return `the debate ended without consensus after ${totalRounds} ${roundWord} (the round budget was reached)${residueQualifier}.`;
+    case 'echo_loop':
+      return `the debate was halted after ${totalRounds} ${roundWord} because the agents had begun looping without making progress${residueQualifier}.`;
+    case 'red_agent_triggered':
+      return `a red-agent intervention was triggered after ${totalRounds} ${roundWord} to break premature convergence${residueQualifier}.`;
+    default:
+      return `the debate ended (reason: ${terminationReason}) after ${totalRounds} ${roundWord}${residueQualifier}.`;
+  }
+}
+
+/**
+ * Translates the numeric residue score into qualitative language the agent
+ * doesn't have to interpret. The prefix is empty for "" (no qualifier
+ * worth adding) — keep the overall sentence terse when residue is ambiguous.
+ */
+function describeResidue(residueScore: number): string {
+  if (residueScore <= 0.2) return ' — the agents largely agreed';
+  if (residueScore <= 0.5) return ' — significant points were resolved but some tensions remained';
+  if (residueScore < 1) return ' — most points remained contested';
+  return ' — the positions could not be reconciled';
 }
 
 /**
