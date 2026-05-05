@@ -110,7 +110,7 @@ describe('formatMemoryFragments', () => {
 });
 
 describe('formatOutcomeForMemory', () => {
-  it('emits Topic / Outcome / Synthesis / Participants in the canonical shape', () => {
+  it('emits Topic / Previously deliberated / Synthesis / Participants in the canonical shape', () => {
     const outcome: MemoryOutcome = {
       topic: 'Should we adopt Engram?',
       terminationReason: 'consensus',
@@ -121,9 +121,89 @@ describe('formatOutcomeForMemory', () => {
     };
     const out = formatOutcomeForMemory(outcome);
     expect(out).toContain('Topic: Should we adopt Engram?');
-    expect(out).toContain('Outcome: consensus after 3 rounds (residue 0.12)');
+    expect(out).toContain(
+      'Previously deliberated: the agents reached consensus after 3 rounds — the agents largely agreed.',
+    );
     expect(out).toContain('Synthesis: Adopt Engram for INSIGHT-layer recall in Phase 1.');
     expect(out).toContain('Participants: Proposer, Skeptic, Synthesizer');
+  });
+
+  // PAR-43: the prior format ("max_rounds after N rounds (residue X)") read
+  // like a system invariant; the Skeptic interpreted it as a live procedural
+  // cap on the current run. Past-tense framing + plain-English mapping of
+  // the termination reason is the fix. These assertions guard the framing.
+  it('frames the outcome in past tense (no enum strings, no system-state phrasing)', () => {
+    const out = formatOutcomeForMemory({
+      topic: 'X',
+      terminationReason: 'max_rounds',
+      synthesis: null,
+      residueScore: 1,
+      totalRounds: 2,
+      agents: ['Proposer', 'Skeptic'],
+    });
+    // Should NOT surface raw enum values to the LLM — those read as system flags.
+    expect(out).not.toMatch(/Outcome: max_rounds/);
+    expect(out).not.toMatch(/\bmax_rounds\b/);
+    // Should NOT surface raw residue numbers — those read as live metrics.
+    expect(out).not.toMatch(/residue \d/);
+    // Should be unmistakably past-tense and historical.
+    expect(out).toContain('Previously deliberated:');
+    expect(out).toContain('the debate ended without consensus');
+    expect(out).toContain('the round budget was reached');
+    expect(out).toContain('the positions could not be reconciled');
+  });
+
+  it('describes consensus termination', () => {
+    const out = formatOutcomeForMemory({
+      topic: 'X',
+      terminationReason: 'consensus',
+      synthesis: null,
+      residueScore: 0.05,
+      totalRounds: 2,
+      agents: ['Proposer'],
+    });
+    expect(out).toContain('the agents reached consensus after 2 rounds');
+    expect(out).toContain('the agents largely agreed');
+  });
+
+  it('describes echo_loop termination', () => {
+    const out = formatOutcomeForMemory({
+      topic: 'X',
+      terminationReason: 'echo_loop',
+      synthesis: null,
+      residueScore: 0.3,
+      totalRounds: 4,
+      agents: ['Proposer'],
+    });
+    expect(out).toContain('the debate was halted');
+    expect(out).toContain('looping without making progress');
+    expect(out).toContain('significant points were resolved but some tensions remained');
+  });
+
+  it('describes red_agent_triggered termination', () => {
+    const out = formatOutcomeForMemory({
+      topic: 'X',
+      terminationReason: 'red_agent_triggered',
+      synthesis: null,
+      residueScore: 0.7,
+      totalRounds: 3,
+      agents: ['Proposer'],
+    });
+    expect(out).toContain('red-agent intervention was triggered');
+    expect(out).toContain('break premature convergence');
+    expect(out).toContain('most points remained contested');
+  });
+
+  it('falls through to generic phrasing for unknown termination reasons', () => {
+    const out = formatOutcomeForMemory({
+      topic: 'X',
+      terminationReason: 'some_future_reason',
+      synthesis: null,
+      residueScore: 0.4,
+      totalRounds: 2,
+      agents: ['Proposer'],
+    });
+    expect(out).toContain('the debate ended (reason: some_future_reason)');
   });
 
   it('uses singular "round" for totalRounds === 1', () => {
@@ -135,7 +215,7 @@ describe('formatOutcomeForMemory', () => {
       totalRounds: 1,
       agents: ['Proposer'],
     });
-    expect(out).toContain('after 1 round (residue 0.50)');
+    expect(out).toContain('after 1 round');
     expect(out).not.toContain('after 1 rounds');
   });
 
@@ -405,7 +485,9 @@ describe('EngramMemoryProvider.remember', () => {
     // Engram's CreateMemoryDto uses `raw`; `content` is documented as a
     // back-compat alias but `raw` is canonical.
     expect(body.raw).toContain('Topic: X?');
-    expect(body.raw).toContain('Outcome: consensus after 2 rounds (residue 0.10)');
+    expect(body.raw).toContain(
+      'Previously deliberated: the agents reached consensus after 2 rounds — the agents largely agreed.',
+    );
     expect(body.raw).toContain('Synthesis: Yes.');
     expect(body.metadata).toEqual({
       source: 'parliament',
