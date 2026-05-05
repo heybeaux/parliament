@@ -93,9 +93,42 @@ export const BUILTIN_AGENT_IDS: readonly string[] = Object.freeze(
   Object.keys(BUILTIN_AGENT_REGISTRY),
 );
 
-/** True when `id` resolves to a built-in neurotype factory. */
+/**
+ * Structural-infrastructure neurotypes — wired by the engine on every run
+ * (synthesizer summarizes; redAgent injects on cadence; sentry monitors
+ * out-of-band). They are NOT registered in `BUILTIN_AGENT_REGISTRY` because
+ * they cannot appear as preset steps, but they DO ship class-level
+ * `SYSTEM_PROMPT` constants in `agents/<id>.ts` and so may legitimately omit
+ * `system_prompt` in `[neurotypes.<id>]` blocks (the runtime falls back to
+ * the class default — same contract as the registry built-ins for PAR-40).
+ */
+export const STRUCTURAL_BUILTIN_NEUROTYPES: ReadonlySet<string> = new Set([
+  'synthesizer',
+  'redAgent',
+  'sentry',
+]);
+
+/**
+ * True when `id` resolves to a built-in neurotype factory.
+ *
+ * NOTE: this returns false for structural-infrastructure neurotypes
+ * (`synthesizer`, `redAgent`, `sentry`) — they aren't steppable, so callers
+ * doing step-validation correctly reject them. Callers that need to know
+ * "does this ID have a class-level default prompt?" (e.g. config-loader
+ * `system_prompt`-optional gating) should use `hasBuiltinDefaultPrompt`.
+ */
 export function isBuiltinNeurotype(id: string): boolean {
   return Object.prototype.hasOwnProperty.call(BUILTIN_AGENT_REGISTRY, id);
+}
+
+/**
+ * True when `id` is any built-in neurotype that ships a class-level default
+ * `SYSTEM_PROMPT` — registry built-ins (proposer, skeptic, …) plus structural
+ * built-ins (synthesizer, redAgent, sentry). Used by config loaders to decide
+ * whether `system_prompt` may be omitted in a `[neurotypes.<id>]` block.
+ */
+export function hasBuiltinDefaultPrompt(id: string): boolean {
+  return isBuiltinNeurotype(id) || STRUCTURAL_BUILTIN_NEUROTYPES.has(id);
 }
 
 /**

@@ -258,6 +258,42 @@ describe('SkepticAgent', () => {
     expect(board.conflicts[0]!.between).toContain('Skeptic');
     expect(board.conflicts[0]!.between).toContain('Proposer');
   });
+
+  // PAR-40 — recall plumbing only pays off if the Skeptic actually engages
+  // with the recalled block. These tests pin two contracts:
+  //   1. The default system prompt instructs the model to engage with
+  //      `## Memory` (so OSS consumers don't have to override per-config).
+  //   2. When `blackboard.memory` is populated, the user prompt rendering
+  //      includes the Memory block under its stable heading — i.e. the
+  //      Skeptic actually *sees* what it was instructed to engage with.
+  // The bench-side override added in `parliament.bench.toml` for Tier 1
+  // smoke testing was the workaround; this default makes it unnecessary.
+  it('default system prompt instructs the model to engage with the `## Memory` block', async () => {
+    const memoryAdapter = makeAdapter('Some response.');
+    const agent = new SkepticAgent(memoryAdapter);
+    await agent.generate(makeBlackboard());
+
+    const [, systemArg] = (memoryAdapter.generate as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(systemArg).toMatch(/## Memory/);
+    expect(systemArg).toMatch(/past decisions/i);
+    // The clause should explicitly grant the Skeptic permission to challenge
+    // stale entries — that's the role-fit reason for memory-awareness.
+    expect(systemArg).toMatch(/challenge\s+stale/i);
+  });
+
+  it('renders blackboard.memory under the `## Memory` heading in the user prompt', async () => {
+    const memoryAdapter = makeAdapter('Some response.');
+    const agent = new SkepticAgent(memoryAdapter);
+    const board = makeBlackboard({
+      memory:
+        '1 related past decision:\n- 2026-04-22: Previously deliberated: the agents reached consensus.',
+    });
+    await agent.generate(board);
+
+    const [userPrompt] = (memoryAdapter.generate as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(userPrompt).toContain('## Memory');
+    expect(userPrompt).toContain('Previously deliberated:');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -420,6 +456,25 @@ describe('SynthesizerAgent', () => {
     expect(userPrompt).toContain('Core disagreement');
     // Reinforcement appended at the end of the user prompt.
     expect(userPrompt).toMatch(/Output only the JSON object, no other text\.\s*$/);
+  });
+
+  // PAR-40 — the Synthesizer needs to reason explicitly about whether its
+  // synthesis is consistent-with / refines / overrides any recalled past
+  // decision. Without that clause the synthesis silently overwrites prior
+  // conclusions and recall reads as a disconnected sequence of summaries.
+  // The strict JSON output contract is preserved alongside the new clause.
+  it('default system prompt asks for memory continuity (consistent-with / overrides) when `## Memory` is present', async () => {
+    const adapter = makeAdapter(jsonPayload());
+    const agent = new SynthesizerAgent(adapter);
+    await agent.generate(makeBlackboard());
+
+    const [, systemArg] = (adapter.generate as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(systemArg).toMatch(/## Memory/);
+    expect(systemArg).toMatch(/consistent\s+with/i);
+    expect(systemArg).toMatch(/overrides/i);
+    // The strict JSON-only contract is preserved — adding the clause must
+    // not regress the structured-output guarantee the engine depends on.
+    expect(systemArg).toMatch(/MUST output ONLY a single JSON object/);
   });
 });
 

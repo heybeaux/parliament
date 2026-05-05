@@ -288,6 +288,59 @@ model = "qwen3:8b"
       /system_prompt/,
     );
   });
+
+  // PAR-40 — built-in neurotypes (proposer, skeptic, synthesizer, …) may
+  // omit `system_prompt`; the agent class default is used at runtime. This
+  // is the "lean on the OSS default Skeptic prompt" path the bench config
+  // exercises after PAR-40 ports the memory-engagement clause into the
+  // class-level SYSTEM_PROMPT.
+  it('accepts a built-in neurotype that omits system_prompt (uses class default at runtime)', () => {
+    const cfg = load(`
+[topology]
+active = "debate"
+
+[neurotypes.skeptic]
+model = "qwen3:8b"
+`);
+    expect(cfg.userNeurotypes['skeptic']).toBeDefined();
+    expect(cfg.userNeurotypes['skeptic']).toEqual({
+      model: 'qwen3:8b',
+      temperature: expect.any(Number),
+    });
+    expect(cfg.userNeurotypes['skeptic']).not.toHaveProperty('system_prompt');
+  });
+
+  // PAR-40 — synthesizer/redAgent/sentry are structural infrastructure that
+  // live outside BUILTIN_AGENT_REGISTRY but still ship class-level
+  // SYSTEM_PROMPT defaults. The bench config relies on this exact path —
+  // dropping the synthesizer override and leaning on the OSS default.
+  it('accepts a structural built-in neurotype (synthesizer) that omits system_prompt', () => {
+    const cfg = load(`
+[topology]
+active = "debate"
+
+[neurotypes.synthesizer]
+model = "qwen3:8b"
+`);
+    expect(cfg.userNeurotypes['synthesizer']).toBeDefined();
+    expect(cfg.userNeurotypes['synthesizer']).not.toHaveProperty('system_prompt');
+  });
+
+  it('still rejects a built-in neurotype that supplies a non-string system_prompt', () => {
+    expectThrowsWithCode(
+      () =>
+        load(`
+[topology]
+active = "debate"
+
+[neurotypes.skeptic]
+model = "qwen3:8b"
+system_prompt = 42
+`),
+      'invalid_neurotype_shape',
+      /must be a string/,
+    );
+  });
 });
 
 describe('loadTopology — Sentry-in-steps (AC3)', () => {

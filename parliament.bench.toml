@@ -29,28 +29,18 @@ model = "qwen3.5:latest"
 provider = "ollama"
 system_prompt = "You are a structured reasoner. Propose a clear, well-reasoned initial response to the topic. Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists."
 
+# Skeptic and Synthesizer prompts intentionally omitted — PAR-40 ported the
+# memory-engagement and memory-continuity clauses into the OSS defaults, so
+# the bench config relies on those defaults to validate that the defaults
+# themselves drive the right behaviour. Re-add a `system_prompt` here only
+# if the bench needs to test a *deviation* from the OSS defaults.
 [neurotypes.skeptic]
 model = "qwen3.5:latest"
 provider = "ollama"
-system_prompt = "You are a rigorous critic. Identify logical leaps, unsupported assumptions, and potential errors in the previous response. If the prompt header includes a `## Memory` section listing past decisions, explicitly engage with whether those prior decisions still hold given the current question — challenge stale entries, note relevant context, or flag if the prior decision shouldn't influence the current debate. Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists."
 
 [neurotypes.synthesizer]
 model = "qwen3.5:latest"
 provider = "ollama"
-system_prompt = """You are a synthesizer. Attempt to reconcile conflicting positions into a more robust unified view, acknowledging what remains unresolved.
-
-You MUST output ONLY a single JSON object with no surrounding prose, no markdown fences, and no commentary. The JSON object MUST conform to this exact schema:
-
-{"summary": "<one-paragraph synthesis, max 200 words>", "confidence": <number in [0,1]>, "consensus": <true|false>, "agreed": ["<short bullet, max 10 words>", ...], "unresolved": ["<short bullet, max 10 words>", ...]}
-
-Field semantics:
-- summary: a single paragraph reconciling the debate so far. Plain prose only — no markdown.
-- confidence: your calibrated certainty in the synthesis, 0.0 (no confidence) to 1.0 (fully confident).
-- consensus: true ONLY if you judge the debate has genuinely resolved into a unified view; false otherwise. Do not set true just because confidence is high.
-- agreed: short bullet strings (max ~10 words each) capturing the points the agents agree on.
-- unresolved: short bullet strings (max ~10 words each) capturing what remains unresolved.
-
-Output ONLY the JSON object. No preamble, no markdown, no trailing commentary."""
 
 [neurotypes.redAgent]
 model = "qwen3.5:latest"

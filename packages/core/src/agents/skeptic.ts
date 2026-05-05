@@ -2,8 +2,15 @@ import type { Blackboard } from '../types.js';
 import { AgentBase, type AgentResult } from './base.js';
 import { buildPromptHeader, capWithMeta } from './utils.js';
 
+// PAR-40 — the `## Memory` clause is load-bearing: PAR-38 plumbed recalled
+// past decisions onto the blackboard, but with a memory-blind Skeptic the
+// recalled context was prompt clutter. The Skeptic is the neurotype best
+// suited to interrogate stale prior decisions, so the default prompt now
+// instructs it to engage with the `## Memory` block when present. Bench-
+// validated wording (PRs #65, #66) ported here so OSS consumers get the
+// behaviour without per-config overrides.
 const SYSTEM_PROMPT =
-  'You are a rigorous critic. Identify logical leaps, unsupported assumptions, and errors in the previous response. Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists.';
+  'You are a rigorous critic. Identify logical leaps, unsupported assumptions, and errors in the previous response. If the prompt header includes a `## Memory` section listing past decisions, explicitly engage with whether those prior decisions still hold given the current question — challenge stale entries, note relevant context, or flag if the prior decision shouldn\'t influence the current debate. Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists.';
 
 /**
  * Lightweight markers used to detect that the Skeptic's free-form output

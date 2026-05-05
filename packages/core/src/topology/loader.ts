@@ -1,4 +1,8 @@
-import { isBuiltinNeurotype, BUILTIN_AGENT_IDS } from '../agents/registry.js';
+import {
+  isBuiltinNeurotype,
+  hasBuiltinDefaultPrompt,
+  BUILTIN_AGENT_IDS,
+} from '../agents/registry.js';
 import { BUILTIN_PRESETS } from './presets.js';
 import {
   DEFAULT_NEUROTYPE_TEMPERATURE,
@@ -135,10 +139,25 @@ function parseUserNeurotypes(raw: unknown): Record<string, UserNeurotypeConfig> 
         `parliament.toml: [neurotypes.${id}] is missing required field "model"`,
       );
     }
-    if (typeof entry['system_prompt'] !== 'string') {
+    // PAR-40 — `system_prompt` is required only for user-defined neurotype
+    // IDs. Built-in IDs ship a class-level default in `agents/<id>.ts` and
+    // may omit the field; when omitted, the agent uses its built-in
+    // SYSTEM_PROMPT at runtime. This includes BOTH registry built-ins
+    // (proposer, skeptic, …) and structural built-ins (synthesizer,
+    // redAgent, sentry) — see `hasBuiltinDefaultPrompt` in registry.ts. A
+    // non-string value is still rejected loudly so a typo doesn't silently
+    // fall back to the default.
+    const promptRaw = entry['system_prompt'];
+    if (promptRaw !== undefined && typeof promptRaw !== 'string') {
       throw new TopologyValidationError(
         'invalid_neurotype_shape',
-        `parliament.toml: [neurotypes.${id}] is missing required field "system_prompt"`,
+        `parliament.toml: [neurotypes.${id}] field "system_prompt" must be a string`,
+      );
+    }
+    if (promptRaw === undefined && !hasBuiltinDefaultPrompt(id)) {
+      throw new TopologyValidationError(
+        'invalid_neurotype_shape',
+        `parliament.toml: [neurotypes.${id}] is missing required field "system_prompt" (required for user-defined neurotypes; built-ins may omit it to use the default)`,
       );
     }
 
@@ -149,7 +168,7 @@ function parseUserNeurotypes(raw: unknown): Record<string, UserNeurotypeConfig> 
 
     result[id] = {
       model: entry['model'],
-      system_prompt: entry['system_prompt'],
+      ...(typeof promptRaw === 'string' ? { system_prompt: promptRaw } : {}),
       temperature,
       ...(typeof entry['description'] === 'string' ? { description: entry['description'] } : {}),
       ...(typeof entry['provider'] === 'string' ? { provider: entry['provider'] } : {}),

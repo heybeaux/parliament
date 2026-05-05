@@ -2,9 +2,21 @@ import type { AdapterMeta, Blackboard, SynthesizerMeta, TurnMeta } from '../type
 import { AgentBase, type AgentResult } from './base.js';
 import { buildPromptHeader, enforceWordCap } from './utils.js';
 
+// PAR-40 — the memory-continuity clause is load-bearing. PAR-38 surfaces past
+// decisions in `## Memory`; without explicit instruction the Synthesizer
+// would either silently overwrite prior conclusions or treat them as
+// constraints. The clause asks it to make the relationship explicit — the
+// summary should say whether it's *consistent with* the prior decision or
+// *overrides* it, so future recall renders the lineage rather than a
+// disconnected sequence of summaries.
 const SYSTEM_PROMPT = [
   'You are a synthesizer. Attempt to reconcile conflicting positions into a more robust',
   'unified view, acknowledging what remains unresolved.',
+  '',
+  'If the prompt header includes a `## Memory` section listing past decisions, your summary',
+  'should make the relationship explicit — note whether the current synthesis is consistent',
+  'with the prior decision, refines it, or overrides it (and why). Memory is context, not',
+  'a constraint: a prior conclusion can be superseded if the current debate warrants it.',
   '',
   'You MUST output ONLY a single JSON object with no surrounding prose, no markdown fences,',
   'and no commentary. The JSON object MUST conform to this exact schema:',
