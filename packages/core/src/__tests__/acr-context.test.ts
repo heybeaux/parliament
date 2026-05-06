@@ -32,19 +32,18 @@ describe('NoopContextProvider', () => {
 });
 
 describe('formatResolvedContext', () => {
-  it('renders capabilities, constraints, and budget', () => {
+  it('renders capabilities and constraints', () => {
     const output = formatResolvedContext(stubContext);
     expect(output).toContain('[Context] Available capabilities: jira-search, postgres-readonly, slack-notify');
     expect(output).toContain('[Constraints] Decision must respect: SLA-2026-Q2, Compliance-PII-v3');
-    expect(output).toContain('[Budget]');
-    expect(output).toContain('10,000 tokens');
+    expect(output).not.toContain('[Budget]');
   });
 
   it('omits capabilities line when empty', () => {
     const ctx: ResolvedContext = { ...stubContext, capabilities: [] };
     const output = formatResolvedContext(ctx);
     expect(output).not.toContain('[Context] Available capabilities');
-    expect(output).toContain('[Budget]');
+    expect(output).toContain('[Constraints]');
   });
 
   it('omits constraints line when empty', () => {
@@ -54,16 +53,10 @@ describe('formatResolvedContext', () => {
     expect(output).toContain('[Context] Available capabilities');
   });
 
-  it('always includes budget line', () => {
+  it('returns empty string when both capabilities and constraints are empty', () => {
     const ctx: ResolvedContext = { ...stubContext, capabilities: [], constraints: [] };
     const output = formatResolvedContext(ctx);
-    expect(output).toContain('[Budget]');
-    expect(output).toContain('10,000 tokens');
-  });
-
-  it('shows utilization percentage', () => {
-    const output = formatResolvedContext(stubContext);
-    expect(output).toContain('8% window utilization');
+    expect(output).toBe('');
   });
 });
 

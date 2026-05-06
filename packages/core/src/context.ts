@@ -1,5 +1,30 @@
-import { resolve as acrResolve, calculateBudget, scanCapabilities } from '@acr/core';
-import type { ResolutionPlan } from '@acr/schema';
+import { readdirSync, readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { parse as parseYaml } from 'yaml';
+import { resolve as acrResolve, calculateBudget } from '@acr/core';
+import type { ResolutionPlan, CapabilityManifest } from '@acr/schema';
+
+/**
+ * ESM-safe manifest scanner. Replaces `scanCapabilities` from `@acr/core`
+ * which uses inline `require()` calls incompatible with Parliament's ESM build.
+ * Reads `capability.yaml` from each subdirectory of `baseDir`.
+ */
+function loadManifests(baseDir: string): CapabilityManifest[] {
+  if (!existsSync(baseDir)) return [];
+  const manifests: CapabilityManifest[] = [];
+  for (const entry of readdirSync(baseDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const manifestPath = join(baseDir, entry.name, 'capability.yaml');
+    if (!existsSync(manifestPath)) continue;
+    try {
+      const raw = readFileSync(manifestPath, 'utf-8');
+      manifests.push(parseYaml(raw) as CapabilityManifest);
+    } catch {
+      // Skip malformed manifests — fail-soft per-entry
+    }
+  }
+  return manifests;
+}
 
 export interface ResolvedContext {
   capabilities: string[];
@@ -42,7 +67,7 @@ export class ACRContextProvider implements ContextProvider {
       return this.cache.result;
     }
 
-    const { manifests } = scanCapabilities(this.manifestPath);
+    const manifests = loadManifests(this.manifestPath);
     if (manifests.length === 0) return null;
 
     const plan = acrResolve(manifests);
@@ -72,8 +97,6 @@ export function formatResolvedContext(ctx: ResolvedContext): string {
   if (ctx.constraints.length > 0) {
     lines.push(`[Constraints] Decision must respect: ${ctx.constraints.join(', ')}`);
   }
-  lines.push(
-    `[Budget] ${ctx.budget.tokens.toLocaleString()} tokens · ${Math.round(ctx.budget.utilization * 100)}% window utilization`,
-  );
+  // Budget is used by the engine's cutoff logic only — not surfaced to agents.
   return lines.join('\n');
 }

@@ -30,6 +30,7 @@ import {
   isBuiltinNeurotype,
   createBuiltinAgent,
   buildMemoryProvider,
+  buildContextProvider,
   DEFAULT_PARLIAMENT_DEFAULTS,
 } from '@parliament/core';
 import type {
@@ -250,6 +251,11 @@ async function runDeliberate(topic: string, opts: DeliberateOptions): Promise<vo
         }
       : {};
 
+  // PAR-39: wire ACR context provider from [context] config table.
+  const contextConfig = cfg.context ?? { provider: 'none' as const };
+  const contextProvider = buildContextProvider(contextConfig);
+  const contextOpts = contextProvider !== undefined ? { contextProvider } : {};
+
   // Load the topology config once; we need it both to know the active preset
   // (so we can stay on the legacy path when it's "debate" and no override was
   // supplied) and to feed `runTopology` when we route through topology mode.
@@ -312,6 +318,7 @@ async function runDeliberate(topic: string, opts: DeliberateOptions): Promise<vo
       ...(sources !== undefined ? { sources } : {}),
       ...(maxSourceWords !== undefined ? { maxSourceWords } : {}),
       ...memoryOpts,
+      ...contextOpts,
     });
   } else {
     // Legacy 5-agent path — preserved byte-identically for the default Debate
@@ -335,6 +342,7 @@ async function runDeliberate(topic: string, opts: DeliberateOptions): Promise<vo
       ...(sources !== undefined ? { sources } : {}),
       ...(maxSourceWords !== undefined ? { maxSourceWords } : {}),
       ...memoryOpts,
+      ...contextOpts,
     });
   }
 

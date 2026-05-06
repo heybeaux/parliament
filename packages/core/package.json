@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "smol-toml": "^1.6.1",
+    "yaml": "^2.8.2",
     "@acr/core": "file:/tmp/acr/packages/core",
     "@acr/schema": "file:/tmp/acr/packages/schema"
   }

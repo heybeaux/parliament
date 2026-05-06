@@ -10,6 +10,10 @@ osi_enabled = true
 osi_threshold = 0.85
 server_port = 3000
 
+[context]
+provider = "acr"
+manifest_path = "/Users/beauxwalton/Dev/ops/phase0"
+
 [memory]
 provider = "engram"
 endpoint = "http://localhost:3002"
