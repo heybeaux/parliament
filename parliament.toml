@@ -68,3 +68,17 @@ system_prompt = "You are a monitor. Identify if the current debate shows signs o
 model = "Qwen3.5-35B-A3B-8bit"
 provider = "omlx"
 system_prompt = "Built-in Adversary agent — runtime supplies the prompt."
+
+[memory]
+provider = "engram"
+endpoint = "http://localhost:3002"
+api_key = "eng_kit_local_dev_2026"
+agent_id = "parliament-test"
+recall_limit = 3
+
+# PAR-39: ACR context provider (disabled by default; set provider = "acr" to enable)
+[context]
+provider = "none"
+# manifest_path = "/path/to/.acr"
+# budget_multiplier = 1.0
+# cache_ttl_ms = 60000

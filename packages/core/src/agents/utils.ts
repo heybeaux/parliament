@@ -32,6 +32,14 @@ export const SOURCES_HEADING = '## Sources';
 export const MEMORY_HEADING = '## Memory';
 
 /**
+ * Stable heading for the ACR capability/constraint/budget preamble (PAR-39).
+ * Sits BEFORE the `## Background` context section so it reads as an objective
+ * capability envelope rather than editorial context. Pinned as a constant so
+ * tests and the engine cannot drift apart.
+ */
+export const ACR_CONTEXT_HEADING = '## Capabilities & Constraints';
+
+/**
  * Default per-source word cap applied at prompt-construction time when no
  * explicit `maxSourceWords` is supplied on the deliberation config.
  *
@@ -162,6 +170,7 @@ export function buildPromptHeader(
   sources?: readonly DeliberationSource[],
   memory?: string,
   maxSourceWords: number = DEFAULT_MAX_SOURCE_WORDS,
+  acrContext?: string,
 ): string {
   const today = new Date().toISOString().slice(0, 10);
   const baseHeader = [
@@ -170,11 +179,16 @@ export function buildPromptHeader(
     `Topic: ${topic}`,
   ].join('\n');
 
+  const trimmedAcrContext = acrContext?.trim();
   const trimmedContext = context?.trim();
   const trimmedMemory = memory?.trim();
   const sourcesBlock = buildSourcesBlock(sources, maxSourceWords);
 
   const sections: string[] = [];
+  // ACR preamble goes first — it's an objective capability envelope, not editorial
+  if (trimmedAcrContext !== undefined && trimmedAcrContext.length > 0) {
+    sections.push(`${ACR_CONTEXT_HEADING}\n\n${trimmedAcrContext}`);
+  }
   if (trimmedContext !== undefined && trimmedContext.length > 0) {
     sections.push(`${CONTEXT_HEADING}\n\n${trimmedContext}`);
   }

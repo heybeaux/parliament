@@ -16,6 +16,8 @@ import { executeParallelBlock } from './topology/parallel.js';
 import { DEFAULT_MAX_SOURCE_WORDS } from './agents/utils.js';
 import type { MemoryProvider, MemoryOutcome } from './memory.js';
 import { formatMemoryFragments } from './memory.js';
+import type { ContextProvider } from './context.js';
+import { formatResolvedContext } from './context.js';
 
 export interface DeliberationConfig {
   /** Maximum number of deliberation rounds. Default: 5. */
@@ -74,6 +76,20 @@ export interface DeliberationConfig {
   memoryAgentId?: string;
   /** PAR-38 — Max recall fragments. Default 5. */
   memoryRecallLimit?: number;
+  /**
+   * PAR-39 — Optional ACR context provider. When set, the engine resolves
+   * capabilities and budget before round 0 (in parallel with memory recall)
+   * and injects the result as a pinned system turn under `## Capabilities &
+   * Constraints`. Fail-soft: provider errors log a warning and deliberation
+   * proceeds without the context turn.
+   */
+  contextProvider?: import('./context.js').ContextProvider;
+  /**
+   * PAR-39 — Budget utilization fraction at which the engine terminates early
+   * and sets `incomplete: true` on the outcome. Default 0.8 (80%). Only
+   * meaningful when `contextProvider` is set and resolution succeeds.
+   */
+  contextBudgetCutoff?: number;
   agents: {
     proposer: Agent;
     skeptic: Agent;
@@ -291,6 +307,31 @@ async function attachMemoryRecall(
     // eslint-disable-next-line no-console
     console.warn(`[parliament] memory.recall failed: ${message}`);
   }
+}
+
+/**
+ * PAR-39 — Resolves ACR capabilities and writes the formatted preamble onto
+ * `blackboard.acrContext`. Runs in parallel with `attachMemoryRecall` before
+ * round 0. Fail-soft: provider errors are logged and deliberation proceeds
+ * without the context turn. Returns the budget token cap (0 = no cap).
+ */
+async function attachContextResolution(
+  blackboard: Blackboard,
+  provider: ContextProvider | undefined,
+): Promise<number> {
+  if (provider === undefined) return 0;
+  try {
+    const resolved = await provider.resolve(blackboard.topic);
+    if (resolved !== null) {
+      blackboard.acrContext = formatResolvedContext(resolved);
+      return resolved.budget.tokens;
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // eslint-disable-next-line no-console
+    console.warn(`[parliament] context.resolve failed: ${message}`);
+  }
+  return 0;
 }
 
 /**
@@ -591,24 +632,36 @@ export class DeliberationEngine {
       ...(normalizedSources !== undefined ? { sources: normalizedSources } : {}),
     };
 
-    // PAR-38: pull recall fragments from the memory provider before round 1
-    // so every agent's prompt header sees the `## Memory` block on its first
-    // turn. Fail-soft.
-    await attachMemoryRecall(
-      blackboard,
-      config.memoryProvider,
-      config.memoryAgentId,
-      config.memoryRecallLimit ?? 5,
-    );
+    // PAR-38 + PAR-39: run memory recall and ACR context resolution in parallel
+    // before round 1. Both are fail-soft — a flaky provider never blocks deliberation.
+    const [, acrBudgetTokens] = await Promise.all([
+      attachMemoryRecall(
+        blackboard,
+        config.memoryProvider,
+        config.memoryAgentId,
+        config.memoryRecallLimit ?? 5,
+      ),
+      attachContextResolution(blackboard, config.contextProvider),
+    ]);
+    const acrBudgetCutoff = config.contextBudgetCutoff ?? 0.8;
+    // Token threshold at which the engine will terminate early (0 = no limit).
+    const acrTokenThreshold = acrBudgetTokens > 0
+      ? Math.floor(acrBudgetTokens * acrBudgetCutoff)
+      : 0;
 
     let terminationReason: TerminationReason = 'max_rounds';
     let synthesis: string | null = null;
     let totalRounds = 0;
+    let budgetCutoffHit = false;
     const events: SystemEvent[] = [];
     // Tracks each round's synthesizer confidence so `recordTurn` can attach
     // a stable `convergence_delta` to every fresh turn without re-walking
     // the transcript.
     const synthConfidenceByRound = new Map<number, number>();
+    // Best-effort fallback: when the loop exits without crossing the
+    // consensus threshold, surface the highest-confidence synth attempt
+    // rather than null so callers see the model's reasoning.
+    let bestSynthAttempt: { content: string; confidence: number } | null = null;
 
     for (let round = 1; round <= maxRounds; round++) {
       totalRounds = round;
@@ -692,6 +745,10 @@ export class DeliberationEngine {
       // turns (and the next round) see it via `convergence_delta`.
       if (synthResult.meta !== undefined) {
         synthConfidenceByRound.set(round, synthResult.meta.confidence);
+        const conf = synthResult.meta.confidence;
+        if (bestSynthAttempt === null || conf > bestSynthAttempt.confidence) {
+          bestSynthAttempt = { content: synthResult.content, confidence: conf };
+        }
       }
       events.push({
         round,
@@ -774,6 +831,27 @@ export class DeliberationEngine {
         message: `Round ${round} ended.`,
         timestamp: new Date().toISOString(),
       });
+
+      // PAR-39: budget cutoff — if ACR reported a token budget and cumulative
+      // usage exceeds the cutoff threshold, terminate early with incomplete: true.
+      if (acrTokenThreshold > 0) {
+        const usedTokens = blackboard.turns.reduce((sum, t) => {
+          const meta = t.meta;
+          return sum + ((meta?.promptTokens ?? 0) + (meta?.completionTokens ?? 0));
+        }, 0);
+        if (usedTokens >= acrTokenThreshold) {
+          terminationReason = 'max_rounds';
+          budgetCutoffHit = true;
+          events.push({
+            round,
+            kind: 'termination',
+            message: `ACR budget cutoff hit after round ${round} (${usedTokens} tokens ≥ ${acrTokenThreshold} threshold).`,
+            timestamp: new Date().toISOString(),
+            data: { reason: 'budget_cutoff', usedTokens, acrTokenThreshold },
+          });
+          break;
+        }
+      }
     }
 
     // -------------------------------------------------------------------- //
@@ -783,10 +861,22 @@ export class DeliberationEngine {
     const resolved = blackboard.conflicts.length === 0 ||
       blackboard.conflicts.every((c) => c.resolved);
 
+    // `split` reflects termination state — populated whenever the engine
+    // didn't reach consensus, regardless of whether we surface a best-effort
+    // synthesis below. The split positions are the canonical "no agreement"
+    // structured output; synthesis is the best-effort prose.
     const split: SplitSummary | null =
-      synthesis === null
-        ? buildSplitSummary(blackboard.turns, residueScore)
-        : null;
+      terminationReason === 'consensus'
+        ? null
+        : buildSplitSummary(blackboard.turns, residueScore);
+
+    // Surface the model's best synthesis even when consensus didn't trigger.
+    // Without this, max_rounds / echo_loop terminations return synthesis=null
+    // even though the synthesizer produced coherent reasoning every round —
+    // hiding the most informative output from the caller.
+    if (synthesis === null && bestSynthAttempt !== null) {
+      synthesis = bestSynthAttempt.content;
+    }
 
     // PAR-10: termination lifecycle marker. Always emitted, regardless of
     // why the loop exited, so the Observability panel can render a final
@@ -839,6 +929,8 @@ export class DeliberationEngine {
       // background runner; this stays additive for the byte-identical
       // regression test, which only inspects `turns`).
       status: 'completed',
+      // PAR-39 — set only when the ACR budget cutoff terminated the run early.
+      ...(budgetCutoffHit ? { incomplete: true as const } : {}),
     };
   }
 
@@ -929,6 +1021,8 @@ export class DeliberationEngine {
     // a stable `convergence_delta` to every fresh turn without re-walking
     // the transcript. Mirrors the `run()` method.
     const synthConfidenceByRound = new Map<number, number>();
+    // Best-effort fallback for non-consensus terminations — see `run()`.
+    let bestSynthAttempt: { content: string; confidence: number } | null = null;
     // PAR-25 — tracks the round in which each step is currently executing
     // so the failover event-push helper can stamp the right round number
     // without re-threading it through every resolver call. Updated at the
@@ -1183,6 +1277,10 @@ export class DeliberationEngine {
       // turns (and the next round) see it via `convergence_delta`.
       if (synthResult.meta !== undefined) {
         synthConfidenceByRound.set(round, synthResult.meta.confidence);
+        const conf = synthResult.meta.confidence;
+        if (bestSynthAttempt === null || conf > bestSynthAttempt.confidence) {
+          bestSynthAttempt = { content: synthResult.content, confidence: conf };
+        }
       }
       pushEvent({
         round,
@@ -1267,10 +1365,15 @@ export class DeliberationEngine {
     const resolved = blackboard.conflicts.length === 0 ||
       blackboard.conflicts.every((c) => c.resolved);
 
+    // Mirrors the `run()` method — split tracks termination state, not
+    // synthesis presence; synthesis falls back to best-effort prose.
     const split: SplitSummary | null =
-      synthesis === null
-        ? buildSplitSummary(blackboard.turns, residueScore)
-        : null;
+      terminationReason === 'consensus'
+        ? null
+        : buildSplitSummary(blackboard.turns, residueScore);
+    if (synthesis === null && bestSynthAttempt !== null) {
+      synthesis = bestSynthAttempt.content;
+    }
 
     // PAR-10: termination lifecycle marker. Always emitted, regardless of
     // why the loop exited.

@@ -45,6 +45,8 @@ export class AdversaryAgent extends AgentBase {
       blackboard.context,
       blackboard.sources,
       blackboard.memory,
+      undefined,
+      blackboard.acrContext,
     );
 
     const userPrompt = recentTurns.length > 0

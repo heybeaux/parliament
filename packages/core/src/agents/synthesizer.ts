@@ -187,6 +187,8 @@ export class SynthesizerAgent extends AgentBase {
       blackboard.context,
       blackboard.sources,
       blackboard.memory,
+      undefined,
+      blackboard.acrContext,
     );
     if (recentTurns.length > 0) {
       userPrompt += `\n\nDiscussion:\n\n${recentTurns}`;
