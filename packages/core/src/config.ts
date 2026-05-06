@@ -11,6 +11,11 @@ import {
   type MemoryLayer,
   type MemoryProvider,
 } from './memory.js';
+import {
+  ACRContextProvider,
+  NoopContextProvider,
+  type ContextProvider,
+} from './context.js';
 
 export interface NeurotypeConfig {
   model: string;
@@ -113,10 +118,33 @@ export interface MemoryConfig {
 
 export const DEFAULT_MEMORY_CONFIG: MemoryConfig = { provider: 'none' };
 
+/**
+ * PAR-39 — Context provider configuration parsed from the optional `[context]`
+ * table.
+ *
+ * Default (no table, or `provider = "none"`) is a noop — the engine sees no
+ * `contextProvider` and skips ACR resolution entirely. `provider = "acr"`
+ * enables the ACRContextProvider; `manifest_path` is required.
+ */
+export type ContextProviderKind = 'none' | 'acr';
+
+export interface ContextConfig {
+  provider: ContextProviderKind;
+  /** Absolute path to the `.acr` manifest directory. Required when provider === 'acr'. */
+  manifest_path?: string;
+  /** Scale factor applied to the ACR budget token count. Default 1.0. */
+  budget_multiplier?: number;
+  /** Cache TTL in ms for resolved contexts. Default 60000. */
+  cache_ttl_ms?: number;
+}
+
+export const DEFAULT_CONTEXT_CONFIG: ContextConfig = { provider: 'none' };
+
 export interface ParliamentTomlConfig {
   neurotypes: Record<string, NeurotypeConfig>;
   parliament: ParliamentDefaults;
   memory: MemoryConfig;
+  context: ContextConfig;
 }
 
 const DEFAULT_CONFIG_FILENAME = 'parliament.toml';
@@ -301,8 +329,9 @@ function validateConfig(raw: unknown, configPath: string): ParliamentTomlConfig 
 
   const parliament = mergeParliamentDefaults(top['parliament']);
   const memory = parseMemoryConfig(top['memory'], configPath);
+  const context = parseContextConfig(top['context'], configPath);
 
-  return { neurotypes, parliament, memory };
+  return { neurotypes, parliament, memory, context };
 }
 
 /**
@@ -404,6 +433,67 @@ export function buildMemoryProvider(config: MemoryConfig): MemoryProvider | unde
       if (config.layers !== undefined) opts.layers = config.layers;
       return new EngramMemoryProvider(opts);
     }
+  }
+}
+
+/**
+ * PAR-39 — parses the optional `[context]` table. Missing table → noop default.
+ * `provider = "acr"` requires `manifest_path`.
+ */
+function parseContextConfig(raw: unknown, configPath: string): ContextConfig {
+  if (raw === undefined || raw === null) return { ...DEFAULT_CONTEXT_CONFIG };
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`Parliament: [context] in "${configPath}" must be a TOML table`);
+  }
+
+  const entry = raw as Record<string, unknown>;
+  const providerRaw = entry['provider'];
+  let provider: ContextProviderKind = 'none';
+  if (typeof providerRaw === 'string') {
+    if (providerRaw === 'none' || providerRaw === 'acr') {
+      provider = providerRaw;
+    } else {
+      throw new Error(
+        `Parliament: [context] provider in "${configPath}" must be "none" or "acr" (got "${providerRaw}")`,
+      );
+    }
+  }
+
+  const out: ContextConfig = { provider };
+  if (typeof entry['manifest_path'] === 'string') out.manifest_path = entry['manifest_path'];
+  if (typeof entry['budget_multiplier'] === 'number') out.budget_multiplier = entry['budget_multiplier'];
+  if (typeof entry['cache_ttl_ms'] === 'number') out.cache_ttl_ms = entry['cache_ttl_ms'];
+
+  if (provider === 'acr') {
+    if (out.manifest_path === undefined || out.manifest_path.length === 0) {
+      throw new Error(
+        `Parliament: [context] provider = "acr" requires a "manifest_path" in "${configPath}"`,
+      );
+    }
+  }
+
+  return out;
+}
+
+/**
+ * PAR-39 — instantiates the context provider declared by {@link ContextConfig}.
+ * Returns `undefined` for `provider = "none"` so the engine skips ACR resolution;
+ * `provider = "acr"` returns a ready `ACRContextProvider`.
+ */
+export function buildContextProvider(config: ContextConfig): ContextProvider | undefined {
+  switch (config.provider) {
+    case 'none':
+      return undefined;
+    case 'acr':
+      return new ACRContextProvider({
+        manifestPath: config.manifest_path!,
+        ...(config.budget_multiplier !== undefined
+          ? { budgetMultiplier: config.budget_multiplier }
+          : {}),
+        ...(config.cache_ttl_ms !== undefined
+          ? { cacheTtlMs: config.cache_ttl_ms }
+          : {}),
+      });
   }
 }
 

@@ -40,6 +40,8 @@ export type {
   ParliamentDefaults,
   MemoryConfig,
   MemoryProviderKind,
+  ContextConfig,
+  ContextProviderKind,
 } from './config.js';
 export {
   loadConfig,
@@ -51,9 +53,22 @@ export {
   buildAgentsFromConfig,
   buildFallbackAdapter,
   buildMemoryProvider,
+  buildContextProvider,
   DEFAULT_PARLIAMENT_DEFAULTS,
   DEFAULT_MEMORY_CONFIG,
+  DEFAULT_CONTEXT_CONFIG,
 } from './config.js';
+
+export type {
+  ContextProvider,
+  ResolvedContext,
+  ACRContextProviderConfig,
+} from './context.js';
+export {
+  NoopContextProvider,
+  ACRContextProvider,
+  formatResolvedContext,
+} from './context.js';
 
 export {
   topicSlug,
@@ -86,6 +101,7 @@ export {
   CONTEXT_HEADING,
   SOURCES_HEADING,
   MEMORY_HEADING,
+  ACR_CONTEXT_HEADING,
   CITATION_INSTRUCTION,
   DEFAULT_MAX_SOURCE_WORDS,
   buildPromptHeader,

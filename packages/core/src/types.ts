@@ -456,6 +456,12 @@ export interface DeliberationResult {
     body: string;
     requestId?: string;
   };
+  /**
+   * PAR-39 — true when the deliberation was terminated early because the ACR
+   * budget envelope hit the 80% threshold before consensus was reached.
+   * Absent (falsy) on normal terminations.
+   */
+  incomplete?: true;
 }
 
 export interface Blackboard {
@@ -492,6 +498,13 @@ export interface Blackboard {
    * `Blackboard` literals without memory.
    */
   memory?: string;
+  /**
+   * PAR-39 — Optional formatted ACR context block. When the engine ran with
+   * an `ACRContextProvider` configured, the formatted capability/constraint/budget
+   * preamble is written here so `buildPromptHeader` can inject it as a pinned
+   * system turn before round 0.
+   */
+  acrContext?: string;
   turns: Turn[];
   conflicts: Conflict[];
   metadata: Record<string, unknown>;

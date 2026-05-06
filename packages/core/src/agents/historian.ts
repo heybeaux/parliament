@@ -24,6 +24,8 @@ export class HistorianAgent extends AgentBase {
       blackboard.context,
       blackboard.sources,
       blackboard.memory,
+      undefined,
+      blackboard.acrContext,
     );
     const userPrompt = recentTurns.length > 0
       ? `${header}\n\nRecent discussion:\n\n${recentTurns}`
