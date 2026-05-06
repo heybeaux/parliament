@@ -69,7 +69,7 @@ describe.skipIf(!acrEnabled)('ACRContextProvider live contract', () => {
     if (!acr) return;
 
     const { manifests } = acr.scanCapabilities(acrManifestPath!);
-    const plan: ResolutionPlan = acr.resolve(manifests);
+    const plan = acr.resolve(manifests);
 
     expect(typeof plan.totalBudget).toBe('number');
     expect(plan.totalBudget).toBeGreaterThanOrEqual(0);
@@ -95,8 +95,8 @@ describe.skipIf(!acrEnabled)('ACRContextProvider live contract', () => {
     if (!acr) return;
 
     const { manifests } = acr.scanCapabilities(acrManifestPath!);
-    const plan: ResolutionPlan = acr.resolve(manifests);
-    const report: BudgetReport = acr.calculateBudget(plan);
+    const plan = acr.resolve(manifests);
+    const report = acr.calculateBudget(plan);
 
     expect(typeof report.totalBudget).toBe('number');
     expect(typeof report.windowSize).toBe('number');
@@ -126,8 +126,10 @@ describe.skipIf(!acrEnabled)('ACRContextProvider live contract', () => {
 
     expect(plan1.totalBudget).toBe(plan2.totalBudget);
     expect(plan1.utilization).toBe(plan2.utilization);
-    expect(plan1.capabilities.map((c) => c.manifest.name)).toEqual(
-      plan2.capabilities.map((c) => c.manifest.name),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(plan1.capabilities.map((c: any) => c.manifest.name)).toEqual(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      plan2.capabilities.map((c: any) => c.manifest.name),
     );
   }, 15_000);
 });

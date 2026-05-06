@@ -1,11 +1,13 @@
-# Parliament — OpenRouter multi-family smoke test config.
+# Parliament — frontier-tier OpenRouter config for live testing.
 #
-# Routes each canonical role to a different model family via OpenRouter
-# to exercise the cross-provider deliberation path end-to-end. All cheap,
-# all fast — a 5-round Debate run should clear well under $0.05.
+# Each canonical role is routed to a different frontier model so you can hear
+# how a real cross-vendor cabinet deliberates. Costs are non-trivial — a
+# 3-round Debate run is a few cents, not fractions of a cent. Run it
+# deliberately, not in a tight loop.
 #
 # Run with:
-#   parliament deliberate "<topic>" --config parliament.openrouter.toml
+#   PARLIAMENT_CONFIG=parliament.frontier.toml node packages/cli/dist/index.js \
+#     deliberate "<topic>"
 # (Requires OPENROUTER_API_KEY in env or .env)
 
 [parliament]
@@ -16,21 +18,26 @@ osi_enabled = true
 osi_threshold = 0.85
 server_port = 3000
 
+[server]
+# LAN exposure for testing from another device on the network.
+host = "0.0.0.0"
+cors_origins = ["http://localhost:*", "http://127.0.0.1:*", "http://10.0.0.*:*"]
+# Bench/benchmarking override — defaults are 1 concurrent / 10 per hour.
+rate_limit_concurrent = 8
+rate_limit_per_hour = 200
+
 [neurotypes.proposer]
-# Alibaba Qwen — structured reasoning, $0.033/$0.130 per M tok
-model = "qwen/qwen-turbo"
+model = "anthropic/claude-opus-4.7"
 provider = "openrouter"
 system_prompt = "You are a structured reasoner. Propose a clear, well-reasoned initial response to the topic. Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists."
 
 [neurotypes.skeptic]
-# DeepSeek — sharp critique, $0.140/$0.280 per M tok
-model = "deepseek/deepseek-v4-flash"
+model = "openai/gpt-5.5"
 provider = "openrouter"
 system_prompt = "You are a rigorous critic. Identify logical leaps, unsupported assumptions, and potential errors in the previous response. Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists."
 
 [neurotypes.synthesizer]
-# NVIDIA Nemotron Super 120B — open weights, strong JSON adherence, 262K ctx
-model = "nvidia/nemotron-3-super-120b-a12b"
+model = "anthropic/claude-opus-4.7"
 provider = "openrouter"
 system_prompt = """You are a synthesizer. Attempt to reconcile conflicting positions into a more robust unified view, acknowledging what remains unresolved.
 
@@ -48,68 +55,62 @@ Field semantics:
 Output ONLY the JSON object. No preamble, no markdown, no trailing commentary."""
 
 [neurotypes.redAgent]
-# xAI Grok — disruption (fitting), $0.200/$0.500 per M tok
-model = "x-ai/grok-4.1-fast"
+model = "x-ai/grok-4.20"
 provider = "openrouter"
 system_prompt = "You are a disruptor. Inject a challenging perspective that prevents premature consensus. Target the weakest assumption in the current debate. Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists."
 
 [neurotypes.sentry]
-# Mistral Nemo — classifier, $0.020/$0.030 per M tok (cheapest)
-model = "mistralai/mistral-nemo"
+model = "openai/gpt-5.4-mini"
 provider = "openrouter"
 system_prompt = "You are a monitor. Identify if the current debate shows signs of echo (agents agreeing without genuine synthesis) or uncertainty collapse. Return only: OK, SPECIALIST_NEEDED, or COLLAPSE_DETECTED."
 
 # --- Built-in neurotypes (still required by schema) ---
-# Routed through cheap providers since most aren't exercised by the Debate preset.
+# These aren't exercised in the Debate preset but the schema requires entries.
 
 [neurotypes.empiricist]
-model = "meta-llama/llama-3.1-8b-instruct"
+model = "openai/gpt-5.4-mini"
 provider = "openrouter"
 system_prompt = "Built-in Empiricist agent — runtime supplies the prompt."
 
 [neurotypes.steelmanner]
-model = "meta-llama/llama-3.1-8b-instruct"
+model = "openai/gpt-5.4-mini"
 provider = "openrouter"
 system_prompt = "Built-in Steelmanner agent — runtime supplies the prompt."
 
 [neurotypes.devils-advocate]
-model = "meta-llama/llama-3.1-8b-instruct"
+model = "openai/gpt-5.4-mini"
 provider = "openrouter"
 system_prompt = "Built-in Devil's Advocate agent — runtime supplies the prompt."
 
 [neurotypes.translator]
-model = "meta-llama/llama-3.1-8b-instruct"
+model = "openai/gpt-5.4-mini"
 provider = "openrouter"
 system_prompt = "Built-in Translator agent — runtime supplies the prompt."
 
 [neurotypes.lateralist]
-model = "meta-llama/llama-3.1-8b-instruct"
+model = "openai/gpt-5.4-mini"
 provider = "openrouter"
 system_prompt = "Built-in Lateralist agent — runtime supplies the prompt."
 
 [neurotypes.historian]
-model = "meta-llama/llama-3.1-8b-instruct"
+model = "openai/gpt-5.4-mini"
 provider = "openrouter"
 system_prompt = "Built-in Historian agent — runtime supplies the prompt."
 
 [neurotypes.forecaster]
-model = "meta-llama/llama-3.1-8b-instruct"
+model = "openai/gpt-5.4-mini"
 provider = "openrouter"
 system_prompt = "Built-in Forecaster agent — runtime supplies the prompt."
 
 [neurotypes.pragmatist]
-model = "meta-llama/llama-3.1-8b-instruct"
+model = "openai/gpt-5.4-mini"
 provider = "openrouter"
 system_prompt = "Built-in Pragmatist agent — runtime supplies the prompt."
 
 [neurotypes.adversary]
-model = "meta-llama/llama-3.1-8b-instruct"
+model = "openai/gpt-5.4-mini"
 provider = "openrouter"
 system_prompt = "Built-in Adversary agent — runtime supplies the prompt."
 
-[memory]
-provider = "engram"
-endpoint = "http://localhost:3002"
-api_key = "eng_kit_local_dev_2026"
-agent_id = "parliament-test"
-recall_limit = 3
+# Memory off for the launch test — keep behaviour observable without recall noise.
+# Add an [memory] block once you want to test Engram integration on top.
