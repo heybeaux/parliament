@@ -23,7 +23,10 @@ import {
   DEFAULT_PARLIAMENT_DEFAULTS,
   isBuiltinNeurotype,
   createBuiltinAgent,
+  resolveLineup,
+  runIdeation,
 } from '@parliament/core';
+import type { IdeateMode, IdeateStyle } from '@parliament/core';
 import type {
   Agent,
   AgentRuntimeOptions,
@@ -47,6 +50,13 @@ import {
   markCompleted,
   markFailed,
 } from './db.js';
+import {
+  buildIdeationInflightKey,
+  createIdeationRow,
+  finalizeIdeation,
+  getIdeation,
+  ideationInflight,
+} from './ideations.js';
 import {
   listDeliberationsScoped,
   decodeCursor,
@@ -173,6 +183,25 @@ const DeliberateBodySchema = z.object({
       structured_output: z.boolean().optional(),
     })
     .optional(),
+});
+
+// ---------------------------------------------------------------------------
+// /ideate body schema
+//
+// Mirrors the deliberation surface but with phase-mode + style fields. The
+// `confirm` flag is the cost gate for `mode: 'full'` (8-model run); without
+// it the route returns 400 so callers must opt in deliberately.
+// ---------------------------------------------------------------------------
+const IdeateBodySchema = z.object({
+  idea: z.string().trim().min(1, 'idea must be a non-empty string'),
+  mode: z.enum(['cooperative', 'adversarial', 'full']).optional(),
+  style: z.enum(['individual', 'collective']).optional(),
+  /**
+   * Required for `mode: 'full'`. Without it the route rejects the request
+   * with HTTP 400 so 8-model runs are never accidental. Ignored for the
+   * other sub-modes.
+   */
+  confirm: z.boolean().optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -1565,6 +1594,161 @@ export function createRouter(
         unsubscribe();
       }
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /ideate — phase-based ideation (cooperative / adversarial / full).
+  //
+  // Mirrors POST /deliberate's fire-and-forget shape: the handler validates
+  // the request, mints a UUID, persists a placeholder row with
+  // `status: 'running'`, and kicks `runIdeation()` in the background. The
+  // 202 response carries `{ id, status: 'running' }` so the client can
+  // start polling `GET /ideate/:id` immediately.
+  //
+  // Cost gate: `mode: 'full'` runs 8 models per cooperative phase plus an
+  // adversarial team plus rebuttal rounds — easily an order of magnitude
+  // more spend than the default cooperative run. The route requires
+  // `confirm: true` for full mode so the cost is always a deliberate
+  // opt-in. `cooperative` and `adversarial` ignore the flag.
+  //
+  // Idempotency: the existing Idempotency-Key middleware applies to all
+  // POSTs — same key + same body → same response. The /ideate-specific
+  // in-flight tracker (`ideationInflight`) collapses concurrent dupes that
+  // omit the Idempotency-Key header by hashing (account, idea, mode, style)
+  // within a 30s window.
+  // -------------------------------------------------------------------------
+  app.post('/ideate', async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'Invalid JSON body' }, 400);
+    }
+
+    const parsed = IdeateBodySchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json({ error: 'Validation failed', issues: parsed.error.issues }, 400);
+    }
+
+    const mode: IdeateMode = parsed.data.mode ?? 'cooperative';
+    const style: IdeateStyle = parsed.data.style ?? 'collective';
+    const idea = parsed.data.idea;
+
+    // Cost gate — full mode is opt-in only. The error message names the
+    // missing field so SDK callers can wire the prompt without guessing.
+    if (mode === 'full' && parsed.data.confirm !== true) {
+      return c.json(
+        {
+          error: {
+            code: 'confirm_required',
+            message:
+              'mode "full" runs 8 models and requires `confirm: true` in the request body to proceed.',
+          },
+        },
+        400,
+      );
+    }
+
+    let lineup;
+    try {
+      lineup = resolveLineup(mode);
+    } catch (err) {
+      return c.json(
+        { error: `Failed to resolve lineup: ${err instanceof Error ? err.message : String(err)}` },
+        500,
+      );
+    }
+
+    const accountId =
+      (c.get(AUTH_CTX_ACCOUNT_ID) as string | undefined) ?? OSS_ACCOUNT_ID;
+
+    // In-flight dedup: a concurrent POST with the same (account, idea, mode,
+    // style) within the 30s window returns the existing id rather than
+    // starting a second run. The Idempotency-Key header gives the same
+    // guarantee for callers that pass it; this tracker is the fallback.
+    const inflightKey = buildIdeationInflightKey({ accountId, idea, mode, style });
+    const existing = ideationInflight.lookup(inflightKey);
+    if (existing !== null) {
+      return c.json({ id: existing, status: 'running' }, 202);
+    }
+
+    const id = crypto.randomUUID();
+    try {
+      createIdeationRow(db, { id, accountId, idea, mode, style, lineup });
+    } catch (err) {
+      return c.json(
+        { error: `Failed to persist placeholder: ${err instanceof Error ? err.message : String(err)}` },
+        500,
+      );
+    }
+    ideationInflight.register(inflightKey, id);
+
+    // Background runner — same fire-and-forget shape as /deliberate. The
+    // factory closes over `createAdapter` so the orchestrator can reach
+    // each model via parliament.toml's [neurotypes.*] mapping without
+    // importing the factory directly.
+    void (async () => {
+      try {
+        const result = await runIdeation(
+          { idea, mode, style, lineup },
+          (model) => createAdapter(model),
+        );
+        finalizeIdeation(db, id, {
+          status: result.status,
+          phases: result.phases,
+          synthesis: result.synthesis,
+          error: result.error,
+        });
+      } catch (err) {
+        // `runIdeation` already catches inside its own try/finally and
+        // returns `status: 'error'`; this branch only fires on a truly
+        // unexpected throw outside that catch (e.g. an adapter factory
+        // bug). Still record it so the row reaches a terminal state.
+        const message = err instanceof Error ? err.message : String(err);
+        try {
+          finalizeIdeation(db, id, {
+            status: 'error',
+            phases: [],
+            synthesis: null,
+            error: message,
+          });
+        } catch (persistErr) {
+          console.error(
+            `Parliament: failed to mark ideation ${id} failed:`,
+            persistErr,
+          );
+        }
+      } finally {
+        ideationInflight.release(inflightKey);
+      }
+    })();
+
+    return c.json({ id, status: 'running' }, 202);
+  });
+
+  // -------------------------------------------------------------------------
+  // GET /ideate/:id — fetch one ideation by id.
+  //
+  // Returns the full IdeationRecord shape (id, idea, mode, style, status,
+  // lineup, phases, synthesis, error). Polling clients hit this endpoint
+  // every few seconds; a `status: 'running'` response indicates the
+  // background runner is still working.
+  // -------------------------------------------------------------------------
+  app.get('/ideate/:id', (c) => {
+    const { id } = c.req.param();
+    let result;
+    try {
+      result = getIdeation(db, id);
+    } catch (err) {
+      return c.json(
+        { error: `Database error: ${err instanceof Error ? err.message : String(err)}` },
+        500,
+      );
+    }
+    if (result === null) {
+      return c.json({ error: `Ideation "${id}" not found` }, 404);
+    }
+    return c.json(result, 200);
   });
 
   // -------------------------------------------------------------------------
