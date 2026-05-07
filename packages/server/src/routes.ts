@@ -1651,7 +1651,12 @@ export function createRouter(
 
     let lineup;
     try {
-      lineup = resolveLineup(mode);
+      // Pull `[ideate]` overrides from parliament.toml — strict-by-default
+      // semantics live inside `resolveLineup`. An invalid override (e.g. a
+      // skeptic role under cooperative) throws synchronously so the caller
+      // sees the misconfiguration instead of a silently-wrong lineup.
+      const cfg = loadConfig();
+      lineup = resolveLineup(mode, cfg.ideate);
     } catch (err) {
       return c.json(
         { error: `Failed to resolve lineup: ${err instanceof Error ? err.message : String(err)}` },
