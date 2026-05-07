@@ -85,6 +85,8 @@ The server binds to `parliament.server_port` (3000 by default) or the `PORT` env
 | ----------------------- | ------------------------------------------------------ |
 | `POST /deliberate`      | Run a new deliberation. Body: `{ topic, preset?, config? }`. |
 | `GET  /deliberate/:id`  | Fetch a stored deliberation by UUID.                   |
+| `POST /ideate`          | Run an ideation on an idea. Body: `{ idea, mode?, style?, confirm? }`. See [Ideate](#ideate). |
+| `GET  /ideate/:id`      | Fetch a stored ideation by UUID.                       |
 | `GET  /presets`         | List the topology preset registry plus the active default. |
 | `GET  /health`          | Probe each model's adapter for connectivity.           |
 
@@ -137,6 +139,10 @@ parliament deliberate <topic> [options]
 parliament get <id>
   Fetch a previously-saved deliberation from the server.
   Server URL is read from PARLIAMENT_SERVER_URL (default http://localhost:3030).
+
+parliament ideate <idea>
+  Run a multi-model ideation. See the Ideate section below for sub-modes,
+  styles, lineup, and TOML overrides.
 ```
 
 `--preset` accepts any registered preset id (built-in or user-defined). Unknown values exit `1` with a `did you mean "X"?` suggestion plus the alphabetized list of available presets — the same format the loader emits when `[topology].active` points at a non-existent preset. When omitted, the CLI uses `[topology].active` from `parliament.toml`, falling back to `debate`. The default `debate` path is byte-identical to legacy runs; any non-default preset routes through the topology runtime.
@@ -158,6 +164,104 @@ Topology presets compose neurotypes into reusable deliberation shapes. Pick one 
 | `jury`               | Proposer, then **{Skeptic, Empiricist, Steelmanner, Devil's Advocate}** in parallel | Use Jury when you don't want the first speaker's framing to dominate the room — four critics fire concurrently against one snapshot. |
 
 Built-in presets always include their full metadata (`name`, `description`, `best_for`, step list, plus `requires_neurotypes` / `missing_neurotypes`) under `GET /presets`, so a UI picker can render them without a second round-trip. User-defined presets author the same fields under `[topology.presets.<id>]`.
+
+## Ideate
+
+Parliament's `/ideate` mode is a **second top-level workflow** parallel to deliberation. Where deliberation pits agents against a topic until they reach consensus, **ideate** runs a frontier-model lineup over a single product idea, gathers structured critique, and produces one synthesized ideation document. It bypasses the deliberation engine entirely (no rounds, no OSI, no Sentry) — the orchestrator drives a fixed phase pipeline instead.
+
+### Sub-modes
+
+| Sub-mode      | Phases run                                                                                  | Pick when                                                                              |
+| ------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `cooperative` | cooperative-build → synth                                                                   | You want pure expansion of an idea — no critique, no rebuttal. The default.            |
+| `adversarial` | cooperative-build → adversarial-critique → rebuttal-1 → rebuttal-2 → synth                  | You want structured critique with proposed fixes plus two rebuttal passes.             |
+| `full`        | Same as `adversarial`, but with all 8 frontier models on the lineup. **Requires confirm.**  | High-stakes ideas where the breadth of an 8-model lineup justifies the cost.           |
+
+### Styles
+
+| Style        | Behaviour in `cooperative-build`                                  | Pick when                                                                              |
+| ------------ | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `collective` | Each cooperative agent sees the prior contributions in order      | You want each agent to build on what came before. The default.                         |
+| `individual` | All cooperative agents fire in parallel against the bare idea     | You want unbiased independent takes — first-speaker framing doesn't dominate.          |
+
+### Default lineup
+
+The cooperative team is fixed at four roles (`proposer`, `expander`, `pragmatist`, `lateralist`); the adversarial team is `skeptic` + `devils-advocate`. Default models (override per-role via `[ideate.lineup]` in `parliament.toml`):
+
+| Sub-mode      | Cooperative team                                                                              | Adversarial team                                          | Synthesizer                  |
+| ------------- | --------------------------------------------------------------------------------------------- | --------------------------------------------------------- | ---------------------------- |
+| `cooperative` | Opus 4.6 / GPT-5 / Gemini 2.5 Pro / Grok 4                                                    | _none_                                                    | Opus 4.6                     |
+| `adversarial` | Same as cooperative                                                                           | Opus 4.6 + GPT-5                                          | Opus 4.6                     |
+| `full`        | All 8: Opus 4.6, GPT-5, Gemini 2.5 Pro, Grok 4, DeepSeek V3, Qwen3-Max, Llama-4-Maverick, Mistral-Large-2 | Opus 4.6 + GPT-5                                          | Gemini 2.5 Pro               |
+
+Inspect the resolved lineup before running with `parliament ideate "<idea>" --print-lineup`. It dumps the team and synth without making any model call.
+
+### CLI
+
+```
+parliament ideate <idea> [options]
+  --mode <name>             cooperative (default) | adversarial | full
+  --style <name>            collective (default) | individual
+  -y, --yes                 Skip the interactive cost prompt for --mode=full (required for scripted runs)
+  --print-lineup            Print the resolved lineup and exit without running
+  --config <path>           Path to parliament.toml
+  --poll-interval-ms <n>    Polling cadence (default 2000)
+  --poll-timeout-ms <n>     Hard timeout for the polling loop (default 600000)
+```
+
+`--mode=full` is gated: the CLI prompts `[y/N]` interactively, or you can pass `--yes` for scripted runs. The HTTP surface enforces the same gate via `confirm: true` on the request body.
+
+### REST API
+
+| Endpoint           | Description                                                                                          |
+| ------------------ | ---------------------------------------------------------------------------------------------------- |
+| `POST /ideate`     | Start a new ideation. Body: `{ idea, mode?, style?, confirm? }`. Returns `202 { id, status }`.       |
+| `GET  /ideate/:id` | Fetch a stored ideation by UUID. Returns the full record including phases, lineup, synthesis, error. |
+
+`mode=full` requires `confirm: true` — without it the route returns `400 { error: { code: "confirm_required" } }`.
+
+```bash
+# cooperative is the default
+curl -s -X POST http://localhost:3030/ideate \
+  -H 'Content-Type: application/json' \
+  -d '{"idea": "browser extension that summarises long PRs"}' | jq .
+
+# full mode requires confirm:true
+curl -s -X POST http://localhost:3030/ideate \
+  -H 'Content-Type: application/json' \
+  -d '{"idea": "...", "mode": "full", "confirm": true}' | jq .
+```
+
+The route mints a UUID, persists a `running` row to the `ideations` table, and runs the orchestrator in the background. Concurrent duplicate submissions (same account + mode + style + idea, normalised) collapse to the same id within a 30s window.
+
+### TOML overrides
+
+Every model in the lineup is overridable via `parliament.toml`. Each role override **replaces** the default for that role — there is no field-level merging. Set only what you want to change:
+
+```toml
+[ideate.lineup.cooperative]
+proposer   = "anthropic/claude-opus-4-6"      # override one role; the other three keep their defaults
+lateralist = "x-ai/grok-4"
+
+[ideate.lineup.adversarial]
+skeptic         = "anthropic/claude-opus-4-6"
+devils-advocate = "openai/gpt-5"
+
+[ideate.lineup.full]
+# Full mode runs all 8 by default; override only the slots you want different.
+proposer = "anthropic/claude-opus-4-7"
+
+[ideate.synth]
+cooperative = "anthropic/claude-opus-4-6"
+adversarial = "anthropic/claude-opus-4-6"
+full        = "google/gemini-2.5-pro"
+```
+
+Run `parliament ideate "<idea>" --print-lineup --mode=<mode>` to verify the resolved lineup before spending the model call.
+
+### Cost guidance
+
+`cooperative` is the cheap default — four models for one cooperative-build pass plus a synth pass (~$0.05–$0.20 per run depending on idea size). `adversarial` adds two rebuttal rounds and an adversarial team (~$0.15–$0.40). `full` runs all 8 frontier models plus the adversarial team and two rebuttals — expect **$0.30–$1.00 per run**, which is why the confirm gate exists. Use `--print-lineup` to dry-run before committing.
 
 ## Architecture
 

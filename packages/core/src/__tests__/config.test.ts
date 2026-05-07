@@ -552,6 +552,102 @@ describe('loadConfig [memory] (PAR-38)', () => {
   });
 });
 
+describe('loadConfig [ideate]', () => {
+  let tmpDir: string;
+  let originalEnv: string | undefined;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'parliament-test-'));
+    originalEnv = process.env['PARLIAMENT_CONFIG'];
+    delete process.env['PARLIAMENT_CONFIG'];
+    resetConfigCache();
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+    if (originalEnv !== undefined) {
+      process.env['PARLIAMENT_CONFIG'] = originalEnv;
+    } else {
+      delete process.env['PARLIAMENT_CONFIG'];
+    }
+    resetConfigCache();
+  });
+
+  it('defaults to an empty IdeateConfig when no [ideate] block exists', () => {
+    const path = writeTempToml(tmpDir, VALID_TOML);
+    const config = loadConfig(path);
+    expect(config.ideate).toEqual({});
+  });
+
+  it('parses lineup overrides per sub-mode', () => {
+    const path = writeTempToml(
+      tmpDir,
+      `${VALID_TOML}
+[ideate.lineup.cooperative]
+proposer = "anthropic/claude-opus-4-7"
+
+[ideate.lineup.adversarial]
+skeptic = "openai/gpt-5"
+`,
+    );
+    const config = loadConfig(path);
+    expect(config.ideate.lineup?.cooperative).toEqual({
+      proposer: 'anthropic/claude-opus-4-7',
+    });
+    expect(config.ideate.lineup?.adversarial).toEqual({
+      skeptic: 'openai/gpt-5',
+    });
+  });
+
+  it('parses synth overrides per sub-mode', () => {
+    const path = writeTempToml(
+      tmpDir,
+      `${VALID_TOML}
+[ideate.synth]
+cooperative = "anthropic/claude-opus-4-6"
+full = "google/gemini-2.5-pro"
+`,
+    );
+    const config = loadConfig(path);
+    expect(config.ideate.synth).toEqual({
+      cooperative: 'anthropic/claude-opus-4-6',
+      full: 'google/gemini-2.5-pro',
+    });
+  });
+
+  it('rejects a non-string lineup model id', () => {
+    const path = writeTempToml(
+      tmpDir,
+      `${VALID_TOML}
+[ideate.lineup.cooperative]
+proposer = 42
+`,
+    );
+    expect(() => loadConfig(path)).toThrow(/must be a non-empty string model id/);
+  });
+
+  it('rejects an empty synth value', () => {
+    const path = writeTempToml(
+      tmpDir,
+      `${VALID_TOML}
+[ideate.synth]
+cooperative = ""
+`,
+    );
+    expect(() => loadConfig(path)).toThrow(/must be a non-empty string model id/);
+  });
+
+  it('rejects [ideate] declared as an array of tables', () => {
+    const path = writeTempToml(
+      tmpDir,
+      `${VALID_TOML}
+[[ideate]]
+`,
+    );
+    expect(() => loadConfig(path)).toThrow(/must be a TOML table/);
+  });
+});
+
 describe('buildMemoryProvider (PAR-38)', () => {
   it('returns undefined for provider = "none" so the engine sees a missing field', () => {
     expect(buildMemoryProvider({ provider: 'none' })).toBeUndefined();

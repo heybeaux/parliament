@@ -7,6 +7,7 @@ import type {
   Turn,
   UpstreamErrorContext,
 } from '@parliament/core';
+import { ensureIdeationsTable } from './ideations.js';
 
 export { Database };
 
@@ -158,6 +159,8 @@ export function initDb(path = 'parliament.db'): Database.Database {
     `CREATE INDEX IF NOT EXISTS idx_idempotency_records_expires
        ON idempotency_records(expires_at)`,
   );
+
+  ensureIdeationsTable(db);
 
   return db;
 }

@@ -12,6 +12,7 @@ import {
   type MemoryProvider,
 } from './memory.js';
 import { ACRContextProvider, type ContextProvider } from './context.js';
+import type { IdeateConfig, IdeateMode, LineupRole } from './ideate/types.js';
 
 export interface NeurotypeConfig {
   model: string;
@@ -141,6 +142,12 @@ export interface ParliamentTomlConfig {
   parliament: ParliamentDefaults;
   memory: MemoryConfig;
   context: ContextConfig;
+  /**
+   * Optional `[ideate]` block — strict-by-default lineup + synthesizer
+   * overrides for the ideate mode. Missing → in-code defaults from
+   * `@parliament/core/src/ideate/lineup.ts` apply unchanged.
+   */
+  ideate: IdeateConfig;
 }
 
 const DEFAULT_CONFIG_FILENAME = 'parliament.toml';
@@ -326,8 +333,9 @@ function validateConfig(raw: unknown, configPath: string): ParliamentTomlConfig 
   const parliament = mergeParliamentDefaults(top['parliament']);
   const memory = parseMemoryConfig(top['memory'], configPath);
   const context = parseContextConfig(top['context'], configPath);
+  const ideate = parseIdeateConfig(top['ideate'], configPath);
 
-  return { neurotypes, parliament, memory, context };
+  return { neurotypes, parliament, memory, context, ideate };
 }
 
 /**
@@ -491,6 +499,92 @@ export function buildContextProvider(config: ContextConfig): ContextProvider | u
           : {}),
       });
   }
+}
+
+/**
+ * Parses the optional `[ideate]` block. Missing → empty `IdeateConfig` so
+ * `resolveLineup` falls through to the in-code defaults unchanged.
+ *
+ * Recognised sub-tables:
+ *   [ideate.lineup.cooperative]   — role overrides for cooperative sub-mode
+ *   [ideate.lineup.adversarial]   — role overrides for adversarial sub-mode
+ *   [ideate.lineup.full]          — role overrides for full sub-mode
+ *   [ideate.synth]                — synthesizer model overrides per sub-mode
+ *
+ * Each entry under [ideate.lineup.<mode>] is `<role> = "<openrouter-model-id>"`.
+ * Each entry under [ideate.synth] is `<mode> = "<openrouter-model-id>"`.
+ *
+ * Validation here is structural only — unknown roles per sub-mode and the
+ * "skeptic under cooperative" rule live on `resolveLineup` so the same
+ * validation runs whether overrides come from TOML or programmatic callers.
+ */
+function parseIdeateConfig(raw: unknown, configPath: string): IdeateConfig {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`Parliament: [ideate] in "${configPath}" must be a TOML table`);
+  }
+  const entry = raw as Record<string, unknown>;
+  const out: IdeateConfig = {};
+
+  const lineupRaw = entry['lineup'];
+  if (lineupRaw !== undefined) {
+    if (typeof lineupRaw !== 'object' || lineupRaw === null || Array.isArray(lineupRaw)) {
+      throw new Error(
+        `Parliament: [ideate.lineup] in "${configPath}" must be a TOML table`,
+      );
+    }
+    const lineupEntry = lineupRaw as Record<string, unknown>;
+    const lineup: NonNullable<IdeateConfig['lineup']> = {};
+    const validModes: readonly IdeateMode[] = ['cooperative', 'adversarial', 'full'];
+    for (const mode of validModes) {
+      const modeRaw = lineupEntry[mode];
+      if (modeRaw === undefined) continue;
+      if (typeof modeRaw !== 'object' || modeRaw === null || Array.isArray(modeRaw)) {
+        throw new Error(
+          `Parliament: [ideate.lineup.${mode}] in "${configPath}" must be a TOML table`,
+        );
+      }
+      const modeEntry = modeRaw as Record<string, unknown>;
+      const overrides: Partial<Record<LineupRole, string>> = {};
+      for (const [role, value] of Object.entries(modeEntry)) {
+        if (typeof value !== 'string' || value.trim().length === 0) {
+          throw new Error(
+            `Parliament: [ideate.lineup.${mode}.${role}] in "${configPath}" must be a non-empty string model id`,
+          );
+        }
+        overrides[role as LineupRole] = value;
+      }
+      if (Object.keys(overrides).length > 0) {
+        lineup[mode] = overrides;
+      }
+    }
+    if (Object.keys(lineup).length > 0) out.lineup = lineup;
+  }
+
+  const synthRaw = entry['synth'];
+  if (synthRaw !== undefined) {
+    if (typeof synthRaw !== 'object' || synthRaw === null || Array.isArray(synthRaw)) {
+      throw new Error(
+        `Parliament: [ideate.synth] in "${configPath}" must be a TOML table`,
+      );
+    }
+    const synthEntry = synthRaw as Record<string, unknown>;
+    const synth: NonNullable<IdeateConfig['synth']> = {};
+    const validModes: readonly IdeateMode[] = ['cooperative', 'adversarial', 'full'];
+    for (const mode of validModes) {
+      const value = synthEntry[mode];
+      if (value === undefined) continue;
+      if (typeof value !== 'string' || value.trim().length === 0) {
+        throw new Error(
+          `Parliament: [ideate.synth.${mode}] in "${configPath}" must be a non-empty string model id`,
+        );
+      }
+      synth[mode] = value;
+    }
+    if (Object.keys(synth).length > 0) out.synth = synth;
+  }
+
+  return out;
 }
 
 function mergeParliamentDefaults(raw: unknown): ParliamentDefaults {

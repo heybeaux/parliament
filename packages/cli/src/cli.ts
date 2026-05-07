@@ -18,6 +18,7 @@ import {
   loadConfig,
   loadTopologyConfig,
   resolveActivePreset,
+  resolveLineup,
   createAdapter,
   DeliberationEngine,
   ProposerAgent,
@@ -36,6 +37,10 @@ import type {
   Agent,
   DeliberationResult,
   DeliberationSource,
+  IdeateMode,
+  IdeateStyle,
+  IdeationRecord,
+  ResolvedLineup,
   TopologyStep,
 } from '@parliament/core';
 import { printResult } from './display.js';
@@ -342,6 +347,214 @@ async function runDeliberate(topic: string, opts: DeliberateOptions): Promise<vo
 }
 
 // ---------------------------------------------------------------------------
+// Ideate command — talks to the local /ideate HTTP surface.
+//
+// `parliament ideate "<idea>"` posts to /ideate, polls /ideate/:id until
+// the run reaches a terminal state, and prints the synthesis. The CLI
+// mirrors the HTTP cost gate: `--mode=full` requires either an
+// interactive y/N confirmation or `--yes`/`-y` for scripting. The
+// `--print-lineup` flag short-circuits the run and dumps the resolved
+// lineup so users can verify their TOML overrides without spending a
+// model call.
+// ---------------------------------------------------------------------------
+
+interface IdeateOptions {
+  mode?: string;
+  style?: string;
+  yes?: boolean;
+  printLineup?: boolean;
+  config?: string;
+  /** Polling cadence in ms; intended for tests. Default: 2000. */
+  pollIntervalMs?: string;
+  /** Hard timeout in ms for the polling loop. Default: 600_000 (10 min). */
+  pollTimeoutMs?: string;
+}
+
+const VALID_MODES: readonly IdeateMode[] = ['cooperative', 'adversarial', 'full'];
+const VALID_STYLES: readonly IdeateStyle[] = ['individual', 'collective'];
+
+/**
+ * Render a `ResolvedLineup` as multi-line plain text. Used by both the
+ * `--print-lineup` flag and (when verbose) the run-start banner so users
+ * always see exactly which models will execute.
+ */
+export function formatLineup(lineup: ResolvedLineup): string {
+  const lines: string[] = [];
+  lines.push(`Mode:        ${lineup.mode}`);
+  lines.push(`Synthesizer: ${lineup.synth}`);
+  lines.push(`Cooperative team:`);
+  for (const slot of lineup.team.cooperative) {
+    lines.push(`  - ${slot.role.padEnd(11)} ${slot.model}`);
+  }
+  if (lineup.team.adversarial.length > 0) {
+    lines.push(`Adversarial team:`);
+    for (const slot of lineup.team.adversarial) {
+      lines.push(`  - ${slot.role.padEnd(11)} ${slot.model}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Prompt the user with a y/N question on stdin. Resolves to `true` only
+ * for case-insensitive `y`/`yes`. Any other input (or EOF) resolves to
+ * `false` so the caller exits gracefully.
+ *
+ * Exported so the test suite can verify the ideate command's prompt
+ * gating without patching `process.stdin` directly.
+ */
+export function promptYesNo(message: string): Promise<boolean> {
+  process.stdout.write(message);
+  return new Promise<boolean>((resolve) => {
+    const onData = (chunk: Buffer | string): void => {
+      const reply = chunk.toString().trim().toLowerCase();
+      process.stdin.removeListener('data', onData);
+      process.stdin.pause();
+      resolve(reply === 'y' || reply === 'yes');
+    };
+    process.stdin.resume();
+    process.stdin.once('data', onData);
+  });
+}
+
+async function runIdeate(idea: string, opts: IdeateOptions): Promise<void> {
+  const mode = (opts.mode ?? 'cooperative') as IdeateMode;
+  const style = (opts.style ?? 'collective') as IdeateStyle;
+  if (!VALID_MODES.includes(mode)) {
+    process.stderr.write(
+      `Parliament: invalid --mode "${mode}". Valid: ${VALID_MODES.join(', ')}\n`,
+    );
+    process.exit(1);
+  }
+  if (!VALID_STYLES.includes(style)) {
+    process.stderr.write(
+      `Parliament: invalid --style "${style}". Valid: ${VALID_STYLES.join(', ')}\n`,
+    );
+    process.exit(1);
+  }
+
+  // --print-lineup short-circuits before any network or model call so
+  // users can verify their parliament.toml overrides offline.
+  if (opts.printLineup === true) {
+    const cfg = loadConfig(opts.config);
+    let lineup: ResolvedLineup;
+    try {
+      lineup = resolveLineup(mode, cfg.ideate);
+    } catch (err) {
+      process.stderr.write(
+        `Parliament: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+      process.exit(1);
+    }
+    process.stdout.write(`${formatLineup(lineup)}\n`);
+    return;
+  }
+
+  // Cost gate for full mode. The server enforces the same contract via
+  // `confirm: true`; the CLI gives the user a chance to abort interactively
+  // OR opt in via --yes for scripted use.
+  let confirmed = false;
+  if (mode === 'full') {
+    if (opts.yes === true) {
+      confirmed = true;
+    } else {
+      const proceed = await promptYesNo(
+        'Parliament: --mode=full runs 8 models per cooperative phase plus an ' +
+          'adversarial team and up to 2 rebuttal rounds. Estimated cost: ' +
+          '$0.30-1.00 per run depending on idea size. Proceed? [y/N] ',
+      );
+      if (!proceed) {
+        process.stdout.write('Parliament: ideation cancelled.\n');
+        return;
+      }
+      confirmed = true;
+    }
+  }
+
+  const baseUrl =
+    process.env['PARLIAMENT_SERVER_URL'] ?? 'http://localhost:3030';
+
+  const body: Record<string, unknown> = { idea, mode, style };
+  if (confirmed) body['confirm'] = true;
+
+  let post: Response;
+  try {
+    post = await fetch(`${baseUrl}/ideate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    process.stderr.write(
+      `Parliament: failed to reach server at ${baseUrl}: ${String(err)}\n`,
+    );
+    process.exit(1);
+  }
+  if (!post.ok) {
+    const text = await post.text();
+    process.stderr.write(
+      `Parliament: server returned ${post.status} from POST /ideate: ${text}\n`,
+    );
+    process.exit(1);
+  }
+
+  const submitted = (await post.json()) as { id: string; status: string };
+  process.stdout.write(`Ideation ${submitted.id} started (status: ${submitted.status}).\n`);
+
+  const pollIntervalMs = opts.pollIntervalMs !== undefined ? parseInt(opts.pollIntervalMs, 10) : 2000;
+  const pollTimeoutMs = opts.pollTimeoutMs !== undefined ? parseInt(opts.pollTimeoutMs, 10) : 600_000;
+  if (isNaN(pollIntervalMs) || pollIntervalMs < 100) {
+    process.stderr.write('Parliament: --poll-interval-ms must be >= 100\n');
+    process.exit(1);
+  }
+  if (isNaN(pollTimeoutMs) || pollTimeoutMs < pollIntervalMs) {
+    process.stderr.write('Parliament: --poll-timeout-ms must be >= --poll-interval-ms\n');
+    process.exit(1);
+  }
+
+  const startedAt = Date.now();
+  const seenPhases = new Set<string>();
+  while (true) {
+    if (Date.now() - startedAt > pollTimeoutMs) {
+      process.stderr.write(
+        `Parliament: ideation ${submitted.id} did not finish within ${pollTimeoutMs}ms.\n`,
+      );
+      process.exit(1);
+    }
+    let getRes: Response;
+    try {
+      getRes = await fetch(`${baseUrl}/ideate/${submitted.id}`);
+    } catch (err) {
+      process.stderr.write(`Parliament: poll failed: ${String(err)}\n`);
+      process.exit(1);
+    }
+    if (!getRes.ok) {
+      process.stderr.write(
+        `Parliament: server returned ${getRes.status} from GET /ideate/${submitted.id}\n`,
+      );
+      process.exit(1);
+    }
+    const record = (await getRes.json()) as IdeationRecord;
+    for (const phase of record.phases) {
+      if (!seenPhases.has(phase.phase)) {
+        seenPhases.add(phase.phase);
+        process.stdout.write(`  phase: ${phase.phase} (${phase.contributions.length} contributions)\n`);
+      }
+    }
+    if (record.status !== 'running') {
+      if (record.status === 'error') {
+        process.stderr.write(`Parliament: ideation failed: ${record.error ?? 'unknown error'}\n`);
+        process.exit(1);
+      }
+      process.stdout.write('\n--- Synthesis ---\n');
+      process.stdout.write(`${record.synthesis ?? '(no synthesis)'}\n`);
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Get command
 // ---------------------------------------------------------------------------
 
@@ -431,6 +644,38 @@ export function createProgram(): Command {
     .description('Fetch and display a past deliberation by ID from the Parliament server')
     .action(async (id: string) => {
       await runGet(id);
+    });
+
+  program
+    .command('ideate <idea>')
+    .description('Run a multi-model ideation on an idea (cooperative / adversarial / full)')
+    .option(
+      '--mode <name>',
+      'Ideation sub-mode: cooperative (default), adversarial, or full',
+    )
+    .option(
+      '--style <name>',
+      'Contribution style: collective (default, sequential) or individual (parallel)',
+    )
+    .option(
+      '-y, --yes',
+      'Skip the interactive cost prompt for --mode=full (required for scripted runs)',
+    )
+    .option(
+      '--print-lineup',
+      'Resolve and print the lineup that would run (defaults plus TOML overrides) without making any model call',
+    )
+    .option('--config <path>', 'Path to parliament.toml config file (used by --print-lineup)')
+    .option(
+      '--poll-interval-ms <n>',
+      'Polling cadence (in ms) for /ideate/:id while the run is in flight. Default: 2000.',
+    )
+    .option(
+      '--poll-timeout-ms <n>',
+      'Maximum time (in ms) to wait for the ideation to finish. Default: 600000.',
+    )
+    .action(async (idea: string, opts: IdeateOptions) => {
+      await runIdeate(idea, opts);
     });
 
   return program;
