@@ -1,0 +1,955 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+
+const base = import.meta.env.BASE_URL;
+const homeHref = base.endsWith('/') ? base : `${base}/`;
+---
+
+<BaseLayout
+  title="Parliament — For when the discussion matters."
+  description="Parliament: for when the discussion matters. Six side-by-side advisory questions where multi-agent deliberation surfaces what a single-model answer compresses away."
+>
+  <nav class="nav">
+    <a class="nav-brand" href={homeHref}>Parliament</a>
+    <div class="nav-links">
+      <a href={homeHref}>Home</a>
+      <a href="https://github.com/heybeaux/parliament" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </nav>
+
+  <header class="showcase-hero">
+    <div class="eyebrow">Showcase</div>
+    <h1>For when the<br /><span class="accent">discussion matters.</span></h1>
+    <p>
+      A single model gives you an answer. Parliament gives you the argument behind it — what was
+      assumed, what was challenged, and what the room couldn't agree on.
+    </p>
+  </header>
+
+  <div class="showcase-intro">
+    <p>
+      Below are six advisory questions, drawn from a 60-question study of founder-style decisions.
+      For each, we show the answer from a leading frontier model alongside the deliberation surfaced
+      by Parliament.
+    </p>
+    <p>
+      The question to ask isn't <em>"which is right?"</em> — both are reasonable. The question is
+      <strong>which one tells you what you'd want to know before you act.</strong>
+    </p>
+  </div>
+
+  <!-- EXAMPLE 1 -->
+  <section class="example">
+    <div class="example-num">Example 1 · Sunk cost</div>
+    <h2 class="example-title">The custom system you're proud of</h2>
+    <div class="question-card">
+      "As COO, I led a year-long effort to build our own internal inventory system. Now we've changed
+      our warehouse model and a standard platform would cover most of what we need. Should we keep
+      investing in our custom system since we've already built so much?"
+    </div>
+    <div class="compare">
+      <div class="panel">
+        <div class="panel-label"><span class="dot red"></span>Single model · Claude Opus 4.7</div>
+        <div class="single-answer">
+          <p>
+            <strong>Switch to the standard platform.</strong> What you're describing is the sunk cost
+            fallacy in its purest form. The year of work is gone whether you keep the system or not.
+          </p>
+          <p>
+            Maintenance is a tax that compounds. Your original justification has expired. Vendors
+            invest more than you can.
+          </p>
+          <p>
+            Run the standard platform in parallel for a defined period, migrate in phases, budget for
+            1.5x the time you think it'll take.
+          </p>
+        </div>
+      </div>
+      <div class="panel parliament-panel">
+        <div class="panel-label"><span class="dot green"></span>Parliament · Debate</div>
+        <div class="turns">
+          <div class="turn">
+            <span class="agent proposer">Proposer</span>
+            <p>
+              Sunk cost is sunk. Run a structured evaluation against leading platforms — TCO, fit,
+              strategic value over three to five years.
+            </p>
+          </div>
+          <div class="turn">
+            <span class="agent skeptic">Skeptic</span>
+            <p>
+              The uncovered 10–20% in inventory systems often involves operationally critical logic —
+              exceptions, compliance, peak workflows, integrations. The recommendation underweights
+              vendor lock-in, future pricing, implementation failure risk, and consulting costs that
+              may erode the savings.
+            </p>
+          </div>
+          <div class="turn">
+            <span class="agent redagent">Red Agent</span>
+            <p>
+              The weakest assumption is that a "structured evaluation" will surface the truth.
+              <strong
+                >The team that spent a year building the custom system will unconsciously design the
+                evaluation to favor it.</strong
+              > Gap analysis will inflate every exception. TCO models will low-ball vendor price hikes.
+              Force a concrete pilot of the standard platform on one warehouse site with live data.
+            </p>
+          </div>
+          <div class="turn">
+            <span class="agent skeptic">Skeptic</span>
+            <p>
+              RedAgent overcorrects. A structured evaluation need not be a political fig leaf if
+              governance is independent, criteria are precommitted, and pilots are real.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="surfaced">
+      <div class="surfaced-label">What surfaced</div>
+      <p>
+        The single-model answer treats this as an analytical problem: run the numbers, follow the
+        logic. Parliament surfaces the political problem hiding underneath —
+        <strong>the people running the evaluation built the thing being evaluated.</strong> The
+        actionable output isn't "switch" or "keep." It's
+        <em
+          >run the live one-warehouse pilot, with independent governance and precommitted criteria,
+          before any TCO model.</em
+        >
+      </p>
+    </div>
+  </section>
+
+  <!-- EXAMPLE 2 -->
+  <section class="example">
+    <div class="example-num">Example 2 · Adversarial framing</div>
+    <h2 class="example-title">The AI feature everyone says you need</h2>
+    <div class="question-card">
+      "I'm running product at a workflow software startup, and our biggest customers keep asking for
+      better permissions and reporting. The team wants to prioritize an AI copilot instead because
+      every company in our space is launching one. Should we ship the AI feature first so we don't
+      look stale?"
+    </div>
+    <div class="compare">
+      <div class="panel">
+        <div class="panel-label"><span class="dot red"></span>Single model · Claude Opus 4.7</div>
+        <div class="single-answer">
+          <p>
+            <strong>Build the permissions and reporting. Ship the AI copilot second.</strong> You have
+            actual customers — your biggest ones — telling you what they need. AI copilots rarely close
+            enterprise deals; they generate demos and tweets.
+          </p>
+          <p>
+            One caveat: if your sales team is losing deals <em>today</em> with "no AI" as the cited
+            reason in win/loss notes — not vibes, actual data — reweight.
+          </p>
+        </div>
+      </div>
+      <div class="panel parliament-panel">
+        <div class="panel-label"><span class="dot green"></span>Parliament · Debate</div>
+        <div class="turns">
+          <div class="turn">
+            <span class="agent proposer">Proposer</span>
+            <p>
+              Ship governance. Layer in AI as a parallel, smaller-scoped track. Permissions are
+              usually prerequisites for expansion in enterprise workflow tools.
+            </p>
+          </div>
+          <div class="turn">
+            <span class="agent skeptic">Skeptic</span>
+            <p>
+              "Enterprise customers churn over missing permissions far more often than over missing
+              copilots" is plausible but unsupported without this startup's actual churn and win/loss
+              data. A weak AI demo may make the company look trend-chasing rather than innovative.
+            </p>
+          </div>
+          <div class="turn">
+            <span class="agent redagent">Red Agent</span>
+            <p>
+              The weakest assumption is that the empirical picture can be gathered later as a neutral
+              waiting state. <strong>That's backwards.</strong> The very act of measuring "are we
+              losing deals over missing AI" is distorted by whether your sales motion even surfaces
+              governance conversations. If the field is trained to open every deal with "how does
+              your copilot handle X," permissions requests will quietly migrate from "blocker" to
+              "table stakes we assume you'll add later." The data will then misleadingly ratify the
+              AI prioritization the team already emotionally wants.
+            </p>
+          </div>
+          <div class="turn">
+            <span class="agent skeptic">Skeptic</span>
+            <p>
+              Imperfect evidence still beats deciding from fear of hype. RedAgent should recommend
+              better data collection, not let strategic posture precede evidence.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="surfaced">
+      <div class="surfaced-label">What surfaced</div>
+      <p>
+        The single-model answer says "look at the win/loss data." Parliament surfaces something
+        deeper: <strong>the data itself is endogenous to your sales motion.</strong> If your AEs lead
+        with AI demos, your win/loss notes will say customers wanted AI. The deliberation gives you
+        an instrument-design problem you wouldn't have known to solve: structure your win/loss
+        interviews to surface governance asks customers won't volunteer.
+      </p>
+    </div>
+  </section>
+
+  <!-- EXAMPLE 3 -->
+  <section class="example">
+    <div class="example-num">Example 3 · Logic trap</div>
+    <h2 class="example-title">Pricing migration with no usage data</h2>
+    <div class="question-card">
+      "I'm moving our SaaS from seat-based pricing to usage-based pricing. The billing system only
+      starts tracking usage once an account is migrated, but I want to quote each customer based on
+      their past usage before asking them to switch. Should I estimate the price first or migrate
+      them and true it up later?"
+    </div>
+    <div class="compare">
+      <div class="panel">
+        <div class="panel-label"><span class="dot red"></span>Single model · Claude Opus 4.7</div>
+        <div class="single-answer">
+          <p>
+            <strong>Estimate first. Don't migrate and true up.</strong> Migrating customers without a
+            price they've agreed to is a trust grenade.
+          </p>
+          <p>
+            Pull a proxy for usage from product telemetry. Model 3–6 months of historical usage per
+            account. Cap downside for the first billing period. Migrate in cohorts.
+          </p>
+        </div>
+      </div>
+      <div class="panel parliament-panel">
+        <div class="panel-label"><span class="dot green"></span>Parliament · Debate</div>
+        <div class="turns">
+          <div class="turn">
+            <span class="agent proposer">Proposer</span>
+            <p>
+              Estimate from proxies, quote first, cap downside. Migrate and true up only if
+              estimation is genuinely impossible.
+            </p>
+          </div>
+          <div class="turn">
+            <span class="agent skeptic">Skeptic</span>
+            <p>
+              Usable historical proxies may not exist — logs incomplete, retained briefly, not
+              attributable to billable units, or sampled. A 90-day window may be distorted by
+              seasonality, onboarding, outages. <strong>A better option may be shadow metering</strong>:
+              instrument usage post-migration but before contractual pricing change, then quote from
+              real metered data.
+            </p>
+          </div>
+          <div class="turn">
+            <span class="agent redagent">Red Agent</span>
+            <p>
+              The blind spot is assuming any pre-visibility must be accurate enough to constitute a
+              quote.
+              <strong
+                >Most SaaS buyers treat any pre-switch number as a ceiling they will anchor to and
+                weaponize in negotiations</strong
+              >, regardless of how it was derived. Shadow metering doesn't solve this; it just moves
+              the anchoring point.
+            </p>
+          </div>
+          <div class="turn">
+            <span class="agent skeptic">Skeptic</span>
+            <p>
+              RedAgent conflates a quote, a forecast, a range, and a cap — these create different
+              expectations and legal obligations. The prescription should distinguish them.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="surfaced">
+      <div class="surfaced-label">What surfaced</div>
+      <p>
+        The single-model answer prescribes an approach. Parliament surfaces the
+        <strong>anchoring problem the prescription creates</strong>: any number you give pre-migration
+        becomes a ceiling in the next negotiation. The deliberation refines the answer into a
+        segmentation: enterprise gets ranges with explicit "directional only" framing and contractual
+        care; SMB gets capped true-up. That's the answer that survives a customer trying to weaponize
+        your quote a year from now.
+      </p>
+    </div>
+  </section>
+
+  <!-- EXAMPLE 4 -->
+  <section class="example">
+    <div class="example-num">Example 4 · Adversarial framing</div>
+    <h2 class="example-title">The Fortune 500 logo</h2>
+    <div class="question-card">
+      "A Fortune 500 prospect says they'll do a pilot only if we build several custom features and
+      heavily discount the first year. My CEO wants the logo. Should we accept the terms just to get
+      the credibility boost?"
+    </div>
+    <div class="compare">
+      <div class="panel">
+        <div class="panel-label"><span class="dot red"></span>Single model · Claude Opus 4.7</div>
+        <div class="single-answer">
+          <p>
+            <strong>Don't take the deal as structured. Renegotiate or walk.</strong> Logo deals with
+            heavy discounts and custom feature commitments rarely deliver the credibility your CEO is
+            imagining.
+          </p>
+          <p>Sequence the features. Trade discount for commitment. Get a real champion on the hook.</p>
+        </div>
+      </div>
+      <div class="panel parliament-panel">
+        <div class="panel-label"><span class="dot green"></span>Parliament · Debate</div>
+        <div class="turns">
+          <div class="turn">
+            <span class="agent proposer">Proposer</span>
+            <p>
+              Separate the asks. Charge custom work as professional services. Trade discount for
+              multi-year commitment, public case study, reference rights.
+            </p>
+          </div>
+          <div class="turn">
+            <span class="agent skeptic">Skeptic</span>
+            <p>
+              Many enterprise pilots prohibit publicity, so the credibility boost may be illusory.
+              The startup may have very little leverage if it lacks references, procurement approval,
+              security maturity, or a mission-critical differentiator.
+            </p>
+          </div>
+          <div class="turn">
+            <span class="agent redagent">Red Agent</span>
+            <p>
+              The weakest assumption is that the prospect's demand is a fixed take-it-or-leave-it
+              posture rather than
+              <strong>a predictable opening bid in a power-imbalanced negotiation.</strong> Early-stage
+              infrastructure companies routinely overestimate how irreplaceable their solution feels to
+              a risk-averse enterprise buyer. The startup likely has more leverage than it realizes.
+            </p>
+          </div>
+          <div class="turn">
+            <span class="agent skeptic">Skeptic</span>
+            <p>
+              That's sweeping and unsupported. Many marquee logos are won through painful pilots,
+              discounts, and customization. "Force them to choose between your standard offering and
+              no solution" could be reckless if the buyer has many substitutes.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="surfaced">
+      <div class="surfaced-label">What surfaced</div>
+      <p>
+        The single-model answer is good negotiation tactics. Parliament surfaces the
+        <strong>leverage question underneath the tactics</strong>: are you negotiating from scarcity
+        or from desperation? The synthesis is sharper than either side: counter the opening bid,
+        <em
+          >but calibrate posture to actual leverage, against an explicit threshold of engineering
+          weeks, conversion probability, runway, and publicity rights.</em
+        > A decision rule, not a vibe.
+      </p>
+    </div>
+  </section>
+
+  <!-- EXAMPLE 5 -->
+  <section class="example">
+    <div class="example-num">Example 5 · False premise</div>
+    <h2 class="example-title">The mobile app for retention</h2>
+    <div class="question-card">
+      "Our web SaaS has 60% D30 retention. We think a mobile app would push it to 80%. Should we
+      build native React Native, or hire a contractor to do iOS + Android separately?"
+    </div>
+    <div class="compare">
+      <div class="panel">
+        <div class="panel-label"><span class="dot red"></span>Single model · Claude Opus 4.7</div>
+        <div class="single-answer">
+          <p>
+            <strong>Don't build the mobile app yet.</strong> A 20-point retention lift from a mobile app
+            is enormous and almost certainly wrong. Most SaaS retention problems are activation, value
+            delivery, or ICP fit problems — not channel problems.
+          </p>
+          <p>
+            If you've validated and still need to build: React Native, in-house engineer, no
+            contractors.
+          </p>
+        </div>
+      </div>
+      <div class="panel parliament-panel">
+        <div class="panel-label"><span class="dot green"></span>Parliament · Debate</div>
+        <div class="turns">
+          <div class="turn">
+            <span class="agent proposer">Proposer</span>
+            <p>
+              Validate the 33% relative lift before committing engineering quarters. Retention gains
+              usually come from solving a habit or notification gap, not wrapping existing
+              functionality.
+            </p>
+          </div>
+          <div class="turn">
+            <span class="agent skeptic">Skeptic</span>
+            <p>
+              Averages could hide that only one segment needs mobile. A bad React Native contractor
+              can create as much maintenance debt as two native contractors. The real issue is code
+              ownership, CI/CD, app-store process — not stack choice.
+            </p>
+          </div>
+          <div class="turn">
+            <span class="agent redagent">Red Agent</span>
+            <p>
+              The weakest assumption is that retention lift is primarily a question of which mobile
+              affordances are missing.
+              <strong
+                >In many SaaS products with 60% D30, the core problem is that the value users get
+                from the web version is already shallow or episodic; a better mobile experience
+                simply amplifies exposure to the same mediocre value.</strong
+              > The team must first quantify how much current retention variance is explained by session
+              depth and outcome achievement on web. If that correlation is low, the entire mobile bet
+              collapses.
+            </p>
+          </div>
+          <div class="turn">
+            <span class="agent skeptic">Skeptic</span>
+            <p>
+              Low correlation between web session depth and retention does not disprove mobile value
+              — mobile could create new usage modes not visible in web behavior.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="surfaced">
+      <div class="surfaced-label">What surfaced</div>
+      <p>
+        The single-model answer is already strong: don't build, validate first. Parliament adds a
+        <strong>product-quality diagnosis upstream of the validation</strong>: before testing whether
+        mobile lifts retention, test whether your web product creates enough underlying value that
+        <em>any</em> additional surface area would help. The single model says "fix activation"; Parliament
+        says "quantify the variance in retention explained by outcome achievement, then decide whether
+        the mobile question is even live." Different orders of investigation.
+      </p>
+    </div>
+  </section>
+
+  <!-- EXAMPLE 6 -->
+  <section class="example">
+    <div class="example-num">Example 6 · Sunk cost</div>
+    <h2 class="example-title">The fundraise that isn't closing</h2>
+    <div class="question-card">
+      "I've been fundraising for eight weeks and have taken more than 60 investor meetings, but we
+      only have one small soft commit. It feels painful to stop after putting this much founder time
+      into it. Should I keep pushing until we get a round done?"
+    </div>
+    <div class="compare">
+      <div class="panel">
+        <div class="panel-label"><span class="dot red"></span>Single model · Claude Opus 4.7</div>
+        <div class="single-answer">
+          <p>
+            <strong>Stop. Or more precisely: stop the broad push and make a hard decision this week.</strong>
+            60+ meetings with one soft commit is the market telling you clearly that this round, as currently
+            packaged, isn't going to close.
+          </p>
+          <p>Do 5–10 honest post-mortem calls with investors who passed but engaged seriously.</p>
+        </div>
+      </div>
+      <div class="panel parliament-panel">
+        <div class="panel-label"><span class="dot green"></span>Parliament · Debate</div>
+        <div class="turns">
+          <div class="turn">
+            <span class="agent proposer">Proposer</span>
+            <p>
+              Separate "is the business worth continuing" (customer signal) from "is this round worth
+              continuing" (investor signal). Pause broad outreach, do honest diligence calls, look at
+              runway.
+            </p>
+          </div>
+          <div class="turn">
+            <span class="agent skeptic">Skeptic</span>
+            <p>
+              Investors often give polite or misleading feedback. Triangulate behavior, not stated
+              reasons. Pausing outreach for a week could kill momentum if there are warm
+              conversations active. Distinguish stopping broad top-of-funnel from aggressively
+              closing real active leads.
+            </p>
+          </div>
+          <div class="turn">
+            <span class="agent redagent">Red Agent</span>
+            <p>
+              The weakest assumption is that investor behavior after 60 meetings is reliable signal
+              about the company itself. It isn't. <strong>Most investor conversations are noisy theater</strong>
+              — polite deflections, shifting criteria, herding instincts that reveal more about the current
+              mood of capital than about your traction. Continuing to push is endowment effect dressed
+              up as persistence. Redirect every cycle into product and revenue immediately.
+            </p>
+          </div>
+          <div class="turn">
+            <span class="agent skeptic">Skeptic</span>
+            <p>
+              It's noisy but still meaningful signal about fundability under current conditions.
+              Sixty meetings is large enough to warrant serious inference. The advice should define
+              <strong>"genuine conviction"</strong> concretely: partner meetings, active diligence, terms
+              discussion, reference calls — not polite encouragement.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="surfaced">
+      <div class="surfaced-label">What surfaced</div>
+      <p>
+        The single-model answer says "stop." Parliament's answer is also "stop" — but the
+        deliberation produces an <strong>operational definition of when to restart</strong> that no single
+        answer offered: a relaunch should be gated on a <em>material</em> milestone (not cosmetic narrative
+        changes), and "genuine conviction" in the active pipeline means partner meetings, active diligence,
+        terms discussion, reference calls — not polite encouragement. The difference between a founder
+        who flails for another quarter and one who knows exactly what evidence would change the call.
+      </p>
+    </div>
+  </section>
+
+  <!-- CLOSING -->
+  <section class="closing">
+    <h2>What you're paying for</h2>
+    <p>A single frontier model is optimized to give you the best single answer.</p>
+    <p>Parliament is optimized to surface what the best single answer would have to assume away.</p>
+    <p class="pitch">
+      For most questions, the single answer is enough.<br />
+      For the questions where the discussion matters — where assumptions are the actual problem, where
+      the stakes are large, where you have to defend the call later —
+      <strong>Parliament gives you the transcript that shows your work.</strong>
+    </p>
+    <div class="closing-cta">
+      <a href="https://github.com/heybeaux/parliament" class="btn btn-primary" target="_blank" rel="noopener"
+        >Start deliberating →</a
+      >
+      <a href={homeHref} class="btn btn-secondary">Back to overview</a>
+    </div>
+  </section>
+
+  <div class="methodology">
+    <p>
+      The six examples above were drawn from a 60-question study comparing Parliament against Claude
+      Opus 4.7, GPT-5.5, Gemini 3.1 Pro, and Grok 4.20 on advisory questions across logic traps,
+      false premises, sunk-cost reasoning, and adversarial framings. Full data and methodology
+      available on request.
+    </p>
+  </div>
+
+  <footer>
+    <div class="footer-content">
+      <div class="footer-links">
+        <a href="https://github.com/heybeaux/parliament" target="_blank" rel="noopener">GitHub</a>
+        <a
+          href="https://github.com/heybeaux/parliament/blob/main/docs/topology.md"
+          target="_blank"
+          rel="noopener">Docs</a
+        >
+        <a
+          href="https://github.com/heybeaux/parliament/blob/main/docs/neurotypes.md"
+          target="_blank"
+          rel="noopener">Neurotypes</a
+        >
+        <a href="https://heybeaux.dev" target="_blank" rel="noopener">heybeaux.dev</a>
+      </div>
+      <p class="footer-copy">Built by heybeaux. Part of the reasoning layer — ACR + Engram + Parliament.</p>
+    </div>
+  </footer>
+</BaseLayout>
+
+<style is:global>
+  :root {
+    --bg: #0a0a0f;
+    --bg-card: #12121a;
+    --text: #e8e8ed;
+    --text-muted: #8888a0;
+    --accent: #6366f1;
+    --accent-glow: rgba(99, 102, 241, 0.3);
+    --green: #22c55e;
+    --amber: #f59e0b;
+    --red: #ef4444;
+    --border: rgba(255, 255, 255, 0.08);
+  }
+
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  a {
+    color: var(--accent);
+    text-decoration: none;
+    transition: opacity 0.2s;
+  }
+
+  a:hover {
+    opacity: 0.8;
+  }
+
+  .nav {
+    padding: 1.5rem 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    max-width: 1100px;
+    margin: 0 auto;
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-brand {
+    font-weight: 700;
+    font-size: 1.05rem;
+    color: var(--text);
+  }
+  .nav-links {
+    display: flex;
+    gap: 1.5rem;
+  }
+  .nav-links a {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+  }
+  .nav-links a:hover {
+    color: var(--accent);
+    opacity: 1;
+  }
+
+  .showcase-hero {
+    text-align: center;
+    padding: 5rem 2rem 3rem;
+    max-width: 800px;
+    margin: 0 auto;
+    position: relative;
+  }
+  .showcase-hero::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: -1;
+  }
+  .showcase-hero .eyebrow {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    margin-bottom: 1rem;
+  }
+  .showcase-hero h1 {
+    font-size: clamp(2rem, 5vw, 3.25rem);
+    font-weight: 700;
+    line-height: 1.15;
+    margin-bottom: 1.25rem;
+  }
+  .showcase-hero h1 .accent {
+    color: var(--accent);
+    text-shadow: 0 0 40px var(--accent-glow);
+    font-style: italic;
+  }
+  .showcase-hero p {
+    font-size: 1.1rem;
+    color: var(--text-muted);
+    max-width: 640px;
+    margin: 0 auto 1rem;
+  }
+  .showcase-intro {
+    max-width: 740px;
+    margin: 0 auto 4rem;
+    padding: 0 2rem;
+    color: var(--text-muted);
+    font-size: 1rem;
+    line-height: 1.7;
+  }
+  .showcase-intro strong {
+    color: var(--text);
+  }
+
+  .example {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 3rem 2rem;
+    border-top: 1px solid var(--border);
+  }
+  .example:first-of-type {
+    border-top: none;
+  }
+  .example-num {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    margin-bottom: 0.75rem;
+  }
+  .example-title {
+    font-size: clamp(1.5rem, 3vw, 2rem);
+    font-weight: 700;
+    margin-bottom: 1.5rem;
+    line-height: 1.25;
+  }
+  .question-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 2rem;
+    font-size: 1rem;
+    line-height: 1.6;
+    color: var(--text);
+    font-style: italic;
+  }
+
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+  }
+  @media (max-width: 860px) {
+    .compare {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .panel {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+  }
+  .panel.parliament-panel {
+    border-color: rgba(99, 102, 241, 0.3);
+  }
+  .panel-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--text-muted);
+  }
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .dot.red {
+    background: var(--red);
+  }
+  .dot.green {
+    background: var(--green);
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+  }
+
+  .single-answer {
+    font-size: 0.92rem;
+    line-height: 1.6;
+    color: var(--text-muted);
+  }
+  .single-answer strong {
+    color: var(--text);
+  }
+  .single-answer p {
+    margin-bottom: 0.75rem;
+  }
+  .single-answer p:last-child {
+    margin-bottom: 0;
+  }
+
+  .turns {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+  }
+  .turn {
+    padding-bottom: 0.85rem;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.88rem;
+    line-height: 1.55;
+    color: var(--text-muted);
+  }
+  .turn:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+  .agent {
+    display: inline-block;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.15rem 0.5rem;
+    border-radius: 3px;
+    margin-bottom: 0.4rem;
+  }
+  .agent.proposer {
+    background: rgba(96, 165, 250, 0.15);
+    color: #60a5fa;
+  }
+  .agent.skeptic {
+    background: rgba(248, 113, 113, 0.15);
+    color: #f87171;
+  }
+  .agent.redagent {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+  }
+  .agent.synth {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+  }
+  .turn p {
+    margin: 0;
+  }
+
+  .surfaced {
+    background: rgba(99, 102, 241, 0.08);
+    border: 1px solid rgba(99, 102, 241, 0.25);
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+  }
+  .surfaced-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--accent);
+    margin-bottom: 0.5rem;
+  }
+  .surfaced p {
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: var(--text);
+    margin: 0;
+  }
+  .surfaced strong {
+    color: var(--accent);
+  }
+
+  .closing {
+    max-width: 800px;
+    margin: 4rem auto 0;
+    padding: 4rem 2rem;
+    text-align: center;
+    border-top: 1px solid var(--border);
+  }
+  .closing h2 {
+    font-size: clamp(1.5rem, 3.5vw, 2.25rem);
+    font-weight: 700;
+    margin-bottom: 1.5rem;
+    line-height: 1.3;
+  }
+  .closing p {
+    color: var(--text-muted);
+    font-size: 1.05rem;
+    margin-bottom: 1rem;
+    line-height: 1.7;
+  }
+  .closing .pitch {
+    color: var(--text);
+    font-size: 1.1rem;
+    font-weight: 500;
+    margin-top: 2rem;
+  }
+  .closing .pitch strong {
+    color: var(--accent);
+  }
+
+  .closing-cta {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 2.5rem;
+  }
+  .btn {
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 1rem;
+    transition: all 0.2s;
+    display: inline-block;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+  }
+  .btn-primary:hover {
+    box-shadow: 0 0 24px var(--accent-glow);
+    opacity: 1;
+  }
+  .btn-secondary {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .btn-secondary:hover {
+    border-color: var(--accent);
+    opacity: 1;
+  }
+
+  .methodology {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 3rem 2rem 5rem;
+    text-align: center;
+  }
+  .methodology p {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    opacity: 0.7;
+    line-height: 1.6;
+  }
+
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 2rem;
+    text-align: center;
+  }
+  .footer-content {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  .footer-links {
+    display: flex;
+    gap: 1.5rem;
+    justify-content: center;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+  }
+  .footer-links a {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+  .footer-links a:hover {
+    color: var(--accent);
+    opacity: 1;
+  }
+  .footer-copy {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    opacity: 0.5;
+  }
+</style>
