@@ -167,3 +167,35 @@ export {
   formatOutcomeForMemory,
   formatMemoryFragments,
 } from './memory.js';
+
+export type {
+  IdeateMode,
+  IdeateStyle,
+  LineupRole,
+  LineupAssignment,
+  LineupTeam,
+  ResolvedLineup,
+  IdeatePhaseId,
+  PhaseContribution,
+  PhaseRecord,
+  Problem,
+  IdeationStatus,
+  IdeationRecord,
+  IdeateLineupOverrides,
+  IdeateSynthOverrides,
+  IdeateConfig,
+} from './ideate/types.js';
+export {
+  CLOSED_MODELS,
+  OPEN_MODELS,
+  SYNTH_DEFAULTS,
+  defaultLineup,
+  resolveLineup,
+} from './ideate/lineup.js';
+export {
+  ADVERSARIAL_SYSTEM_PROMPT,
+  ADVERSARIAL_RETRY_INSTRUCTION,
+  parseAdversarialOutput,
+} from './ideate/adversarial.js';
+export type { AdapterFactory, RunIdeationInput, RunIdeationResult } from './ideate/orchestrator.js';
+export { runIdeation } from './ideate/orchestrator.js';
