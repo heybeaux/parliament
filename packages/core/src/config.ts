@@ -11,11 +11,7 @@ import {
   type MemoryLayer,
   type MemoryProvider,
 } from './memory.js';
-import {
-  ACRContextProvider,
-  NoopContextProvider,
-  type ContextProvider,
-} from './context.js';
+import { ACRContextProvider, type ContextProvider } from './context.js';
 
 export interface NeurotypeConfig {
   model: string;

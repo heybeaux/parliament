@@ -57,7 +57,7 @@ describe('PresetPicker', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders all 7 fallback presets when /presets fetch fails', async () => {
+  it('renders all fallback presets when /presets fetch fails', async () => {
     (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new TypeError('network down'),
     );
@@ -68,7 +68,7 @@ describe('PresetPicker', () => {
     await waitFor(() => {
       expect((select as HTMLSelectElement).options.length).toBe(FALLBACK_PRESETS.length);
     });
-    expect(FALLBACK_PRESETS).toHaveLength(7);
+    expect(FALLBACK_PRESETS).toHaveLength(8);
     for (const preset of FALLBACK_PRESETS) {
       expect(select).toHaveTextContent(preset.name);
     }

@@ -21,6 +21,22 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import type { ResolutionPlan } from '@acr/schema';
+
+// BudgetReport is a runtime shape from @acr/core (not exported by @acr/schema).
+// Inline a structural type matching the assertions below — this is a contract pin.
+interface BudgetReport {
+  totalBudget: number;
+  windowSize: number;
+  utilization: number;
+  perCapability: Array<{
+    name: string;
+    resolution: 'index' | 'summary' | 'standard' | 'deep';
+    tokens: number;
+    percentage: number;
+  }>;
+  burstAnalysis: unknown[];
+}
 
 const acrManifestPath = process.env['ACR_MANIFEST_PATH'];
 const acrEnabled = typeof acrManifestPath === 'string' && acrManifestPath.length > 0;
@@ -126,8 +142,8 @@ describe.skipIf(!acrEnabled)('ACRContextProvider live contract', () => {
 
     expect(plan1.totalBudget).toBe(plan2.totalBudget);
     expect(plan1.utilization).toBe(plan2.utilization);
-    expect(plan1.capabilities.map((c) => c.manifest.name)).toEqual(
-      plan2.capabilities.map((c) => c.manifest.name),
+    expect(plan1.capabilities.map((c: ResolutionPlan['capabilities'][number]) => c.manifest.name)).toEqual(
+      plan2.capabilities.map((c: ResolutionPlan['capabilities'][number]) => c.manifest.name),
     );
   }, 15_000);
 });
