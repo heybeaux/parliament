@@ -220,7 +220,9 @@ describe('DeliberationEngine', () => {
 
     expect(result.terminationReason).toBe('max_rounds');
     expect(result.totalRounds).toBe(2);
-    expect(result.synthesis).toBeNull();
+    // Engine surfaces highest-confidence synth attempt as best-effort when
+    // termination is not consensus (see add-best-effort-synthesis change).
+    expect(result.synthesis).toBe('Confident but contested');
   });
 
   it('does NOT terminate when synthesizer fail-closed (confidence=0, consensus=false); runs to max_rounds', async () => {
@@ -336,7 +338,7 @@ describe('DeliberationEngine', () => {
   // Unresolved split
   // -------------------------------------------------------------------------
 
-  it('sets synthesis=null and split populated when confidence never reaches threshold', async () => {
+  it('surfaces best-effort synthesis and populates split when confidence never reaches threshold', async () => {
     const config = makeConfig({
       maxRounds: 2,
       redAgentInterval: 99,
@@ -348,7 +350,11 @@ describe('DeliberationEngine', () => {
 
     const result = await engine.run('split topic', config);
 
-    expect(result.synthesis).toBeNull();
+    // Termination on max_rounds (no consensus): engine surfaces the
+    // highest-confidence synth attempt as best-effort, AND a split is
+    // populated to signal the unresolved state.
+    expect(result.terminationReason).not.toBe('consensus');
+    expect(result.synthesis).toBe('Synthesis content');
     expect(result.split).not.toBeNull();
     expect(result.split).toMatchObject({
       positions: expect.any(Object),

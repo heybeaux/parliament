@@ -136,7 +136,10 @@ describe('end-to-end deliberation', () => {
     });
 
     expect(result.terminationReason).toBe('echo_loop');
-    expect(result.synthesis).toBeNull();
+    // On non-consensus termination, engine surfaces the highest-confidence
+    // synth attempt as best-effort prose. Script supplies a single tentative
+    // summary; that's what gets surfaced.
+    expect(result.synthesis).toBe('Tentative synthesis.');
     expect(result.split).not.toBeNull();
   });
 

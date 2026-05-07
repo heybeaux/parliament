@@ -435,6 +435,33 @@ exports[`PAR-6 — Stage 3 UI walkthrough > walks PresetPicker → Timeline (par
                     Add context
                   </button>
                 </div>
+                <div
+                  class="mt-3"
+                >
+                  <button
+                    aria-controls="sample-questions-gallery"
+                    aria-expanded="false"
+                    class="flex items-center gap-2 rounded-lg px-2 py-1 text-xs font-medium uppercase tracking-widest text-zinc-400 transition-colors hover:text-zinc-200 disabled:opacity-40"
+                    type="button"
+                  >
+                    <svg
+                      aria-hidden="true"
+                      fill="none"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      width="12"
+                    >
+                      <path
+                        d="M9 11l3 3 8-8M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"
+                        stroke="currentColor"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="1.75"
+                      />
+                    </svg>
+                    Try a sample question
+                  </button>
+                </div>
               </div>
             </div>
           </form>
@@ -1014,7 +1041,7 @@ exports[`PAR-6 — Stage 3 UI walkthrough > walks PresetPicker → Timeline (par
                             <span
                               class="text-2xs text-zinc-500"
                             >
-                              05:00 a.m.
+                              05:00 AM
                             </span>
                           </div>
                         </div>
@@ -1090,7 +1117,7 @@ exports[`PAR-6 — Stage 3 UI walkthrough > walks PresetPicker → Timeline (par
                             <span
                               class="text-2xs text-zinc-500"
                             >
-                              05:00 a.m.
+                              05:00 AM
                             </span>
                           </div>
                         </div>
@@ -1189,7 +1216,7 @@ exports[`PAR-6 — Stage 3 UI walkthrough > walks PresetPicker → Timeline (par
                         <span
                           class="text-2xs text-zinc-500"
                         >
-                          05:00 a.m.
+                          05:00 AM
                         </span>
                       </div>
                     </div>
@@ -1286,7 +1313,7 @@ exports[`PAR-6 — Stage 3 UI walkthrough > walks PresetPicker → Timeline (par
                         <span
                           class="text-2xs text-zinc-500"
                         >
-                          05:00 a.m.
+                          05:00 AM
                         </span>
                       </div>
                     </div>
@@ -1362,7 +1389,7 @@ exports[`PAR-6 — Stage 3 UI walkthrough > walks PresetPicker → Timeline (par
                         <span
                           class="text-2xs text-zinc-500"
                         >
-                          05:00 a.m.
+                          05:00 AM
                         </span>
                       </div>
                     </div>
