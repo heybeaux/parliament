@@ -202,6 +202,21 @@ const IdeateBodySchema = z.object({
    * other sub-modes.
    */
   confirm: z.boolean().optional(),
+  /**
+   * Optional Lattice coordination block (PAR-Lattice). When `enabled:
+   * true`, the orchestrator wraps each model call with State Contracts +
+   * Circuit Breakers and runs the cooperative team through
+   * ParliamentReducer. Defaults preserve pre-integration behaviour: a
+   * missing block is treated as `enabled: false`.
+   */
+  lattice: z
+    .object({
+      enabled: z.boolean(),
+      auditLogPath: z.string().min(1).optional(),
+      minAgreementRatio: z.number().min(0).max(1).optional(),
+      shadowMode: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -1633,6 +1648,8 @@ export function createRouter(
     const mode: IdeateMode = parsed.data.mode ?? 'cooperative';
     const style: IdeateStyle = parsed.data.style ?? 'collective';
     const idea = parsed.data.idea;
+    // Optional Lattice block. When absent, the orchestrator runs unchanged.
+    const lattice = parsed.data.lattice;
 
     // Cost gate — full mode is opt-in only. The error message names the
     // missing field so SDK callers can wire the prompt without guessing.
@@ -1695,7 +1712,15 @@ export function createRouter(
     void (async () => {
       try {
         const result = await runIdeation(
-          { idea, mode, style, lineup },
+          {
+            idea,
+            mode,
+            style,
+            lineup,
+            // Forward the optional Lattice block. The orchestrator only
+            // activates the wrap when `lattice.enabled === true`.
+            ...(lattice !== undefined ? { lattice } : {}),
+          },
           (model) => createAdapter(model),
         );
         finalizeIdeation(db, id, {
@@ -1703,6 +1728,7 @@ export function createRouter(
           phases: result.phases,
           synthesis: result.synthesis,
           error: result.error,
+          lattice: result.lattice ?? null,
         });
       } catch (err) {
         // `runIdeation` already catches inside its own try/finally and
@@ -1716,6 +1742,7 @@ export function createRouter(
             phases: [],
             synthesis: null,
             error: message,
+            lattice: null,
           });
         } catch (persistErr) {
           console.error(

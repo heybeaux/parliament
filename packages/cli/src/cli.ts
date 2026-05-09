@@ -578,6 +578,21 @@ async function runIdeate(idea: string, opts: IdeateOptions): Promise<void> {
       }
       process.stdout.write('\n--- Synthesis ---\n');
       process.stdout.write(`${record.synthesis ?? '(no synthesis)'}\n`);
+      // Lattice coordination report. The orchestrator already appends a
+      // formatted block to `synthesis`, but the structured `record.lattice`
+      // field carries the raw data so consumers (and the CLI) can render
+      // their own summary independent of the prose. We emit a one-line
+      // summary here for terminal users; the full block is already in
+      // synthesis for copy/paste workflows.
+      if (record.lattice != null) {
+        const l = record.lattice;
+        process.stdout.write(
+          `\nLattice: trace=${l.traceId} agreement=${l.agreementRatio.toFixed(2)} ` +
+            `consensus=${l.consensusReached ? 'yes' : 'no'} ` +
+            `conflicts=${l.conflicts.length} ` +
+            `audit=${l.auditLogPath ?? '(disabled)'}\n`,
+        );
+      }
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
