@@ -184,7 +184,15 @@ export type {
   IdeateLineupOverrides,
   IdeateSynthOverrides,
   IdeateConfig,
+  LatticeIdeateOptions,
+  LatticeReport,
 } from './ideate/types.js';
+export {
+  LatticeRunner,
+  resolveLatticeOptions,
+  DEFAULT_AUDIT_LOG_PATH,
+  DEFAULT_MIN_AGREEMENT_RATIO,
+} from './ideate/lattice.js';
 export {
   CLOSED_MODELS,
   OPEN_MODELS,
@@ -198,4 +206,4 @@ export {
   parseAdversarialOutput,
 } from './ideate/adversarial.js';
 export type { AdapterFactory, RunIdeationInput, RunIdeationResult } from './ideate/orchestrator.js';
-export { runIdeation } from './ideate/orchestrator.js';
+export { runIdeation, formatLatticeReport } from './ideate/orchestrator.js';
