@@ -364,6 +364,13 @@ interface IdeateOptions {
   yes?: boolean;
   printLineup?: boolean;
   config?: string;
+  /**
+   * Path to a UTF-8 file whose contents are used as the idea body. Mutually
+   * exclusive with the positional `<idea>` argument — pass exactly one.
+   * Useful for ideating on long-form documents (specs, theses, briefs) that
+   * don't fit cleanly on the command line.
+   */
+  ideaFile?: string;
   /** Polling cadence in ms; intended for tests. Default: 2000. */
   pollIntervalMs?: string;
   /** Hard timeout in ms for the polling loop. Default: 600_000 (10 min). */
@@ -417,7 +424,41 @@ export function promptYesNo(message: string): Promise<boolean> {
   });
 }
 
-async function runIdeate(idea: string, opts: IdeateOptions): Promise<void> {
+async function runIdeate(
+  ideaArg: string | undefined,
+  opts: IdeateOptions,
+): Promise<void> {
+  // Idea source: exactly one of the positional `<idea>` or `--idea-file <path>`.
+  // --print-lineup is the one path that legitimately needs neither (it just
+  // resolves the lineup), so we defer the "must supply an idea" check until
+  // after the print-lineup short-circuit.
+  let idea: string;
+  if (opts.ideaFile !== undefined && ideaArg !== undefined) {
+    process.stderr.write(
+      'Parliament: pass either <idea> or --idea-file, not both.\n',
+    );
+    process.exit(1);
+  } else if (opts.ideaFile !== undefined) {
+    try {
+      idea = fs.readFileSync(opts.ideaFile, 'utf-8').trim();
+    } catch (err) {
+      process.stderr.write(
+        `Parliament: failed to read --idea-file "${opts.ideaFile}": ${String(err)}\n`,
+      );
+      process.exit(1);
+    }
+    if (idea.length === 0) {
+      process.stderr.write(
+        `Parliament: --idea-file "${opts.ideaFile}" is empty.\n`,
+      );
+      process.exit(1);
+    }
+  } else if (ideaArg !== undefined) {
+    idea = ideaArg;
+  } else {
+    idea = '';
+  }
+
   const mode = (opts.mode ?? 'cooperative') as IdeateMode;
   const style = (opts.style ?? 'collective') as IdeateStyle;
   if (!VALID_MODES.includes(mode)) {
@@ -448,6 +489,16 @@ async function runIdeate(idea: string, opts: IdeateOptions): Promise<void> {
     }
     process.stdout.write(`${formatLineup(lineup)}\n`);
     return;
+  }
+
+  // Past the print-lineup short-circuit, an idea body is required. We
+  // validate here rather than at the top so `--print-lineup --mode=full`
+  // works without forcing a dummy idea string.
+  if (idea.length === 0) {
+    process.stderr.write(
+      'Parliament: must supply an idea via the positional argument or --idea-file <path>.\n',
+    );
+    process.exit(1);
   }
 
   // Cost gate for full mode. The server enforces the same contract via
@@ -647,7 +698,7 @@ export function createProgram(): Command {
     });
 
   program
-    .command('ideate <idea>')
+    .command('ideate [idea]')
     .description('Run a multi-model ideation on an idea (cooperative / adversarial / full)')
     .option(
       '--mode <name>',
@@ -667,6 +718,10 @@ export function createProgram(): Command {
     )
     .option('--config <path>', 'Path to parliament.toml config file (used by --print-lineup)')
     .option(
+      '--idea-file <path>',
+      'Path to a UTF-8 file whose contents are used as the idea body. Mutually exclusive with the positional <idea> argument.',
+    )
+    .option(
       '--poll-interval-ms <n>',
       'Polling cadence (in ms) for /ideate/:id while the run is in flight. Default: 2000.',
     )
@@ -674,7 +729,7 @@ export function createProgram(): Command {
       '--poll-timeout-ms <n>',
       'Maximum time (in ms) to wait for the ideation to finish. Default: 600000.',
     )
-    .action(async (idea: string, opts: IdeateOptions) => {
+    .action(async (idea: string | undefined, opts: IdeateOptions) => {
       await runIdeate(idea, opts);
     });
 

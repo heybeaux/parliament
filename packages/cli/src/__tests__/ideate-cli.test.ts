@@ -439,6 +439,115 @@ describe('formatLineup', () => {
 });
 
 // ---------------------------------------------------------------------------
+// --idea-file flag
+// ---------------------------------------------------------------------------
+
+describe('parliament ideate --idea-file', () => {
+  it('reads idea body from a file and POSTs the trimmed contents', async () => {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ideate-cli-file-'));
+    const ideaPath = path.join(tmp, 'idea.md');
+    fs.writeFileSync(ideaPath, '# Lattice\n\nBuild a thing.\n', 'utf8');
+
+    const { posts } = installFetchMock({
+      post: { status: 202, body: { id: 'file-1', status: 'running' } },
+      gets: [
+        { status: 200, body: ideationRecord({ id: 'file-1', phases: [completePhase()] }) },
+      ],
+    });
+
+    const { createProgram } = await import('../cli.js');
+    const program = createProgram();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+
+    const out = captureStream(process.stdout);
+    try {
+      await program.parseAsync([
+        'node', 'parliament', 'ideate',
+        '--idea-file', ideaPath,
+        '--poll-interval-ms', '100',
+      ]);
+    } finally {
+      out.restore();
+    }
+
+    expect(posts).toHaveLength(1);
+    const body = posts[0]!.body as { idea: string };
+    expect(body.idea).toBe('# Lattice\n\nBuild a thing.');
+  });
+
+  it('exits 1 when both <idea> and --idea-file are supplied', async () => {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ideate-cli-both-'));
+    const ideaPath = path.join(tmp, 'idea.md');
+    fs.writeFileSync(ideaPath, 'idea body', 'utf8');
+
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const err = captureStream(process.stderr);
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`__exit_${code ?? 0}__`);
+    }) as never);
+
+    const { createProgram } = await import('../cli.js');
+    const program = createProgram();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+
+    let caught: unknown;
+    try {
+      await program.parseAsync([
+        'node', 'parliament', 'ideate', 'inline idea',
+        '--idea-file', ideaPath,
+      ]);
+    } catch (e) {
+      caught = e;
+    } finally {
+      err.restore();
+      exitSpy.mockRestore();
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toContain('__exit_1__');
+    expect(err.read()).toContain('not both');
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('exits 1 when neither <idea> nor --idea-file is supplied (and not --print-lineup)', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const err = captureStream(process.stderr);
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`__exit_${code ?? 0}__`);
+    }) as never);
+
+    const { createProgram } = await import('../cli.js');
+    const program = createProgram();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+
+    let caught: unknown;
+    try {
+      await program.parseAsync(['node', 'parliament', 'ideate']);
+    } catch (e) {
+      caught = e;
+    } finally {
+      err.restore();
+      exitSpy.mockRestore();
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toContain('__exit_1__');
+    expect(err.read()).toContain('must supply an idea');
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Help text
 // ---------------------------------------------------------------------------
 

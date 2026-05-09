@@ -17,3 +17,8 @@ node_modules/
 *.js.map
 *.db
 *.sqlite
+
+# TypeScript incremental-build cache. Regenerated on every `tsc -b` run, so
+# tracking causes recurring merge conflicts and noisy diffs without any
+# upside — it's a local cache, not source.
+*.tsbuildinfo
