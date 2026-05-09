@@ -1,3 +1,5 @@
+import type { LatticeReport } from './ideate/types.js';
+
 export type TerminationReason =
   | 'consensus'
   | 'echo_loop'
@@ -462,6 +464,19 @@ export interface DeliberationResult {
    * Absent (falsy) on normal terminations.
    */
   incomplete?: true;
+  /**
+   * Optional Lattice coordination report. Populated by `runTopology()` when
+   * the deliberation was launched with `lattice.enabled === true`. Carries
+   * the trace ID, agreement ratio, conflicts, and per-agent pass/fail
+   * outcomes from every steppable + parallel-sibling neurotype. The
+   * synthesizer, RedAgent, and Sentry are intentionally NOT included
+   * (structural infrastructure, not contract participants).
+   *
+   * Optional and additive — pre-Lattice deliberations omit this field.
+   * The shape is shared with `IdeationRecord.lattice` so a single UI/audit
+   * pipeline can render both.
+   */
+  lattice?: LatticeReport;
 }
 
 export interface Blackboard {

@@ -8,16 +8,41 @@ import type {
   Turn,
   TurnMeta,
 } from './types.js';
-import type { Agent, ProviderFailoverInfo } from './agents/base.js';
+import type { Agent, AgentResult, ProviderFailoverInfo } from './agents/base.js';
 import type { SynthesizerAgent, SynthesizerResult } from './agents/synthesizer.js';
 import type { SentryAgent } from './agents/sentry.js';
 import type { TopologyConfig, TopologyStep } from './topology/index.js';
-import { executeParallelBlock } from './topology/parallel.js';
+import { executeParallelBlock, type ParallelAgentCallWrap } from './topology/parallel.js';
 import { DEFAULT_MAX_SOURCE_WORDS } from './agents/utils.js';
 import type { MemoryProvider, MemoryOutcome } from './memory.js';
 import { formatMemoryFragments } from './memory.js';
 import type { ContextProvider } from './context.js';
 import { formatResolvedContext } from './context.js';
+import { LatticeRunner } from './ideate/lattice.js';
+import { formatLatticeReport as formatLatticeReportShared } from './ideate/orchestrator.js';
+import type { LatticeIdeateOptions, LatticeReport } from './ideate/types.js';
+
+/**
+ * Agent.neurotype values (the architectural archetype the agent class
+ * declares — NOT the topology step ID) that are intentionally contrarian.
+ * The Lattice wrap keeps these on L1-only Circuit Breaker validation
+ * (cooperative agents get L1+L2) — same heuristic the ideate orchestrator
+ * uses for Skeptic / Devil's Advocate, mirrored here so every preset
+ * agrees on which roles are adversarial.
+ *
+ *   - SkepticAgent declares `neurotype = 'critical'`.
+ *   - DevilsAdvocateAgent declares `neurotype = 'devils-advocate'`.
+ *   - AdversaryAgent declares `neurotype = 'adversary'`.
+ */
+const ADVERSARIAL_NEUROTYPES = new Set<string>([
+  'critical',
+  'devils-advocate',
+  'adversary',
+]);
+
+function isAdversarialNeurotype(neurotype: string): boolean {
+  return ADVERSARIAL_NEUROTYPES.has(neurotype);
+}
 
 export interface DeliberationConfig {
   /** Maximum number of deliberation rounds. Default: 5. */
@@ -240,6 +265,18 @@ export interface TopologyDeliberationConfig {
   memoryAgentId?: string;
   /** PAR-38 — Max recall fragments. Default 5. */
   memoryRecallLimit?: number;
+  /**
+   * Optional Lattice coordination wrap. When `lattice.enabled` is `true`,
+   * every steppable + parallel-sibling agent's `generate(blackboard)` call
+   * is wrapped via `LatticeRunner.wrap` so each response becomes a typed
+   * State Contract validated through a tiered Circuit Breaker (L1+L2 for
+   * cooperative neurotypes, L1 only for the adversarial ones — Skeptic,
+   * Devil's Advocate, Adversary). The synthesizer, RedAgent, and Sentry
+   * are intentionally NOT wrapped: they are structural infrastructure, not
+   * contract participants. When `lattice` is omitted or `enabled === false`,
+   * the engine runs unchanged with byte-identical legacy behavior.
+   */
+  lattice?: LatticeIdeateOptions;
 }
 
 
@@ -977,6 +1014,52 @@ export class DeliberationEngine {
 
     const logger: TopologyRuntimeLogger = config.logger ?? { info: () => {} };
 
+    // Lattice wrap is strict opt-in (`lattice.enabled === true`). When absent
+    // or disabled the engine behaves exactly as it did pre-integration. The
+    // runner is shared across sequential + parallel paths so every wrapped
+    // call lands on the same trace ID and audit log, and the run-level
+    // report aggregates outcomes from both paths.
+    const latticeRunner: LatticeRunner | null =
+      config.lattice?.enabled === true ? new LatticeRunner(config.lattice) : null;
+
+    /**
+     * Wrap an `agent.generate(blackboard)` call when Lattice is active.
+     * Returns the original `AgentResult` so the engine's recorded `Turn`
+     * still carries the agent's prose verbatim — Lattice never rewrites the
+     * model output. The `content` round-trips through the wrap layer so we
+     * preserve the exact string the agent emitted (the Lattice State
+     * Contract is a side observation, not a substitute for the raw turn).
+     */
+    const wrapAgentCall = async (
+      agent: Agent,
+      call: () => Promise<AgentResult>,
+    ): Promise<AgentResult> => {
+      if (latticeRunner === null) return call();
+      let captured: AgentResult | null = null;
+      await latticeRunner.wrap(
+        {
+          id: agent.modelName,
+          role: agent.neurotype,
+          isAdversarial: isAdversarialNeurotype(agent.neurotype),
+        },
+        async () => {
+          const result = await call();
+          captured = result;
+          return result.content;
+        },
+      );
+      // The runner returns the wrapped string from `outcome.content`, but the
+      // engine needs the FULL `AgentResult` (truncated flag + meta) so we
+      // hold onto the original here. `captured` is set inside the closure
+      // before the runner resolves.
+      if (captured === null) {
+        throw new Error(
+          'Parliament: Lattice wrap completed without capturing an agent result',
+        );
+      }
+      return captured;
+    };
+
     const startedAt = new Date().toISOString();
 
     // PAR-16: see `run()` above — same normalization rule.
@@ -1138,7 +1221,7 @@ export class DeliberationEngine {
         // `AgentRuntimeOptions.onProviderFailover`. Resolvers from older
         // call sites that ignore the second arg keep working.
         const agent = resolveNeurotype(step, resolverContext);
-        const result = await agent.generate(blackboard);
+        const result = await wrapAgentCall(agent, () => agent.generate(blackboard));
         recordTurn(
           blackboard,
           agent,
@@ -1180,6 +1263,7 @@ export class DeliberationEngine {
           logger?: TopologyRuntimeLogger;
           synthConfidenceByRound?: ReadonlyMap<number, number>;
           resolverContext?: NeurotypeResolverContext;
+          latticeWrap?: ParallelAgentCallWrap;
         } = {
           logger,
           synthConfidenceByRound,
@@ -1190,6 +1274,14 @@ export class DeliberationEngine {
         };
         if (config.parallelBlockTimeoutMs !== undefined) {
           parallelOpts.timeoutMs = config.parallelBlockTimeoutMs;
+        }
+        // When Lattice is active, the parallel executor invokes each
+        // sibling's `generate` through the same wrap path as sequential
+        // steps so the run-level report aggregates outcomes from both
+        // paths under one trace ID + audit log.
+        if (latticeRunner !== null) {
+          parallelOpts.latticeWrap = (_step, agent, call) =>
+            wrapAgentCall(agent, call);
         }
         const parallelResult = await executeParallelBlock(
           parallelSteps,
@@ -1375,6 +1467,19 @@ export class DeliberationEngine {
       synthesis = bestSynthAttempt.content;
     }
 
+    // Build the run-level Lattice report (covers both sequential + parallel
+    // wrapped calls under one trace ID) and append the canonical
+    // "Lattice Coordination Report" section to the synthesizer's prose so
+    // downstream renderers (CLI, UI, audit pipelines) see a stable surface
+    // matching the `/ideate` flow. Done AFTER the best-effort fallback so
+    // the report is appended whether synthesis came from consensus or from
+    // bestSynthAttempt rescue.
+    const latticeReport: LatticeReport | null =
+      latticeRunner !== null ? latticeRunner.buildReport() : null;
+    if (latticeReport !== null && typeof synthesis === 'string') {
+      synthesis = `${synthesis.trim()}\n\n${formatLatticeReportShared(latticeReport)}`;
+    }
+
     // PAR-10: termination lifecycle marker. Always emitted, regardless of
     // why the loop exited.
     pushEvent({
@@ -1431,6 +1536,10 @@ export class DeliberationEngine {
       // background runner ignores this and writes its own status onto the
       // persisted row when the engine resolves vs. throws.
       status: 'completed',
+      // Surface the run-level Lattice report on the result so the CLI / UI
+      // / audit pipelines can consume it without re-parsing the synthesis
+      // markdown. Absent when the run was launched without `--lattice`.
+      ...(latticeReport !== null ? { lattice: latticeReport } : {}),
     };
   }
 }

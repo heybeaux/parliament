@@ -183,6 +183,26 @@ const DeliberateBodySchema = z.object({
       structured_output: z.boolean().optional(),
     })
     .optional(),
+  /**
+   * Optional Lattice coordination block. When `enabled: true`, the engine
+   * wraps every steppable + parallel-sibling agent's `generate` call with
+   * `@heybeaux/lattice-adapter-parliament` so each response becomes a
+   * State Contract validated through a tiered Circuit Breaker (L1+L2 for
+   * cooperative neurotypes, L1 only for the adversarial ones — Skeptic,
+   * Devil's Advocate, Adversary). The synthesizer / RedAgent / Sentry are
+   * intentionally NOT wrapped (structural infrastructure, not contract
+   * participants). Defaults preserve pre-integration behaviour: a missing
+   * block is treated as `enabled: false`. Mirrors the `/ideate` shape so
+   * a single client SDK can target both routes.
+   */
+  lattice: z
+    .object({
+      enabled: z.boolean(),
+      auditLogPath: z.string().min(1).optional(),
+      minAgreementRatio: z.number().min(0).max(1).optional(),
+      shadowMode: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -1033,6 +1053,7 @@ export function createRouter(
       sources: requestSources,
       config: configOverrides,
       transform: transformFlags,
+      lattice: latticeOptions,
     } = parsed.data;
 
     // PAR-32 / PRD D2: only `retry_on_upstream_500: true` engages the
@@ -1195,6 +1216,7 @@ export function createRouter(
           ...topologyConfig,
           onTurn,
           onEvent,
+          ...(latticeOptions !== undefined ? { lattice: latticeOptions } : {}),
         });
         try {
           markCompleted(db, id, result);

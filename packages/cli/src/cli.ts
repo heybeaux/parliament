@@ -40,6 +40,7 @@ import type {
   IdeateMode,
   IdeateStyle,
   IdeationRecord,
+  LatticeIdeateOptions,
   ResolvedLineup,
   TopologyStep,
 } from '@parliament/core';
@@ -79,6 +80,19 @@ interface DeliberateOptions {
    * (PAR-17). Optional. Must parse to a positive integer.
    */
   maxSourceWords?: string;
+  /**
+   * Lattice coordination toggle. When `true`, the engine wraps every
+   * non-structural agent call with a State Contract + Circuit Breaker and
+   * appends a "Lattice Coordination Report" to the synthesis. Defaults to
+   * `false` (opt-in) so existing users see no behavior change.
+   */
+  lattice?: boolean;
+  /**
+   * Path for the JSONL audit log Lattice writes to when `--lattice=true`.
+   * Defaults to `./parliament-audit.jsonl` when omitted. Ignored when
+   * `--lattice` is `false`.
+   */
+  auditLog?: string;
 }
 
 /**
@@ -270,8 +284,21 @@ async function runDeliberate(topic: string, opts: DeliberateOptions): Promise<vo
     }
   })();
 
+  // --lattice forces the topology path even on the default `debate` preset:
+  // the legacy 5-agent `engine.run` codepath has no Lattice wiring, so an
+  // unforced legacy run would silently drop the flag.
   const useTopologyPath =
-    opts.preset !== undefined || baseTopology.activePreset.id !== 'debate';
+    opts.preset !== undefined ||
+    baseTopology.activePreset.id !== 'debate' ||
+    opts.lattice === true;
+
+  const latticeOptions: LatticeIdeateOptions | undefined =
+    opts.lattice === true
+      ? {
+          enabled: true,
+          auditLogPath: opts.auditLog ?? DEFAULT_AUDIT_LOG_PATH,
+        }
+      : undefined;
 
   let result: DeliberationResult;
 
@@ -316,6 +343,7 @@ async function runDeliberate(topic: string, opts: DeliberateOptions): Promise<vo
       ...(context !== undefined ? { context } : {}),
       ...(sources !== undefined ? { sources } : {}),
       ...(maxSourceWords !== undefined ? { maxSourceWords } : {}),
+      ...(latticeOptions !== undefined ? { lattice: latticeOptions } : {}),
       ...memoryOpts,
     });
   } else {
@@ -679,6 +707,16 @@ export function createProgram(): Command {
     .option(
       '--max-source-words <n>',
       'Per-source word cap applied at prompt-construction time (PAR-17). Default: 500.',
+    )
+    .option(
+      '--lattice',
+      // Boolean flag — Commander defaults to `false` when absent (opt-in).
+      'Wrap every non-structural agent call with @heybeaux/lattice-adapter-parliament for State Contract validation, Circuit Breaker enforcement, and ConsensusReducer-based agreement tracking. Adds a "Lattice Coordination Report" to the synthesis. Default: off.',
+      false,
+    )
+    .option(
+      '--audit-log <path>',
+      `Path to the JSONL audit log Lattice writes to when --lattice is set. Default: ${DEFAULT_AUDIT_LOG_PATH}.`,
     )
     .action(async (topic: string, opts: DeliberateOptions) => {
       await runDeliberate(topic, opts);

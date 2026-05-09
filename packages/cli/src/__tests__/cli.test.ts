@@ -431,6 +431,155 @@ describe('parliament deliberate --preset', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// PAR-Lattice — `parliament deliberate --lattice` flag wiring.
+//
+// We assert the flag (a) shows up in --help, (b) forces the topology path
+// even on the default debate preset (the legacy run() path has no Lattice
+// hook), and (c) marshals the right structured options into the engine's
+// `runTopology` config.
+// ---------------------------------------------------------------------------
+
+describe('parliament deliberate --lattice', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('--help advertises --lattice and --audit-log', async () => {
+    const { createProgram } = await import('../cli.js');
+    const program = createProgram();
+
+    let helpOutput = '';
+    program.configureOutput({
+      writeOut: (str) => { helpOutput += str; },
+      writeErr: () => {},
+    });
+    program.exitOverride();
+    program.commands.forEach((cmd) => {
+      cmd.configureOutput({
+        writeOut: (str) => { helpOutput += str; },
+        writeErr: () => {},
+      });
+      cmd.exitOverride();
+    });
+
+    try {
+      await program.parseAsync(['node', 'parliament', 'deliberate', '--help']);
+    } catch {
+      // exitOverride throws — ignore.
+    }
+
+    expect(helpOutput).toContain('--lattice');
+    expect(helpOutput).toContain('--audit-log');
+  });
+
+  it('forces the topology path even on the default debate preset and threads lattice config', async () => {
+    const core = await import('@parliament/core');
+    const mockEngineRun = vi.fn().mockResolvedValue(MOCK_RESULT);
+    const mockEngineRunTopology = vi.fn().mockResolvedValue(MOCK_RESULT);
+    (core.DeliberationEngine as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () => ({ run: mockEngineRun, runTopology: mockEngineRunTopology }),
+    );
+
+    const { createProgram } = await import('../cli.js');
+    const program = createProgram();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+
+    await program.parseAsync([
+      'node', 'parliament', 'deliberate', 'topic', '--lattice',
+    ]);
+
+    // --lattice forces the topology path: legacy run() must not be called
+    // (it has no Lattice hook).
+    expect(mockEngineRunTopology).toHaveBeenCalledTimes(1);
+    expect(mockEngineRun).not.toHaveBeenCalled();
+
+    const callArgs = mockEngineRunTopology.mock.calls[0]?.[1] as {
+      lattice?: { enabled: boolean; auditLogPath?: string };
+    };
+    expect(callArgs.lattice).toEqual({
+      enabled: true,
+      auditLogPath: './parliament-audit.jsonl',
+    });
+  });
+
+  it('--audit-log forwards the supplied path verbatim', async () => {
+    const core = await import('@parliament/core');
+    const mockEngineRun = vi.fn().mockResolvedValue(MOCK_RESULT);
+    const mockEngineRunTopology = vi.fn().mockResolvedValue(MOCK_RESULT);
+    (core.DeliberationEngine as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () => ({ run: mockEngineRun, runTopology: mockEngineRunTopology }),
+    );
+
+    const { createProgram } = await import('../cli.js');
+    const program = createProgram();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+
+    await program.parseAsync([
+      'node', 'parliament', 'deliberate', 'topic',
+      '--lattice',
+      '--audit-log', '/tmp/custom-deliberate-audit.jsonl',
+    ]);
+
+    expect(mockEngineRunTopology).toHaveBeenCalledTimes(1);
+    const callArgs = mockEngineRunTopology.mock.calls[0]?.[1] as {
+      lattice?: { enabled: boolean; auditLogPath?: string };
+    };
+    expect(callArgs.lattice).toEqual({
+      enabled: true,
+      auditLogPath: '/tmp/custom-deliberate-audit.jsonl',
+    });
+  });
+
+  it('omits the lattice config when --lattice is absent (legacy path stays on run())', async () => {
+    const core = await import('@parliament/core');
+    const mockEngineRun = vi.fn().mockResolvedValue(MOCK_RESULT);
+    const mockEngineRunTopology = vi.fn().mockResolvedValue(MOCK_RESULT);
+    (core.DeliberationEngine as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () => ({ run: mockEngineRun, runTopology: mockEngineRunTopology }),
+    );
+
+    const { createProgram } = await import('../cli.js');
+    const program = createProgram();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+
+    await program.parseAsync([
+      'node', 'parliament', 'deliberate', 'topic',
+    ]);
+
+    // No --lattice + default debate preset → legacy run() path.
+    expect(mockEngineRun).toHaveBeenCalledTimes(1);
+    expect(mockEngineRunTopology).not.toHaveBeenCalled();
+  });
+
+  it('threads lattice config when --lattice combined with --preset', async () => {
+    const core = await import('@parliament/core');
+    const mockEngineRun = vi.fn().mockResolvedValue(MOCK_RESULT);
+    const mockEngineRunTopology = vi.fn().mockResolvedValue(MOCK_RESULT);
+    (core.DeliberationEngine as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () => ({ run: mockEngineRun, runTopology: mockEngineRunTopology }),
+    );
+
+    const { createProgram } = await import('../cli.js');
+    const program = createProgram();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+
+    await program.parseAsync([
+      'node', 'parliament', 'deliberate', 'topic',
+      '--preset', 'socratic',
+      '--lattice',
+    ]);
+
+    expect(mockEngineRunTopology).toHaveBeenCalledTimes(1);
+    const callArgs = mockEngineRunTopology.mock.calls[0]?.[1] as {
+      lattice?: { enabled: boolean };
+      topology: { activePreset: { id: string } };
+    };
+    expect(callArgs.topology.activePreset.id).toBe('socratic');
+    expect(callArgs.lattice?.enabled).toBe(true);
+  });
+});
+
 describe('display.ts role colors', () => {
   it('formatTurnHeader returns a string for any Turn', async () => {
     const { formatTurnHeader } = await import('../display.js');

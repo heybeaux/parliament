@@ -25,7 +25,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { Agent } from '../agents/base.js';
+import type { Agent, AgentResult } from '../agents/base.js';
 import type { AdapterMeta, Blackboard, Conflict, Turn } from '../types.js';
 import type {
   NeurotypeResolver,
@@ -33,6 +33,19 @@ import type {
   TopologyRuntimeLogger,
 } from '../engine.js';
 import type { TopologyStep } from './types.js';
+
+/**
+ * Optional callback the engine supplies when Lattice coordination is enabled.
+ * Wraps a sibling agent's `generate(blackboard)` call so the response gets
+ * State Contract validation + audit logging before the executor records the
+ * turn. The callback returns the same `AgentResult` shape so the parallel
+ * code path stays byte-identical for runs that don't enable Lattice.
+ */
+export type ParallelAgentCallWrap = (
+  step: TopologyStep,
+  agent: Agent,
+  call: () => Promise<AgentResult>,
+) => Promise<AgentResult>;
 
 /** Result of executing a parallel block. The caller appends these in order. */
 export interface ParallelBlockResult {
@@ -70,6 +83,15 @@ export interface ExecuteParallelBlockOptions {
    * pass nothing and behaviour is unchanged.
    */
   resolverContext?: NeurotypeResolverContext;
+  /**
+   * Optional Lattice agent-call wrapper. When supplied, every sibling's
+   * `agent.generate(snapshot)` call goes through this wrapper so the
+   * response is validated as a State Contract, the audit log is appended,
+   * and the sibling outcome is recorded for the run-level Lattice report.
+   * When omitted, the executor calls `agent.generate` directly — keeping
+   * legacy parallel runs byte-identical.
+   */
+  latticeWrap?: ParallelAgentCallWrap;
 }
 
 /**
@@ -150,6 +172,7 @@ async function runSibling(
   snapshot: Blackboard,
   resolveNeurotype: NeurotypeResolver,
   resolverContext: NeurotypeResolverContext | undefined,
+  latticeWrap: ParallelAgentCallWrap | undefined,
 ): Promise<{
   step: TopologyStep;
   agent: Agent;
@@ -170,7 +193,10 @@ async function runSibling(
   // see the same wiring as sequential steps. Resolvers that ignore the
   // second arg behave exactly as before.
   const agent = resolveNeurotype(step, resolverContext);
-  const result = await agent.generate(ownView);
+  const result =
+    latticeWrap === undefined
+      ? await agent.generate(ownView)
+      : await latticeWrap(step, agent, () => agent.generate(ownView));
   const elapsedMs = Date.now() - startedAt;
 
   // Capture any conflicts the agent appended. We compare lengths against the
@@ -210,7 +236,7 @@ export async function executeParallelBlock(
   round: number,
   options: ExecuteParallelBlockOptions = {},
 ): Promise<ParallelBlockResult> {
-  const { timeoutMs, logger, synthConfidenceByRound, resolverContext } = options;
+  const { timeoutMs, logger, synthConfidenceByRound, resolverContext, latticeWrap } = options;
   const parallelGroup = randomUUID();
 
   if (steps.length === 0) {
@@ -224,7 +250,7 @@ export async function executeParallelBlock(
   // Track per-step settlement so that on timeout we can name the offenders.
   const settled = new Set<string>();
   const tasks = steps.map((step) =>
-    runSibling(step, snapshot, resolveNeurotype, resolverContext).then(
+    runSibling(step, snapshot, resolveNeurotype, resolverContext, latticeWrap).then(
       (res) => {
         settled.add(step.id);
         return { kind: 'ok' as const, value: res };
