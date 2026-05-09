@@ -368,7 +368,24 @@ interface IdeateOptions {
   pollIntervalMs?: string;
   /** Hard timeout in ms for the polling loop. Default: 600_000 (10 min). */
   pollTimeoutMs?: string;
+  /**
+   * Lattice coordination toggle (PAR-Lattice). When `true`, the server wraps
+   * each model call with a State Contract + Circuit Breaker and runs the
+   * cooperative team through `ParliamentReducer` to surface an agreement
+   * ratio + conflicts. Defaults to `false` (opt-in) so existing users see
+   * no behavior change.
+   */
+  lattice?: boolean;
+  /**
+   * Path for the JSONL audit log Lattice writes to when `--lattice=true`.
+   * Defaults to `./parliament-audit.jsonl` if `--lattice=true` is set
+   * without an explicit path. Ignored when `--lattice` is `false`.
+   */
+  auditLog?: string;
 }
+
+/** Default audit-log path matching the spec + `@parliament/core` constant. */
+const DEFAULT_AUDIT_LOG_PATH = './parliament-audit.jsonl';
 
 const VALID_MODES: readonly IdeateMode[] = ['cooperative', 'adversarial', 'full'];
 const VALID_STYLES: readonly IdeateStyle[] = ['individual', 'collective'];
@@ -476,6 +493,19 @@ async function runIdeate(idea: string, opts: IdeateOptions): Promise<void> {
 
   const body: Record<string, unknown> = { idea, mode, style };
   if (confirmed) body['confirm'] = true;
+  // Lattice opt-in: send the structured `lattice` block to the server. The
+  // server normalises defaults; we only forward what the user supplied.
+  if (opts.lattice === true) {
+    const auditLogPath = opts.auditLog ?? DEFAULT_AUDIT_LOG_PATH;
+    body['lattice'] = { enabled: true, auditLogPath };
+  } else if (opts.auditLog !== undefined) {
+    // The user passed `--audit-log` without `--lattice=true`. That's almost
+    // always a typo / wishful thinking — surface it loudly instead of
+    // silently dropping the flag.
+    process.stderr.write(
+      'Parliament: --audit-log requires --lattice=true; ignoring.\n',
+    );
+  }
 
   let post: Response;
   try {
@@ -673,6 +703,17 @@ export function createProgram(): Command {
     .option(
       '--poll-timeout-ms <n>',
       'Maximum time (in ms) to wait for the ideation to finish. Default: 600000.',
+    )
+    .option(
+      '--lattice',
+      // Boolean flag. Commander defaults boolean options to `false` when
+      // absent — exactly the behaviour the spec asks for (opt-in).
+      'Wrap model calls with @heybeaux/lattice-adapter-parliament for State Contract validation, Circuit Breaker enforcement, and ConsensusReducer-based agreement tracking. Adds a "Lattice Coordination Report" to the synthesis. Default: off.',
+      false,
+    )
+    .option(
+      '--audit-log <path>',
+      `Path to the JSONL audit log Lattice writes to when --lattice is set. Default: ${DEFAULT_AUDIT_LOG_PATH}.`,
     )
     .action(async (idea: string, opts: IdeateOptions) => {
       await runIdeate(idea, opts);
