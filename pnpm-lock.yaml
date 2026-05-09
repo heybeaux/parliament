@@ -6,7 +6,6 @@ settings:
 
 overrides:
   '@heybeaux/lattice-core': 0.1.0
-  '@acr/schema': file:/tmp/acr/packages/schema
 
 patchedDependencies:
   '@heybeaux/lattice-core@0.1.0':
@@ -57,12 +56,12 @@ importers:
 
   packages/core:
     dependencies:
-      '@acr/core':
-        specifier: file:/tmp/acr/packages/core
-        version: file:../../../../tmp/acr/packages/core
-      '@acr/schema':
-        specifier: file:/tmp/acr/packages/schema
-        version: file:../../../../tmp/acr/packages/schema
+      '@agentcapabilityruntime/core':
+        specifier: ^0.2.0
+        version: 0.2.0
+      '@agentcapabilityruntime/schema':
+        specifier: ^0.2.0
+        version: 0.2.0
       '@heybeaux/lattice-adapter-parliament':
         specifier: 0.2.1
         version: 0.2.1
@@ -164,6 +163,18 @@ packages:
   /@adobe/css-tools@4.4.4:
     resolution: {integrity: sha512-Elp+iwUx5rN5+Y8xLt5/GRoG20WGoDCQ/1Fb+1LiGtvwbDavuSk0jhD/eZdckHAuzcDzccnkv+rEjyWfRx18gg==}
     dev: true
+
+  /@agentcapabilityruntime/core@0.2.0:
+    resolution: {integrity: sha512-mUNvrVhlTp2hGwzpXyFBp+C2tc2rZaAwS+oZ2JI7Le/l07FaVKTpQNcqb2D8mJt0hV0lrHTO6pEtD/orav6/Ng==}
+    dependencies:
+      '@agentcapabilityruntime/schema': 0.2.0
+      ajv: 8.20.0
+      yaml: 2.8.4
+    dev: false
+
+  /@agentcapabilityruntime/schema@0.2.0:
+    resolution: {integrity: sha512-qeS3GgTTE9fVBdxM+egdKHDT6MsTNyIzYeZql/jZt+Eow2s6emltsrCbFbqaqxAW8JbH38eQxxh9uyKr4zdX1g==}
+    dev: false
 
   /@alloc/quick-lru@5.2.0:
     resolution: {integrity: sha512-UrcABB+4bUrFABwbluTIBErXwvbsU/V7TZWfmbgJfbkwiBuziS9gxdODUyuiecfdGQ85jglMW6juS3+z5TsKLw==}
@@ -3983,18 +3994,4 @@ packages:
 
   /zod@4.4.2:
     resolution: {integrity: sha512-IynmDyxsEsb9RKzO3J9+4SxXnl2FTFSzNBaKKaMV6tsSk0rw9gYw9gs+JFCq/qk2LCZ78KDwyj+Z289TijSkUw==}
-    dev: false
-
-  file:../../../../tmp/acr/packages/core:
-    resolution: {directory: ../../../../tmp/acr/packages/core, type: directory}
-    name: '@acr/core'
-    dependencies:
-      '@acr/schema': file:../../../../tmp/acr/packages/schema
-      ajv: 8.20.0
-      yaml: 2.8.4
-    dev: false
-
-  file:../../../../tmp/acr/packages/schema:
-    resolution: {directory: ../../../../tmp/acr/packages/schema, type: directory}
-    name: '@acr/schema'
     dev: false

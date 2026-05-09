@@ -5,7 +5,7 @@ import {
   formatResolvedContext,
   type ResolvedContext,
 } from '../context.js';
-import type { ResolutionPlan } from '@acr/schema';
+import type { ResolutionPlan } from '@agentcapabilityruntime/schema';
 
 const stubPlan: ResolutionPlan = {
   capabilities: [],

@@ -27,8 +27,7 @@
       ]
     },
     "overrides": {
-      "@heybeaux/lattice-core": "0.1.0",
-      "@acr/schema": "file:/tmp/acr/packages/schema"
+      "@heybeaux/lattice-core": "0.1.0"
     },
     "patchedDependencies": {
       "@heybeaux/lattice-core@0.1.0": "patches/@heybeaux__lattice-core@0.1.0.patch"

@@ -1,7 +1,7 @@
 /**
  * ACR integration test (PAR-41).
  *
- * Exercises the real `@acr/core` programmatic API through Parliament's
+ * Exercises the real `@agentcapabilityruntime/core` programmatic API through Parliament's
  * ACRContextProvider. Skipped by default. Opt in with:
  *
  *   ACR_MANIFEST_PATH=/path/to/.acr \
@@ -13,17 +13,17 @@
  * seam that catches ACR contract drift before it reaches production.
  *
  * ACR is a programmatic SDK (not HTTP), so we exercise `resolve()` and
- * `calculateBudget()` from `@acr/core` directly — not HTTP round-trips.
+ * `calculateBudget()` from `@agentcapabilityruntime/core` directly — not HTTP round-trips.
  * The contract pin lives at `integrations/acr/PIN.md`.
  *
- * Note: `@acr/core` is added to package.json as part of PAR-39. Until then
+ * Note: `@agentcapabilityruntime/core` is added to package.json as part of PAR-39. Until then
  * the live describe block is skipped (both by env-var gate and import guard).
  */
 
 import { describe, it, expect } from 'vitest';
-import type { ResolutionPlan } from '@acr/schema';
+import type { ResolutionPlan } from '@agentcapabilityruntime/schema';
 
-// BudgetReport is a runtime shape from @acr/core (not exported by @acr/schema).
+// BudgetReport is a runtime shape from @agentcapabilityruntime/core (not exported by @agentcapabilityruntime/schema).
 // Inline a structural type matching the assertions below — this is a contract pin.
 interface BudgetReport {
   totalBudget: number;
@@ -41,12 +41,12 @@ interface BudgetReport {
 const acrManifestPath = process.env['ACR_MANIFEST_PATH'];
 const acrEnabled = typeof acrManifestPath === 'string' && acrManifestPath.length > 0;
 
-// Lazily import @acr/core so the file loads even before PAR-39 installs the package.
+// Lazily import @agentcapabilityruntime/core so the file loads even before PAR-39 installs the package.
 // Types are inlined here to avoid a cross-package type dependency before the dep exists.
 async function loadAcr() {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return await import('@acr/core') as any;
+    return await import('@agentcapabilityruntime/core') as any;
   } catch {
     return null;
   }
@@ -56,7 +56,7 @@ describe.skipIf(!acrEnabled)('ACRContextProvider live contract', () => {
   it('scanCapabilities() loads at least one manifest from ACR_MANIFEST_PATH', async () => {
     const acr = await loadAcr();
     if (!acr) {
-      console.warn('[acr-integration] @acr/core not installed — install as part of PAR-39');
+      console.warn('[acr-integration] @agentcapabilityruntime/core not installed — install as part of PAR-39');
       return;
     }
 
