@@ -1,0 +1,8 @@
+echo "pre-push: pnpm run lint"
+pnpm run lint || exit 1
+
+echo "pre-push: pnpm run test"
+pnpm run test || exit 1
+
+echo "pre-push: pnpm run build"
+pnpm run build || exit 1
