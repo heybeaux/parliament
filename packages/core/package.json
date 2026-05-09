@@ -16,8 +16,10 @@
     "lint": "eslint src"
   },
   "dependencies": {
-    "smol-toml": "^1.6.1",
     "@acr/core": "file:/tmp/acr/packages/core",
-    "@acr/schema": "file:/tmp/acr/packages/schema"
+    "@acr/schema": "file:/tmp/acr/packages/schema",
+    "@heybeaux/lattice-adapter-parliament": "0.2.1",
+    "@heybeaux/lattice-core": "0.1.0",
+    "smol-toml": "^1.6.1"
   }
 }

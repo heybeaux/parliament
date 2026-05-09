@@ -141,6 +141,64 @@ export interface IdeationRecord {
   phases: readonly PhaseRecord[];
   synthesis: string | null;
   error: string | null;
+  /** Optional Lattice coordination report when the run was launched with `--lattice`. */
+  lattice?: LatticeReport | null;
+}
+
+/**
+ * Lattice coordination metadata aggregated across all per-phase wrapped
+ * model calls. Surfaced both on the `RunIdeationResult` and (eventually)
+ * on the persisted `IdeationRecord` so consumers can ship audit reports
+ * without re-running the deliberation.
+ *
+ * Phase-bucketed contracts let the synthesizer (and the human-facing
+ * "Lattice Coordination Report") attribute conflicts and pass/fail outcomes
+ * to the cooperative-build, adversarial-critique, or rebuttal step that
+ * generated them.
+ */
+export interface LatticeReport {
+  /** Whether the run was actually wrapped with Lattice (false = bypassed). */
+  enabled: boolean;
+  /** ULID-style trace ID of the cooperative-build phase (or first wrapped phase). */
+  traceId: string;
+  /** Aggregate ratio of models that agreed on the consensus fields. */
+  agreementRatio: number;
+  /** True when the agreement ratio met the configured `minAgreementRatio`. */
+  consensusReached: boolean;
+  /** Conflicts surfaced by ConsensusReducer across the cooperative team. */
+  conflicts: ReadonlyArray<{
+    field: string;
+    values: ReadonlyArray<{ agentId: string; value: unknown }>;
+    resolution: string;
+  }>;
+  /** Per-model pass/fail outcome for the cooperative + adversarial wrap. */
+  modelOutcomes: ReadonlyArray<{
+    agentId: string;
+    role: string;
+    isAdversarial: boolean;
+    passed: boolean;
+    breakerTier: 'L1' | 'L1+L2';
+  }>;
+  /** Path the audit log was written to (or `null` when no path was supplied). */
+  auditLogPath: string | null;
+}
+
+/**
+ * Caller-supplied Lattice options. When `enabled` is false, the orchestrator
+ * runs unchanged. Default `shadowMode: true` ensures Circuit Breaker failures
+ * NEVER abort a deliberation — they only surface in the report.
+ */
+export interface LatticeIdeateOptions {
+  enabled: boolean;
+  /** Path to the JSONL audit log. Defaults to `./parliament-audit.jsonl`. */
+  auditLogPath?: string;
+  /** ConsensusReducer minimum agreement ratio. Defaults to 0.6. */
+  minAgreementRatio?: number;
+  /**
+   * Default to `true` — Lattice never blocks a Parliament deliberation. Set
+   * to `false` only in tests that want to assert raw breaker behavior.
+   */
+  shadowMode?: boolean;
 }
 
 /**

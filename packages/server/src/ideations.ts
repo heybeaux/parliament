@@ -30,6 +30,7 @@ import type {
   IdeateStyle,
   IdeationRecord,
   IdeationStatus,
+  LatticeReport,
   PhaseRecord,
   ResolvedLineup,
 } from '@parliament/core';
@@ -56,6 +57,16 @@ export function ensureIdeationsTable(db: Db): void {
     `CREATE INDEX IF NOT EXISTS idx_ideations_account_created
        ON ideations(account_id, created_at DESC, id DESC)`,
   );
+  // Lattice integration (PAR-Lattice). Idempotent additive migration: stores
+  // the LatticeReport JSON when the run was launched with --lattice=true.
+  // ALTER TABLE ... ADD COLUMN raises in better-sqlite3 if the column
+  // already exists, so guard with PRAGMA table_info.
+  const cols = db
+    .prepare<[], { name: string }>(`PRAGMA table_info(ideations)`)
+    .all() as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === 'lattice_json')) {
+    db.exec(`ALTER TABLE ideations ADD COLUMN lattice_json TEXT`);
+  }
 }
 
 interface IdeationRow {
@@ -70,10 +81,11 @@ interface IdeationRow {
   phases_json: string;
   synthesis: string | null;
   error: string | null;
+  lattice_json: string | null;
 }
 
 function rowToRecord(row: IdeationRow): IdeationRecord {
-  return {
+  const record: IdeationRecord = {
     id: row.id,
     created_at: row.created_at,
     idea: row.idea,
@@ -85,6 +97,18 @@ function rowToRecord(row: IdeationRow): IdeationRecord {
     synthesis: row.synthesis,
     error: row.error,
   };
+  // Surface the Lattice report when present. Old rows from before the
+  // PAR-Lattice migration return null; never include the field in that
+  // case so JSON consumers don't trip on a phantom `lattice: null`.
+  if (row.lattice_json !== null) {
+    try {
+      record.lattice = JSON.parse(row.lattice_json) as LatticeReport;
+    } catch {
+      // Corrupt JSON should fall through silently — better to omit the
+      // report than to fail the whole GET.
+    }
+  }
+  return record;
 }
 
 /**
@@ -124,7 +148,8 @@ export function createIdeationRow(
 
 /**
  * Persist the final outcome of an ideation run. Writes phases + synthesis +
- * error in a single UPDATE so a polling client never sees a half-updated row.
+ * error + (optional) Lattice report in a single UPDATE so a polling client
+ * never sees a half-updated row.
  */
 export function finalizeIdeation(
   db: Db,
@@ -134,11 +159,13 @@ export function finalizeIdeation(
     phases: readonly PhaseRecord[];
     synthesis: string | null;
     error: string | null;
+    /** Lattice coordination report when --lattice was active; null otherwise. */
+    lattice?: LatticeReport | null;
   },
 ): void {
   const stmt = db.prepare(
     `UPDATE ideations
-       SET status = ?, phases_json = ?, synthesis = ?, error = ?
+       SET status = ?, phases_json = ?, synthesis = ?, error = ?, lattice_json = ?
      WHERE id = ?`,
   );
   stmt.run(
@@ -146,6 +173,7 @@ export function finalizeIdeation(
     JSON.stringify(outcome.phases),
     outcome.synthesis,
     outcome.error,
+    outcome.lattice != null ? JSON.stringify(outcome.lattice) : null,
     id,
   );
 }
@@ -157,7 +185,7 @@ export function finalizeIdeation(
 export function getIdeation(db: Db, id: string): IdeationRecord | null {
   const stmt = db.prepare<[string], IdeationRow>(
     `SELECT id, created_at, account_id, idea, mode, style, status,
-            lineup_json, phases_json, synthesis, error
+            lineup_json, phases_json, synthesis, error, lattice_json
        FROM ideations WHERE id = ?`,
   );
   const row = stmt.get(id);

@@ -470,5 +470,175 @@ describe('parliament ideate --help', () => {
     expect(helpOutput).toContain('--style');
     expect(helpOutput).toContain('--yes');
     expect(helpOutput).toContain('--print-lineup');
+    // PAR-Lattice flags appear in help so users discover them naturally.
+    expect(helpOutput).toContain('--lattice');
+    expect(helpOutput).toContain('--audit-log');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PAR-Lattice — --lattice / --audit-log flags
+//
+// The CLI flags marshal a structured `lattice` block onto the POST body. The
+// orchestrator/server interpret it; here we just pin the wire shape.
+// ---------------------------------------------------------------------------
+
+describe('parliament ideate --lattice', () => {
+  it('default (no flag) omits the lattice block from the POST body', async () => {
+    const { posts } = installFetchMock({
+      post: { status: 202, body: { id: 'abc-1', status: 'running' } },
+      gets: [{ status: 200, body: ideationRecord({ id: 'abc-1' }) }],
+    });
+    const out = captureStream(process.stdout);
+
+    const { createProgram } = await import('../cli.js');
+    const program = createProgram();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+
+    try {
+      await program.parseAsync([
+        'node', 'parliament', 'ideate', 'an idea',
+        '--poll-interval-ms', '100',
+      ]);
+    } finally {
+      out.restore();
+    }
+
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.body).toEqual({
+      idea: 'an idea',
+      mode: 'cooperative',
+      style: 'collective',
+    });
+    // Body must not carry a lattice key when the flag is absent.
+    expect((posts[0]!.body as Record<string, unknown>).lattice).toBeUndefined();
+  });
+
+  it('--lattice sends { enabled: true, auditLogPath: default } when no --audit-log', async () => {
+    const { posts } = installFetchMock({
+      post: { status: 202, body: { id: 'abc-2', status: 'running' } },
+      gets: [{ status: 200, body: ideationRecord({ id: 'abc-2' }) }],
+    });
+    const out = captureStream(process.stdout);
+
+    const { createProgram } = await import('../cli.js');
+    const program = createProgram();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+
+    try {
+      await program.parseAsync([
+        'node', 'parliament', 'ideate', 'an idea',
+        '--lattice',
+        '--poll-interval-ms', '100',
+      ]);
+    } finally {
+      out.restore();
+    }
+
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.body).toMatchObject({
+      idea: 'an idea',
+      mode: 'cooperative',
+      style: 'collective',
+      lattice: { enabled: true, auditLogPath: './parliament-audit.jsonl' },
+    });
+  });
+
+  it('--lattice with --audit-log forwards the supplied path verbatim', async () => {
+    const { posts } = installFetchMock({
+      post: { status: 202, body: { id: 'abc-3', status: 'running' } },
+      gets: [{ status: 200, body: ideationRecord({ id: 'abc-3' }) }],
+    });
+    const out = captureStream(process.stdout);
+
+    const { createProgram } = await import('../cli.js');
+    const program = createProgram();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+
+    try {
+      await program.parseAsync([
+        'node', 'parliament', 'ideate', 'an idea',
+        '--lattice',
+        '--audit-log', '/tmp/custom-audit.jsonl',
+        '--poll-interval-ms', '100',
+      ]);
+    } finally {
+      out.restore();
+    }
+
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.body).toMatchObject({
+      lattice: { enabled: true, auditLogPath: '/tmp/custom-audit.jsonl' },
+    });
+  });
+
+  it('--audit-log without --lattice warns on stderr and omits the lattice block', async () => {
+    const { posts } = installFetchMock({
+      post: { status: 202, body: { id: 'abc-4', status: 'running' } },
+      gets: [{ status: 200, body: ideationRecord({ id: 'abc-4' }) }],
+    });
+    const out = captureStream(process.stdout);
+    const err = captureStream(process.stderr);
+
+    const { createProgram } = await import('../cli.js');
+    const program = createProgram();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+
+    try {
+      await program.parseAsync([
+        'node', 'parliament', 'ideate', 'an idea',
+        '--audit-log', '/tmp/orphan.jsonl',
+        '--poll-interval-ms', '100',
+      ]);
+    } finally {
+      out.restore();
+      err.restore();
+    }
+
+    expect(err.read()).toContain('--audit-log requires --lattice=true');
+    expect((posts[0]!.body as Record<string, unknown>).lattice).toBeUndefined();
+  });
+
+  it('prints a one-line Lattice summary when the record carries a lattice report', async () => {
+    const latticeReport = {
+      enabled: true,
+      traceId: '01TEST_TRACE',
+      agreementRatio: 0.75,
+      consensusReached: true,
+      conflicts: [],
+      modelOutcomes: [
+        { agentId: 'm1', role: 'proposer', isAdversarial: false, passed: true, breakerTier: 'L1+L2' as const },
+      ],
+      auditLogPath: './parliament-audit.jsonl',
+    };
+    const { posts } = installFetchMock({
+      post: { status: 202, body: { id: 'abc-5', status: 'running' } },
+      gets: [
+        { status: 200, body: ideationRecord({ id: 'abc-5', lattice: latticeReport }) },
+      ],
+    });
+    const out = captureStream(process.stdout);
+
+    const { createProgram } = await import('../cli.js');
+    const program = createProgram();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+
+    try {
+      await program.parseAsync([
+        'node', 'parliament', 'ideate', 'an idea',
+        '--lattice',
+        '--poll-interval-ms', '100',
+      ]);
+    } finally {
+      out.restore();
+    }
+
+    expect(posts).toHaveLength(1);
+    const printed = out.read();
+    expect(printed).toContain('Lattice: trace=01TEST_TRACE');
+    expect(printed).toContain('agreement=0.75');
+    expect(printed).toContain('consensus=yes');
+    expect(printed).toContain('conflicts=0');
+    expect(printed).toContain('audit=./parliament-audit.jsonl');
   });
 });

@@ -19,6 +19,13 @@
       "ignoreMissing": [
         "*"
       ]
+    },
+    "overrides": {
+      "@heybeaux/lattice-core": "0.1.0",
+      "@acr/schema": "file:/tmp/acr/packages/schema"
+    },
+    "patchedDependencies": {
+      "@heybeaux/lattice-core@0.1.0": "patches/@heybeaux__lattice-core@0.1.0.patch"
     }
   },
   "dependencies": {
