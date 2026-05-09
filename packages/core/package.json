@@ -16,8 +16,8 @@
     "lint": "eslint src"
   },
   "dependencies": {
-    "@acr/core": "file:/tmp/acr/packages/core",
-    "@acr/schema": "file:/tmp/acr/packages/schema",
+    "@agentcapabilityruntime/core": "^0.2.0",
+    "@agentcapabilityruntime/schema": "^0.2.0",
     "@heybeaux/lattice-adapter-parliament": "0.2.1",
     "@heybeaux/lattice-core": "0.1.0",
     "smol-toml": "^1.6.1"

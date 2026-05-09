@@ -1,6 +1,8 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
+process.env.TZ = 'UTC';
+
 export default defineConfig({
   plugins: [react()],
   test: {

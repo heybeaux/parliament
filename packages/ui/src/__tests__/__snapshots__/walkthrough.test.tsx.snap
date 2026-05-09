@@ -1041,7 +1041,7 @@ exports[`PAR-6 — Stage 3 UI walkthrough > walks PresetPicker → Timeline (par
                             <span
                               class="text-2xs text-zinc-500"
                             >
-                              05:00 AM
+                              12:00 PM
                             </span>
                           </div>
                         </div>
@@ -1117,7 +1117,7 @@ exports[`PAR-6 — Stage 3 UI walkthrough > walks PresetPicker → Timeline (par
                             <span
                               class="text-2xs text-zinc-500"
                             >
-                              05:00 AM
+                              12:00 PM
                             </span>
                           </div>
                         </div>
@@ -1216,7 +1216,7 @@ exports[`PAR-6 — Stage 3 UI walkthrough > walks PresetPicker → Timeline (par
                         <span
                           class="text-2xs text-zinc-500"
                         >
-                          05:00 AM
+                          12:00 PM
                         </span>
                       </div>
                     </div>
@@ -1313,7 +1313,7 @@ exports[`PAR-6 — Stage 3 UI walkthrough > walks PresetPicker → Timeline (par
                         <span
                           class="text-2xs text-zinc-500"
                         >
-                          05:00 AM
+                          12:00 PM
                         </span>
                       </div>
                     </div>
@@ -1389,7 +1389,7 @@ exports[`PAR-6 — Stage 3 UI walkthrough > walks PresetPicker → Timeline (par
                         <span
                           class="text-2xs text-zinc-500"
                         >
-                          05:00 AM
+                          12:00 PM
                         </span>
                       </div>
                     </div>
