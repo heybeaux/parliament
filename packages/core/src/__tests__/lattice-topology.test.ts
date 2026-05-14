@@ -171,6 +171,14 @@ describe('runTopology — Lattice integration', () => {
     const contents = await fs.readFile(auditPath, 'utf8');
     const lines = contents.trim().split('\n').filter((l) => l.length > 0);
     expect(lines).toHaveLength(2);
+
+    // Each entry carries wall-clock timing fields so callers can compute
+    // Lattice overhead without depending on adapter internals.
+    const entry = JSON.parse(lines[0]!) as Record<string, unknown>;
+    expect(typeof entry['wrapMs']).toBe('number');
+    expect(typeof entry['modelCallMs']).toBe('number');
+    expect(typeof entry['latticeOverheadMs']).toBe('number');
+    expect(entry['latticeOverheadMs'] as number).toBeGreaterThanOrEqual(0);
   });
 
   it('wraps parallel critics on the jury preset (executeParallelBlock path)', async () => {

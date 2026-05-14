@@ -95,13 +95,21 @@ export class LatticeRunner {
     model: ParliamentModel,
     modelCall: () => Promise<string>,
   ): Promise<WrappedCallOutcome> {
+    // Wall-clock measurement of Lattice's overhead per wrap. We can't get
+    // per-tier (L1/L2/L3) latency out of `@heybeaux/lattice-adapter-parliament`
+    // today — it returns `{ contract, passed }` only — so we capture the
+    // total round-trip and the raw model call separately and report the
+    // delta as `latticeOverheadMs`. That answers the practical question
+    // (how much wall-clock does Lattice cost?) without depending on
+    // adapter internals.
+    let modelCallMs = 0;
+    const wrapStart = Date.now();
     const wrapped = wrapParliamentModel(
       model,
-      // The wrap layer feeds us a prompt string we don't care about because
-      // our caller has already constructed the full prompt — we just return
-      // the raw content. The adapter will still build a State Contract.
       async () => {
+        const innerStart = Date.now();
         const content = await modelCall();
+        modelCallMs = Date.now() - innerStart;
         return { content };
       },
       {
@@ -109,6 +117,8 @@ export class LatticeRunner {
       },
     );
     const { contract, passed } = await wrapped(model.id, this.traceId);
+    const wrapMs = Date.now() - wrapStart;
+    const latticeOverheadMs = Math.max(0, wrapMs - modelCallMs);
     // The wrap layer puts the model call's return value under
     // `contract.outputs.payload`. Our model call returns `{ content }` so
     // we extract `.content` directly. Fall back to a JSON encoding so the
@@ -137,6 +147,9 @@ export class LatticeRunner {
         passed,
         timestamp: new Date().toISOString(),
         contractId: contract.id,
+        wrapMs,
+        modelCallMs,
+        latticeOverheadMs,
       });
     }
 
