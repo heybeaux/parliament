@@ -1,0 +1,51 @@
+name: parliament
+type: capability
+version: 1.0.0
+description: "Reasoning faculty — synthetic discourse engine using managed AI misalignment for resilient multi-model deliberation."
+
+provides:
+  - reasoning-faculty
+  - deliberation-engine
+  - synthesis
+
+requires:
+  tools: []
+  capabilities:
+    - ref: sonder
+      optional: true
+  context: []
+
+budget:
+  index: 20
+  summary: 200
+  standard: 1250
+  deep: 2500
+
+activation:
+  triggers:
+    - type: pattern
+      match: "(parliament|deliberation|deliberate|synthesizer|red agent|sentry|@parliament/server|@parliament/ui)"
+  trigger_logic: OR
+  co_activates: []
+  conflicts: []
+
+permissions:
+  data:
+    parliament_metadata: read-only
+
+behavioral:
+  core: |
+    When discussing or working on Parliament:
+    1. Server has NO `pnpm dev`. Build then run dist/index.js with .env sourced + PARLIAMENT_CONFIG set.
+    2. UI needs Node 20 (Babel/Vite vs Node 22 File-global collision).
+    3. Routes use /deliberate (POST, GET /:id), NOT /v1/deliberations (list only).
+    4. Results persist to ~/.parliament/parliament.db (SQLite, source of truth). HTTP API is a view.
+    5. synthesizer/redAgent/sentry are structural built-ins, NOT in BUILTIN_AGENT_REGISTRY.
+    6. Don't return synthesis=null on max_rounds/echo_loop — surface best-effort attempt.
+  overlays: []
+
+verification:
+  checklist:
+    - "Sourced .env before starting server"
+    - "Used Node 20 for UI"
+    - "Queried SQLite before assuming job lost"

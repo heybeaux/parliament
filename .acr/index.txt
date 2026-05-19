@@ -1,0 +1,1 @@
+parliament: reasoning faculty — multi-model synthetic discourse engine with consensus + adversarial critique
