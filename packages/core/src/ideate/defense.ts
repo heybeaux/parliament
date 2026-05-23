@@ -69,8 +69,14 @@ export function buildDefenseUserPrompt(
   critiques: readonly Problem[],
   mode: string,
 ): string {
-  const critiqueList = critiques.map((p, i) => {
-    return `[ID: ${i}]\nDimension: ${p.dimension}\nProblem: ${p.problem}\nProposed Fix: ${p.proposed_fix}`;
+  // Group critiques by dimension for better author organization
+  const dimensions = Array.from(new Set(critiques.map((p) => p.dimension)));
+  const groupedCritiques = dimensions.map((dim) => {
+    const dimCritiques = critiques
+      .filter((p) => p.dimension === dim)
+      .map((p, i) => `  - [ID: ${i}] Problem: ${p.problem}\n    Fix: ${p.proposed_fix}`)
+      .join('\n');
+    return `### ${dim.toUpperCase()}\n${dimCritiques}`;
   }).join('\n\n');
 
   const modeInstruction = 
@@ -81,7 +87,7 @@ export function buildDefenseUserPrompt(
   return [
     `# Original Idea\n${idea}`,
     `# Your Draft\n${draft}`,
-    `# Critiques to Address\n${critiqueList}`,
+    `# Critiques by Dimension\n${groupedCritiques}`,
     `# Instructions\n${modeInstruction}`
   ].join('\n\n');
 }

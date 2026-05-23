@@ -144,6 +144,8 @@ export async function runIdeation(
     let unstructuredAdversarial = false;
 
     if (input.mode === 'adversarial' || input.mode === 'full') {
+      // ARCHITECTURAL LOCK: Critiques MUST NOT be deduped. 
+      // Multi-model perspective signal is preserved by design.
       const adversarial = await runAdversarialCritique(input, factory, runner);
       phases.push(adversarial);
       problems = collectProblems(adversarial);
@@ -172,6 +174,7 @@ export async function runIdeation(
         .flatMap((p) => p.contributions.map((c) => c.content)),
       unstructuredAdversarial,
       lattice: latticeReport,
+      dimensionsSummary: generateDimensionsSummary(phases),
     });
     phases.push(synth);
 
@@ -535,6 +538,28 @@ async function runIdeaDedupePhase(
 }
 
 // ---------- helpers ----------
+
+/**
+ * Generates a summary of critique dimensions to help the synthesizer group problems.
+ */
+function generateDimensionsSummary(phases: readonly PhaseRecord[]): string {
+  const adversarial = phases.find((p) => p.phase === 'adversarial-critique');
+  if (!adversarial) return '';
+
+  const counts: Record<string, number> = {};
+  for (const c of adversarial.contributions) {
+    if (!c.problems) continue;
+    for (const p of c.problems) {
+      counts[p.dimension] = (counts[p.dimension] || 0) + 1;
+    }
+  }
+
+  const summary = Object.entries(counts)
+    .map(([dim, count]) => `${dim}: ${count}`)
+    .join(', ');
+
+  return summary || 'No structured dimensions identified.';
+}
 
 function makeContribution(
   slot: LineupAssignment,
