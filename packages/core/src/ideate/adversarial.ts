@@ -13,7 +13,17 @@
  * results without a re-prompt round trip.
  */
 
-import type { Problem } from './types.js';
+import type { Problem, ProblemDimension } from './types.js';
+
+/** Closed enum for problem dimensions (`refine-ideate-forge`). */
+export const PROBLEM_DIMENSIONS: readonly ProblemDimension[] = [
+  'ux',
+  'business',
+  'technical',
+  'market',
+  'legal',
+  'other',
+];
 
 /** Adversarial prompt template — used by `compileAdversarialPhase`. */
 export const ADVERSARIAL_SYSTEM_PROMPT = [
@@ -26,13 +36,19 @@ export const ADVERSARIAL_SYSTEM_PROMPT = [
   'fences, and no commentary. The JSON object MUST conform to this exact schema:',
   '',
   '{"problems": [{"problem": "<one sentence describing a specific problem>",',
-  '               "proposed_fix": "<one or two sentences describing a concrete fix>"},',
+  '               "proposed_fix": "<one or two sentences describing a concrete fix>",',
+  '               "dimension": "ux"|"business"|"technical"|"market"|"legal"|"other"},',
   '              ...]}',
   '',
   'Field semantics:',
   '- problems: array of at least 1 and at most 5 problem-fix pairs. Quality > quantity.',
   '- problem: a specific, concrete failure mode — not a vague concern.',
   '- proposed_fix: an actionable change that would address the problem.',
+  '- dimension: REQUIRED. One of: ux (user experience / usability),',
+  '  business (model, pricing, distribution), technical (build cost, scaling,',
+  '  reliability), market (demand, competition, timing), legal (regulation,',
+  '  IP, liability), or other (use sparingly — pick a specific dimension when',
+  '  possible).',
   '',
   'Output ONLY the JSON object. No preamble, no markdown, no trailing commentary.',
 ].join('\n');
@@ -40,7 +56,9 @@ export const ADVERSARIAL_SYSTEM_PROMPT = [
 /** Stricter re-prompt used when the first attempt does not parse. */
 export const ADVERSARIAL_RETRY_INSTRUCTION =
   "Your previous response wasn't valid JSON. Output ONLY the JSON object with the " +
-  '"problems" array, nothing else. Do not include markdown fences or commentary.';
+  '"problems" array — each entry MUST include `problem`, `proposed_fix`, AND ' +
+  '`dimension` (one of ux/business/technical/market/legal/other). Do not include ' +
+  'markdown fences or commentary.';
 
 interface ParsedAdversarial {
   problems: Problem[];
@@ -67,9 +85,17 @@ export function parseAdversarialOutput(raw: string): readonly Problem[] | null {
     if (typeof e['proposed_fix'] !== 'string' || (e['proposed_fix'] as string).trim().length === 0) {
       return null;
     }
+    // `dimension` REQUIRED post-refine. Missing or unknown values cause the
+    // whole adversarial output to be rejected; the orchestrator then runs
+    // the standard one-shot retry with a stricter instruction, falling back
+    // to prose preservation if the second attempt also fails.
+    const dim = e['dimension'];
+    if (typeof dim !== 'string') return null;
+    if (!PROBLEM_DIMENSIONS.includes(dim as ProblemDimension)) return null;
     out.push({
       problem: (e['problem'] as string).trim(),
       proposed_fix: (e['proposed_fix'] as string).trim(),
+      dimension: dim as ProblemDimension,
     });
   }
   return out;
