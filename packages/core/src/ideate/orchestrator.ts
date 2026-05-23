@@ -33,12 +33,15 @@ import {
 import { LatticeRunner } from './lattice.js';
 import {
   COOPERATIVE_PROMPTS,
-  REBUTTAL_SYSTEM_PROMPT,
   SYNTH_SYSTEM_PROMPT,
   buildCooperativeUserPrompt,
-  buildRebuttalUserPrompt,
   buildSynthUserPrompt,
 } from './prompts.js';
+import {
+  DEFENSE_SYSTEM_PROMPT,
+  buildDefenseUserPrompt,
+  parseDefenseOutput,
+} from './defense.js';
 import type {
   IdeateMode,
   IdeateStyle,
@@ -50,10 +53,8 @@ import type {
   PhaseRecord,
   Problem,
   ResolvedLineup,
+  DefenseMode,
 } from './types.js';
-
-/** Hard cap on rebuttal rounds; the spec fixes this in code, not config. */
-const REBUTTAL_ROUND_CAP = 2;
 
 /**
  * Adapter factory injected by callers. Production code wires this to
@@ -89,6 +90,11 @@ export interface RunIdeationInput {
     providerOrder?: readonly DedupeProviderId[];
     embedder?: DedupeEmbedder;
   };
+  /**
+   * Defense mode governing the defense phase. 
+   * Defaults to 'author_choice'.
+   */
+  defense_mode?: DefenseMode;
 }
 
 export interface RunIdeationResult {
@@ -144,21 +150,11 @@ export async function runIdeation(
       unstructuredAdversarial = adversarial.contributions.some((c) => c.unstructured === true);
 
       if (problems.length > 0) {
-        const rebuttalTurns: string[] = [];
-        for (let round: 1 | 2 = 1; round <= REBUTTAL_ROUND_CAP; round = (round + 1) as 1 | 2) {
-          const rebuttal = await runRebuttal(input, factory, runner, {
-            problems,
-            draft: contributionsToProse(liveDrafts),
-            priorRebuttals: rebuttalTurns,
-            round,
-          });
-          phases.push(rebuttal);
-          rebuttalTurns.push(...rebuttal.contributions.map((c) => c.content));
-          // Cap is hard — round 2 always synthesizes regardless of unresolved
-          // problems. There is no early-exit shortcut on round 1; the spec
-          // explicitly forbids configurability and keeps the loop simple.
-          if (round === REBUTTAL_ROUND_CAP) break;
-        }
+        const defense = await runDefensePhase(input, factory, runner, {
+          problems,
+          draft: contributionsToProse(liveDrafts),
+        });
+        phases.push(defense);
       }
     }
 
@@ -172,7 +168,7 @@ export async function runIdeation(
         .filter((p) => p.phase === 'adversarial-critique')
         .flatMap((p) => p.contributions.map((c) => c.content)),
       rebuttalTurns: phases
-        .filter((p) => p.phase === 'rebuttal-1' || p.phase === 'rebuttal-2')
+        .filter((p) => p.phase === 'defense')
         .flatMap((p) => p.contributions.map((c) => c.content)),
       unstructuredAdversarial,
       lattice: latticeReport,
@@ -332,41 +328,104 @@ async function runAdversarialOne(
   });
 }
 
-// ---------- rebuttal phase ----------
+// ---------- defense phase ----------
 
-interface RebuttalContext {
+interface DefenseContext {
   problems: readonly Problem[];
   draft: string;
-  priorRebuttals: readonly string[];
-  round: 1 | 2;
 }
 
-async function runRebuttal(
+async function runDefensePhase(
   input: RunIdeationInput,
   factory: AdapterFactory,
   runner: LatticeRunner | null,
-  ctx: RebuttalContext,
+  ctx: DefenseContext,
 ): Promise<PhaseRecord> {
   const team = input.lineup.team.cooperative;
   const out: PhaseContribution[] = [];
-  // Sequential — rebuttal builds a coherent response, not parallel takes.
+  const warnings: string[] = [];
+
+  // Sequential - defense is a coherent response to the pooled critiques.
   for (const slot of team) {
     const adapter = factory(slot.model);
-    const userPrompt = buildRebuttalUserPrompt({
-      idea: input.idea,
-      draft: ctx.draft,
-      problems: ctx.problems.map((p) => ({ problem: p.problem, proposed_fix: p.proposed_fix })),
-      priorRebuttals: ctx.round === 1 ? [] : ctx.priorRebuttals,
-    });
-    const content = await callModel(runner, slot, false, () =>
-      adapter.generate(userPrompt, REBUTTAL_SYSTEM_PROMPT).then((r) => r.content),
+    const mode = input.defense_mode ?? 'author_choice';
+    const userPrompt = buildDefenseUserPrompt(
+      input.idea,
+      ctx.draft,
+      ctx.problems,
+      mode,
     );
-    out.push(makeContribution(slot, content));
+
+    // First attempt with the canonical system prompt.
+    const firstContent = await callModel(runner, slot, false, () =>
+      adapter.generate(userPrompt, DEFENSE_SYSTEM_PROMPT).then((r) => r.content),
+    );
+    let firstParsed = parseDefenseOutput(firstContent);
+
+    // Stance validation for 'address' or 'double_down' modes.
+    if (firstParsed !== null && mode !== 'author_choice') {
+      const violates = firstParsed.defenses.some((d) => d.stance !== mode);
+      if (violates) firstParsed = null; // Trigger retry
+    }
+
+    if (firstParsed !== null) {
+      out.push(makeContribution(slot, firstContent, {
+        defenses: firstParsed.defenses,
+      }));
+    } else {
+      // Retry once with a stricter instruction.
+      const retryPrompt = `${userPrompt}\n\n${DEFENSE_RETRY_INSTRUCTION}`;
+      const secondContent = await callModel(runner, slot, false, () =>
+        adapter.generate(retryPrompt, DEFENSE_SYSTEM_PROMPT).then((r) => r.content),
+      );
+      const secondParsed = parseDefenseOutput(secondContent);
+
+      if (secondParsed !== null) {
+        // Even on retry, if mode is strict and it still violates, we persist but warn.
+        let finalParsed = secondParsed;
+        if (mode !== 'author_choice' && secondParsed.defenses.some((d) => d.stance !== mode)) {
+          warnings.push(`${slot.role} (${slot.model}) violated defense_mode ${mode} after retry; persisted as best-effort.`);
+        }
+
+        out.push(makeContribution(slot, secondContent, {
+          defenses: finalParsed.defenses,
+        }));
+      } else {
+        // Both attempts failed parsing - preserve raw prose.
+        warnings.push(`${slot.role} (${slot.model}) emitted unstructured defense after one retry; surfaced as best-effort.`);
+        out.push(makeContribution(slot, secondContent));
+      }
+    }
   }
-  return {
-    phase: ctx.round === 1 ? 'rebuttal-1' : 'rebuttal-2',
+
+  const record: PhaseRecord = {
+    phase: 'defense',
     contributions: out,
   };
+
+  // Roll up all structured defenses for the phase record.
+  const allDefenses: DefenseEntry[] = [];
+  for (const c of out) {
+    if (c.defenses) allDefenses.push(...c.defenses);
+  }
+  record.defenses = allDefenses;
+
+  if (warnings.length > 0) record.warnings = warnings;
+  return record;
+}
+
+/** @deprecated use runDefensePhase */
+export async function runRebuttal(
+  input: RunIdeationInput,
+  factory: AdapterFactory,
+  runner: LatticeRunner | null,
+  _ctx: unknown, // legacy context shape
+): Promise<PhaseRecord> {
+  const ctx = _ctx as Record<string, unknown>;
+  return runDefensePhase(input, factory, runner, {
+    problems: ctx.problems as Problem[],
+    draft: ctx.draft as string,
+  });
 }
 
 // ---------- synth phase ----------
