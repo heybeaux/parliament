@@ -23,6 +23,13 @@ import {
   ADVERSARIAL_SYSTEM_PROMPT,
   parseAdversarialOutput,
 } from './adversarial.js';
+import {
+  DEFAULT_DEDUPE_THRESHOLD,
+  DEFAULT_PROVIDER_ORDER,
+  runDedupePhase,
+  type DedupeEmbedder,
+  type DedupeProviderId,
+} from './dedupe.js';
 import { LatticeRunner } from './lattice.js';
 import {
   COOPERATIVE_PROMPTS,
@@ -67,6 +74,21 @@ export interface RunIdeationInput {
    * legacy code path with byte-identical behavior.
    */
   lattice?: LatticeIdeateOptions;
+  /**
+   * Idea-level dedupe between cooperative-build and adversarial-critique.
+   * Defaults to enabled with threshold 0.85 and provider order ['local','cloud'].
+   * Set `enabled: false` to skip the phase entirely. The `embedder` seam is
+   * for tests; production code uses the built-in HTTP embedder.
+   *
+   * NOTE: dedupe runs on cooperative DRAFTS only. Critiques are NEVER
+   * deduped — see `dedupe.ts` architectural lock + `assertCritiquesNotDeduped`.
+   */
+  dedupe?: {
+    enabled?: boolean;
+    threshold?: number;
+    providerOrder?: readonly DedupeProviderId[];
+    embedder?: DedupeEmbedder;
+  };
 }
 
 export interface RunIdeationResult {
@@ -97,6 +119,21 @@ export async function runIdeation(
     const cooperative = await runCooperativeBuild(input, factory, runner);
     phases.push(cooperative);
 
+    // Dedupe phase. Runs by default; opt-out via dedupe.enabled === false.
+    // Soft-fails — provider outage surfaces as phase warning, drafts pass
+    // through untouched so the rest of the pipeline keeps running. The
+    // resulting PhaseRecord is the canonical "phase.dedupe" event surface
+    // (ideate has no separate event bus; consumers read phases[]).
+    //
+    // We preserve the original cooperative PhaseRecord (transcript fidelity)
+    // and route `liveDrafts` — the dedupe survivors — into downstream phases.
+    let liveDrafts: readonly PhaseContribution[] = cooperative.contributions;
+    const dedupePhase = await runIdeaDedupePhase(input, cooperative.contributions);
+    if (dedupePhase !== null) {
+      phases.push(dedupePhase);
+      liveDrafts = dedupePhase.contributions;
+    }
+
     let problems: readonly Problem[] = [];
     let unstructuredAdversarial = false;
 
@@ -111,7 +148,7 @@ export async function runIdeation(
         for (let round: 1 | 2 = 1; round <= REBUTTAL_ROUND_CAP; round = (round + 1) as 1 | 2) {
           const rebuttal = await runRebuttal(input, factory, runner, {
             problems,
-            draft: contributionsToProse(cooperative.contributions),
+            draft: contributionsToProse(liveDrafts),
             priorRebuttals: rebuttalTurns,
             round,
           });
@@ -130,7 +167,7 @@ export async function runIdeation(
     const latticeReport = runner !== null ? runner.buildReport() : null;
 
     const synth = await runSynth(input, factory, {
-      cooperativeTurns: cooperative.contributions.map((c) => c.content),
+      cooperativeTurns: liveDrafts.map((c) => c.content),
       adversarialTurns: phases
         .filter((p) => p.phase === 'adversarial-critique')
         .flatMap((p) => p.contributions.map((c) => c.content)),
@@ -382,6 +419,60 @@ async function runSynth(
     ],
     synthesis,
   };
+}
+
+// ---------- dedupe phase ----------
+
+/**
+ * Run the idea-level dedupe phase between cooperative-build and
+ * adversarial-critique. Returns `null` when dedupe is disabled (caller
+ * skips pushing anything onto `phases`). Otherwise returns a fully-formed
+ * `PhaseRecord` whose `contributions` are the kept survivors (in original
+ * order), with `record.dedupe` carrying the merge map, threshold, provider,
+ * and skip flag, and `record.warnings` set on soft-fail.
+ *
+ * Note: ideate does not have a separate event bus. The "phase.dedupe event"
+ * called for in the spec is realized as this PhaseRecord pushed onto
+ * `phases` — same payload, same observability, single channel.
+ */
+async function runIdeaDedupePhase(
+  input: RunIdeationInput,
+  drafts: readonly PhaseContribution[],
+): Promise<PhaseRecord | null> {
+  const dedupeOpts = input.dedupe;
+  if (dedupeOpts?.enabled === false) return null;
+
+  const result = await runDedupePhase(drafts, {
+    threshold: dedupeOpts?.threshold ?? DEFAULT_DEDUPE_THRESHOLD,
+    providerOrder: dedupeOpts?.providerOrder ?? DEFAULT_PROVIDER_ORDER,
+    ...(dedupeOpts?.embedder !== undefined ? { embedder: dedupeOpts.embedder } : {}),
+  });
+
+  // Build synthetic IDs in the SAME shape dedupe used (`role#index`) so the
+  // kept-IDs list on the record matches the merge_into map keys/values.
+  const allIds = drafts.map((d, i) => `${d.role}#${i}`);
+  const keptIds: string[] = [];
+  for (let i = 0; i < drafts.length; i++) {
+    if (!Object.prototype.hasOwnProperty.call(result.merged_into, allIds[i]!)) {
+      keptIds.push(allIds[i]!);
+    }
+  }
+
+  const record: PhaseRecord = {
+    phase: 'dedupe',
+    contributions: result.kept,
+    dedupe: {
+      kept: keptIds,
+      merged_into: result.merged_into,
+      threshold: result.threshold,
+      provider: result.provider,
+      skipped: result.skipped,
+    },
+  };
+  if (result.warning !== undefined) {
+    record.warnings = [result.warning];
+  }
+  return record;
 }
 
 // ---------- helpers ----------
