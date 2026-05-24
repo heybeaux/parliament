@@ -308,3 +308,85 @@ export const RANK_RETRY_INSTRUCTION =
   '"scores" array. Each entry MUST include "idea_id" (string), "novelty", ' +
   '"feasibility", "fit", "evidence" (each integer 0-10), and "rationale" (string). ' +
   'Every idea_id from the input MUST appear exactly once. No markdown fences, no commentary.';
+
+// ---------------------------------------------------------------------------
+// Forge phase (Section 8)
+// ---------------------------------------------------------------------------
+
+export interface ForgeElaborationPromptInput {
+  /** Original brainstorm prompt — gives the elaborator context. */
+  prompt: string;
+  /** One ranked idea to elaborate. */
+  idea: {
+    idea_id: string;
+    title: string;
+    one_liner: string;
+    dimensions: readonly string[];
+    rationale: string;
+    cluster?: string | null;
+  };
+}
+
+/**
+ * Builds the system + user prompt for one forge-elaboration call.
+ *
+ * Forge is a lightweight cooperative elaboration of a single top-K idea: the
+ * elaborator expands the seed into a one-page-ish project sketch. Output is
+ * free-form prose (NOT JSON) — the elaboration is surfaced verbatim to the
+ * caller, so there's no parse step and no retry.
+ *
+ * Design note (design.md §80): forge MAY share helpers with
+ * `runCooperativeBuild`, but is its own entry point. We keep the prompt
+ * self-contained here rather than reaching into ideate so brainstorm stays
+ * decoupled (and so the no-ideate-coupling architectural lock holds).
+ */
+export function forgeElaborationPrompt({
+  prompt,
+  idea,
+}: ForgeElaborationPromptInput): PromptPair {
+  const system = [
+    'You are elaborating a single candidate project idea from a brainstorm session',
+    'into a one-page-ish project sketch. You will not see the other candidates.',
+    '',
+    'Your job is to take the seed idea and develop it into something a small team',
+    'could actually build. Be concrete: name the user, name the first version, name',
+    'what success looks like in 90 days. Cover the obvious risks honestly.',
+    '',
+    'Suggested structure (use as a guide, not a rigid template):',
+    '- One-paragraph framing of what this is and why it matters now.',
+    '- Target user and the specific pain you remove.',
+    '- The smallest version that could ship in 90 days (v1 scope).',
+    '- The mechanism — how it actually works at a technical level.',
+    '- Two or three honest risks or open questions.',
+    '- A one-line success criterion for v1.',
+    '',
+    'Output free-form prose with light markdown (headings, bullets) at most. No',
+    'preamble, no meta-commentary about the task — write as if you are handing the',
+    'sketch to a builder.',
+  ].join('\n');
+
+  const dims = idea.dimensions.length > 0 ? idea.dimensions.join(' / ') : '';
+  const clusterTag =
+    idea.cluster !== undefined && idea.cluster !== null && idea.cluster !== ''
+      ? `\nCluster: ${idea.cluster}`
+      : '';
+
+  const user = [
+    'The original brainstorm prompt was:',
+    '',
+    prompt,
+    '',
+    'The seed idea to elaborate:',
+    '',
+    `Title: ${idea.title}`,
+    `One-liner: ${idea.one_liner}`,
+    dims !== '' ? `Dimensions: ${dims}` : '',
+    `Rationale: ${idea.rationale}${clusterTag}`,
+    '',
+    'Elaborate this idea into a one-page-ish project sketch.',
+  ]
+    .filter((s) => s !== '')
+    .join('\n');
+
+  return { system, user };
+}
