@@ -37,3 +37,6 @@ export {
 
 export { runBrainstorm } from './orchestrator.js';
 export type { AdapterFactory } from './orchestrator.js';
+
+export { runIdeaDedupePhase, stableIdeaId } from './dedupe.js';
+export type { RunIdeaDedupeInput, IdeaDedupeOutput } from './dedupe.js';

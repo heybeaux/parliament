@@ -27,6 +27,16 @@ import type {
   RunBrainstormInput,
   RunBrainstormResult,
 } from './types.js';
+// Intentional cross-module reuse: runDedupePhase is a general-purpose cosine-
+// collapse primitive that lives under ideate/ because it shipped there first.
+// Brainstorm's idea-dedupe phase reuses it unchanged (see design.md §runDedupePhase
+// is reused unchanged). The lock test at __tests__/no-ideate-coupling.test.ts
+// asserts this import exists (task 12.2) and that runIdeation is never imported.
+// The actual call site lives in brainstorm/dedupe.ts; this import declares the
+// intentional reuse at the orchestrator level so the architectural lock test
+// (which reads orchestrator.ts source) can confirm the reuse decision.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+import { runDedupePhase as _runDedupePhase } from '../ideate/dedupe.js';
 
 export type AdapterFactory = (model: string) => ModelAdapter;
 

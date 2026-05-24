@@ -35,10 +35,10 @@ Per-section commits, just like `refine-ideate-forge`. Don't bundle.
 
 ## Section 5 — Idea dedupe phase (reuses ideate primitive)
 
-- [ ] 5.1 Cross-import `runDedupePhase` from `@parliament/core/ideate/dedupe.ts` into `brainstorm/orchestrator.ts`.
-- [ ] 5.2 Adapt the per-draft `role + index` ID scheme to `author + index` so the merge map keys are stable across reruns.
-- [ ] 5.3 Phase record `phase: 'idea-dedupe'` (not `'dedupe'`) so brainstorm and ideate dedupe records are distinguishable in shared persistence tooling.
-- [ ] 5.4 Unit tests: cross-author duplicate collapses; merge map preserves author identity; soft-fail behavior matches ideate.
+- [x] 5.1 Cross-import `runDedupePhase` from `@parliament/core/ideate/dedupe.ts` into `brainstorm/orchestrator.ts`.
+- [x] 5.2 Adapt the per-draft `role + index` ID scheme to `author + index` so the merge map keys are stable across reruns.
+- [x] 5.3 Phase record `phase: 'idea-dedupe'` (not `'dedupe'`) so brainstorm and ideate dedupe records are distinguishable in shared persistence tooling.
+- [x] 5.4 Unit tests: cross-author duplicate collapses; merge map preserves author identity; soft-fail behavior matches ideate.
 
 ## Section 6 — Cluster phase
 
