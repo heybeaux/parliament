@@ -27,11 +27,11 @@ Per-section commits, just like `refine-ideate-forge`. Don't bundle.
 
 ## Section 4 — Divergent generation phase
 
-- [ ] 4.1 Implement `runDivergentGeneration()` in a new `brainstorm/divergent.ts`. Parallel only.
-- [ ] 4.2 Per-author prompt template emphasizing breadth + anti-convergence. Each author MUST produce K ideas with structured fields (title, one-liner, dimensions, rationale).
-- [ ] 4.3 JSON parsing + one-shot retry, mirroring `parseAdversarialOutput` semantics.
-- [ ] 4.4 Each idea carries its author identity in the phase record (used by the rank phase for author-aware skip).
-- [ ] 4.5 Unit tests: K=1 / K=5 / K=10; parser retry; one author returning prose after retry is preserved as best-effort with `unstructured: true`.
+- [x] 4.1 Implement `runDivergentGeneration()` in a new `brainstorm/divergent.ts`. Parallel only.
+- [x] 4.2 Per-author prompt template emphasizing breadth + anti-convergence. Each author MUST produce K ideas with structured fields (title, one-liner, dimensions, rationale).
+- [x] 4.3 JSON parsing + one-shot retry, mirroring `parseAdversarialOutput` semantics.
+- [x] 4.4 Each idea carries its author identity in the phase record (used by the rank phase for author-aware skip).
+- [x] 4.5 Unit tests: K=1 / K=5 / K=10; parser retry; one author returning prose after retry is preserved as best-effort with `unstructured: true`.
 
 ## Section 5 — Idea dedupe phase (reuses ideate primitive)
 

@@ -63,6 +63,12 @@ export interface BrainstormIdea {
   author_model: string;
   /** Cluster label assigned by the cluster phase. `null` if cluster failed. */
   cluster?: string | null;
+  /**
+   * True when JSON parse + retry both failed. `rationale` contains the raw
+   * model text. The idea is best-effort, not structured — consumers should
+   * treat it as advisory and may omit it from ranking.
+   */
+  unstructured?: boolean;
 }
 
 /** Per-criterion score from a single judge. */
