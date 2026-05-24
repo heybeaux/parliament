@@ -10,11 +10,11 @@ Per-section commits, just like `refine-ideate-forge`. Don't bundle.
 
 ## Section 2 — Core: types + orchestrator skeleton
 
-- [ ] 2.1 New module `packages/core/src/brainstorm/` with `types.ts`, `orchestrator.ts`, `lineup.ts`, `prompts.ts` stubs.
-- [ ] 2.2 `BrainstormMode = 'brainstorm' | 'brainstorm/forge'` (string literal, not a sub-mode enum).
-- [ ] 2.3 `RunBrainstormInput` + `RunBrainstormResult` types matching the design doc's output shape (phases array, rankings array, optional elaborations array).
-- [ ] 2.4 `runBrainstorm()` entry point throws "not implemented" but the shape exists so server + tests can compile.
-- [ ] 2.5 In-code assertion in the entry point: `assertDoesNotCallRunIdeation` test fixture grep-asserts the orchestrator file does not import `runIdeation`.
+- [x] 2.1 New module `packages/core/src/brainstorm/` with `types.ts`, `orchestrator.ts`, `lineup.ts`, `prompts.ts` stubs.
+- [x] 2.2 `BrainstormMode = 'brainstorm' | 'brainstorm/forge'` (string literal, not a sub-mode enum).
+- [x] 2.3 `RunBrainstormInput` + `RunBrainstormResult` types matching the design doc's output shape (phases array, rankings array, optional elaborations array).
+- [x] 2.4 `runBrainstorm()` entry point throws "not implemented" but the shape exists so server + tests can compile.
+- [x] 2.5 Architectural lock test at `brainstorm/__tests__/no-ideate-coupling.test.ts` grep-asserts the orchestrator module does not import or call `runIdeation` and does not import `../ideate/orchestrator`. (Also covers Section 12.1; 12.2 positive check is gated until Section 5 lands the real dedupe wiring.)
 
 ## Section 3 — Lineup + criteria
 
