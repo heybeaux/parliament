@@ -47,3 +47,5 @@ export type { RunClusterPhaseInput, ClusterPhaseOutput } from './cluster.js';
 
 export { runRankPhase } from './rank.js';
 export type { RunRankPhaseInput, RankPhaseOutput } from './rank.js';
+
+export { elaborateIdea, forgeTopK } from './forge.js';

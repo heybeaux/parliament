@@ -59,11 +59,11 @@ Per-section commits, just like `refine-ideate-forge`. Don't bundle.
 
 ## Section 8 — Forge elaboration
 
-- [ ] 8.1 Implement `elaborateIdea()` in `brainstorm/forge.ts`. Lightweight cooperative elaboration; MAY share helpers with `runCooperativeBuild` but does NOT call `runIdeation`.
-- [ ] 8.2 `forgeTopK()` runs `elaborateIdea` in parallel over the top-K ideas from the rank phase.
-- [ ] 8.3 Elaboration result shape: `{ idea_id, elaboration: string, model: string, timestamp }`.
-- [ ] 8.4 Forge is opt-in: triggered only by `mode === 'brainstorm/forge'` in `RunBrainstormInput`.
-- [ ] 8.5 Unit tests: forge runs on top-K only; forge skipped when mode is plain brainstorm; one elaboration failure does not abort others (best-effort: surface partial).
+- [x] 8.1 Implement `elaborateIdea()` in `brainstorm/forge.ts`. Lightweight cooperative elaboration; MAY share helpers with `runCooperativeBuild` but does NOT call `runIdeation`.
+- [x] 8.2 `forgeTopK()` runs `elaborateIdea` in parallel over the top-K ideas from the rank phase.
+- [x] 8.3 Elaboration result shape: `{ idea_id, elaboration: string, model: string, timestamp }`. *Uses pre-existing `ForgeElaboration` type from `types.ts` — `elaboration: string | null` with optional `error` field for the best-effort partial-failure contract.*
+- [x] 8.4 Forge is opt-in: triggered only by `mode === 'brainstorm/forge'` in `RunBrainstormInput`. *Module-level contract: `forgeTopK` is only invoked by orchestrator wiring (Section 9). At this layer, `k <= 0` is a no-op so callers can pass `mode !== 'brainstorm/forge' ? 0 : k` if they prefer.*
+- [x] 8.5 Unit tests: forge runs on top-K only; forge skipped when mode is plain brainstorm; one elaboration failure does not abort others (best-effort: surface partial).
 
 ## Section 9 — Server: routes + persistence
 
