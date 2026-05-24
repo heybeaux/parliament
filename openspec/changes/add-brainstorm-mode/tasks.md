@@ -18,12 +18,12 @@ Per-section commits, just like `refine-ideate-forge`. Don't bundle.
 
 ## Section 3 — Lineup + criteria
 
-- [ ] 3.1 `lineup.ts` exports `defaultBrainstormLineup()` returning the divergent-authors + judges + forge-elaborator triplet from design.md.
-- [ ] 3.2 TOML override resolver for `[brainstorm.lineup]`, mirroring the strict-by-default pattern from `ideate/lineup.ts`.
-- [ ] 3.3 `CRITERIA` constant in `brainstorm/types.ts`: closed enum `'novelty' | 'feasibility' | 'fit' | 'evidence'`.
-- [ ] 3.4 `DEFAULT_WEIGHTS` constant: equal weights summing to 1.0.
-- [ ] 3.5 TOML override `[brainstorm.rank.weights]` with validation (must sum to 1.0 ± 0.01; missing keys default to equal share of remaining mass).
-- [ ] 3.6 Unit tests: default lineup, TOML override applied, invalid weights rejected.
+- [x] 3.1 `lineup.ts` exports `defaultBrainstormLineup()` returning the divergent-authors + judges + forge-elaborator triplet from design.md.
+- [x] 3.2 TOML override resolver for `[brainstorm.lineup]`, mirroring the strict-by-default pattern from `ideate/lineup.ts`. Empty arrays + whitespace-only model IDs rejected.
+- [x] 3.3 `CRITERIA` constant in `brainstorm/types.ts`: closed enum `'novelty' | 'feasibility' | 'fit' | 'evidence'` (exported as `BRAINSTORM_CRITERIA`).
+- [x] 3.4 `DEFAULT_WEIGHTS` constant: equal weights summing to 1.0 (exported as `DEFAULT_RANK_WEIGHTS`).
+- [x] 3.5 `resolveRankWeights()` — TOML `[brainstorm.rank.weights]` + per-run override, both partial-replace on defaults, normalized to sum=1.0. Rejects negative, NaN, infinite, and all-zero weights. *Spec deviation from original 3.5: spec said "must sum to 1.0 ± 0.01"; per design.md lock, weights are partial-replace + auto-normalized instead. The auto-normalize matches the design-decision rationale and is friendlier for partial overrides.*
+- [x] 3.6 Unit tests: default lineup shape, GPT-5 overlap allowed, TOML overrides applied + rejected on empty/invalid, criteria locked, default weights equal, TOML+body partial-replace, normalization correctness, negative/NaN/all-zero rejection.
 
 ## Section 4 — Divergent generation phase
 

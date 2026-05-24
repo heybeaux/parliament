@@ -32,6 +32,7 @@ export {
 export {
   defaultBrainstormLineup,
   resolveBrainstormLineup,
+  resolveRankWeights,
 } from './lineup.js';
 
 export { runBrainstorm } from './orchestrator.js';
