@@ -97,6 +97,37 @@ export interface BrainstormRanking {
   judge_skipped: boolean;
 }
 
+/**
+ * Enriched rank-phase output for one idea. Carries the full identity payload
+ * (title, one_liner, dimensions, rationale, cluster) plus the final weighted
+ * score, per-criterion averaged scores, judge attempt/skip bookkeeping, and
+ * the descending rank position. `final_score` is `null` when every applicable
+ * judge was author-skipped (both-judges-authored degenerate case); such
+ * entries sort to the bottom by deterministic `idea_id` tiebreak.
+ *
+ * This is the canonical Section 7 output shape (see tasks.md 7.x). The legacy
+ * `BrainstormRanking` shape above is preserved for callers that only want the
+ * score + bookkeeping; orchestrator wiring (Section 9) decides which shape the
+ * server response surfaces.
+ */
+export interface BrainstormRankedIdea {
+  idea_id: string;
+  title: string;
+  one_liner: string;
+  dimensions: readonly string[];
+  rationale: string;
+  cluster: string | null;
+  /** Weighted sum across criteria of averaged judge scores. */
+  final_score: number | null;
+  criteria_scores: Readonly<Record<BrainstormCriterion, number | null>>;
+  judges_attempted: readonly string[];
+  judges_skipped: readonly string[];
+  /** 1-based descending rank position; null when final_score is null. */
+  rank: number | null;
+  /** True when every applicable judge was author-skipped for this idea. */
+  judge_skipped: boolean;
+}
+
 /** Elaboration of one top-K idea (forge phase only). */
 export interface ForgeElaboration {
   idea_id: string;
@@ -135,6 +166,12 @@ export interface BrainstormPhaseRecord {
   cluster_map?: Readonly<Record<string, readonly string[]>>;
   /** Per-judge scoring rolled up for the rank phase. */
   judgings?: readonly JudgeScoring[];
+  /**
+   * Rank phase only — fully-enriched ranked ideas in descending final_score
+   * order (with `null` scores sorted to the end, broken by `idea_id` for
+   * determinism).
+   */
+  ranked?: readonly BrainstormRankedIdea[];
   /** Forge phase only. */
   elaborations?: readonly ForgeElaboration[];
   warnings?: readonly string[];

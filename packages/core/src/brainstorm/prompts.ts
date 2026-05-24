@@ -173,3 +173,138 @@ export const CLUSTER_RETRY_INSTRUCTION =
   '"clusters" array. Each entry MUST include "label" (string) and "idea_ids" ' +
   '(array of strings). Every idea_id from the input MUST appear in exactly one ' +
   'cluster. No markdown fences, no commentary.';
+
+// ---------------------------------------------------------------------------
+// Rank phase (Section 7)
+// ---------------------------------------------------------------------------
+
+/** One-line definitions surfaced to judges so scoring stays anchored. */
+export const CRITERIA_DEFINITIONS: Readonly<Record<string, string>> = {
+  novelty: 'How different is this idea from what already exists in this space?',
+  feasibility: 'Could a small team realistically ship a v1 in 90 days?',
+  fit: "How well does this match the prompt's intent and constraints?",
+  evidence: 'How strong is the underlying signal that this is worth building?',
+};
+
+export interface RankPromptInput {
+  /** Original user brainstorm prompt. */
+  prompt: string;
+  /** Surviving (post-dedupe, post-cluster) ideas to be scored. */
+  ideas: readonly {
+    idea_id: string;
+    title: string;
+    one_liner: string;
+    dimensions: readonly string[];
+    rationale: string;
+    cluster?: string | null;
+  }[];
+  /** Map from cluster label to member idea_ids (advisory context). */
+  clusterMap?: Readonly<Record<string, readonly string[]>>;
+  /** Judge's own model ID — used to caveat self-authored ideas in-prompt. */
+  judgeModel: string;
+}
+
+/**
+ * Builds the system + user prompt for one ranking judge.
+ *
+ * Judges run independently and in parallel — no cross-judge anchoring. Each
+ * judge sees the full surviving-idea set, cluster labels for context, and the
+ * four locked criteria with one-line definitions. The judge MUST emit per-idea
+ * per-criterion integer scores (0–10) with a brief rationale per idea.
+ *
+ * Author-aware skipping is enforced by the orchestrator post-hoc: the judge
+ * may still score every idea, but scores for ideas authored by this judge's
+ * model are discarded before averaging. The prompt nevertheless asks the
+ * judge to be self-aware about scoring its own output.
+ */
+export function rankPrompt({
+  prompt,
+  ideas,
+  clusterMap,
+  judgeModel: _judgeModel,
+}: RankPromptInput): PromptPair {
+  const system = [
+    'You are an independent judge scoring candidate project ideas from a',
+    'brainstorm session. Other judges are running concurrently — you will',
+    'never see their scores. Score independently and honestly.',
+    '',
+    'You will score every idea on FOUR fixed criteria, each on an integer',
+    'scale 0–10, with a one-line rationale per idea:',
+    '',
+    `- novelty (0–10): ${CRITERIA_DEFINITIONS['novelty']}`,
+    `- feasibility (0–10): ${CRITERIA_DEFINITIONS['feasibility']}`,
+    `- fit (0–10): ${CRITERIA_DEFINITIONS['fit']}`,
+    `- evidence (0–10): ${CRITERIA_DEFINITIONS['evidence']}`,
+    '',
+    'Scoring guidance:',
+    '- 0 means the idea fails this criterion entirely; 10 means exceptional.',
+    '- Use the full range. Avoid clustering scores in the middle.',
+    '- Score each idea on its own merits; do not normalize relative to peers.',
+    '- Cluster labels are advisory context, NOT a scoring axis.',
+    '',
+    'You MUST output ONLY a single JSON object with no surrounding prose, no',
+    'markdown fences, and no commentary. The JSON object MUST conform to this',
+    'exact schema:',
+    '',
+    '{"scores": [',
+    '  {',
+    '    "idea_id": "<idea_id as provided>",',
+    '    "novelty": <integer 0-10>,',
+    '    "feasibility": <integer 0-10>,',
+    '    "fit": <integer 0-10>,',
+    '    "evidence": <integer 0-10>,',
+    '    "rationale": "<one sentence summarizing your scoring>"',
+    '  },',
+    '  ...',
+    ']}',
+    '',
+    'Every idea_id from the input list MUST appear exactly once in the scores',
+    'array. Output ONLY the JSON object. No preamble, no markdown, no commentary.',
+  ].join('\n');
+
+  const ideaLines = ideas.map((i) => {
+    const dims = Array.isArray(i.dimensions) ? i.dimensions.join(' / ') : '';
+    const clusterTag = i.cluster !== undefined && i.cluster !== null ? ` [cluster: ${i.cluster}]` : '';
+    return [
+      `- ${i.idea_id}${clusterTag}`,
+      `    title: ${i.title}`,
+      `    one_liner: ${i.one_liner}`,
+      dims !== '' ? `    dimensions: ${dims}` : '',
+      `    rationale: ${i.rationale}`,
+    ]
+      .filter((s) => s !== '')
+      .join('\n');
+  });
+
+  const clusterLines: string[] = [];
+  if (clusterMap !== undefined && Object.keys(clusterMap).length > 0) {
+    clusterLines.push('Cluster context (advisory):');
+    for (const [label, ids] of Object.entries(clusterMap)) {
+      clusterLines.push(`- ${label}: ${ids.join(', ')}`);
+    }
+    clusterLines.push('');
+  }
+
+  const user = [
+    'The original brainstorm prompt was:',
+    '',
+    prompt,
+    '',
+    ...clusterLines,
+    `Score the following ${ideas.length} candidate ${ideas.length === 1 ? 'idea' : 'ideas'}.`,
+    'Use the idea_id values exactly as given:',
+    '',
+    ...ideaLines,
+    '',
+    'Return a JSON object with a "scores" array containing one entry per idea_id.',
+  ].join('\n');
+
+  return { system, user };
+}
+
+/** Retry instruction sent when the first rank parse attempt fails. */
+export const RANK_RETRY_INSTRUCTION =
+  "Your previous response wasn't valid JSON. Output ONLY the JSON object with a " +
+  '"scores" array. Each entry MUST include "idea_id" (string), "novelty", ' +
+  '"feasibility", "fit", "evidence" (each integer 0-10), and "rationale" (string). ' +
+  'Every idea_id from the input MUST appear exactly once. No markdown fences, no commentary.';

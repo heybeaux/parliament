@@ -13,6 +13,7 @@ export type {
   CriterionScore,
   JudgeScoring,
   BrainstormRanking,
+  BrainstormRankedIdea,
   ForgeElaboration,
   BrainstormPhaseId,
   BrainstormPhaseRecord,
@@ -43,3 +44,6 @@ export type { RunIdeaDedupeInput, IdeaDedupeOutput } from './dedupe.js';
 
 export { runClusterPhase } from './cluster.js';
 export type { RunClusterPhaseInput, ClusterPhaseOutput } from './cluster.js';
+
+export { runRankPhase } from './rank.js';
+export type { RunRankPhaseInput, RankPhaseOutput } from './rank.js';

@@ -49,13 +49,13 @@ Per-section commits, just like `refine-ideate-forge`. Don't bundle.
 
 ## Section 7 — Rank phase
 
-- [ ] 7.1 Implement `runRankPhase()` — parallel per-judge scoring across all surviving ideas.
-- [ ] 7.2 Per-judge prompt: each judge sees the prompt, all surviving ideas, the cluster labels, and the criteria definitions. Returns per-idea per-criterion scores with one-line rationale.
-- [ ] 7.3 Author-aware skip: a judge whose model ID matches an idea's author MUST be skipped for that idea (orchestrator filters before computing final score).
-- [ ] 7.4 Both-judges-authored edge case: surfaces idea with `score: null`, `judge_skipped: true`, `judges_attempted: []`, `judges_skipped: [...]`. (Per design.md open question, this is the v1 default — confirm during spec lock.)
-- [ ] 7.5 Final score = weighted sum across criteria of averaged judge scores (averaged over non-skipped judges). Rank is descending by final score; ties broken by `idea_id` for determinism.
-- [ ] 7.6 `idea_id` derived from stable hash of `(title, one-liner)` after dedupe.
-- [ ] 7.7 Unit tests: independent judging produces averaged scores; author-aware skip exercised; both-judges-authored edge case; deterministic tiebreak; rank stable across reruns with same inputs (stub adapter).
+- [x] 7.1 Implement `runRankPhase()` — parallel per-judge scoring across all surviving ideas.
+- [x] 7.2 Per-judge prompt: each judge sees the prompt, all surviving ideas, the cluster labels, and the criteria definitions. Returns per-idea per-criterion scores with one-line rationale.
+- [x] 7.3 Author-aware skip: a judge whose model ID matches an idea's author MUST be skipped for that idea (orchestrator filters before computing final score).
+- [x] 7.4 Both-judges-authored edge case: surfaces idea with `score: null`, `judge_skipped: true`, `judges_attempted: []`, `judges_skipped: [...]`. Locked v1 default per design.md "Resolved Decisions".
+- [x] 7.5 Final score = weighted sum across criteria of averaged judge scores (averaged over non-skipped judges). Rank is descending by final score; ties broken by `idea_id` for determinism.
+- [x] 7.6 `idea_id` derived from stable hash of `(title, one-liner)` after dedupe. *(Reuses `stableIdeaId` from `brainstorm/dedupe.ts`, already landed in Section 5.)*
+- [x] 7.7 Unit tests: independent judging produces averaged scores; author-aware skip exercised; both-judges-authored edge case; deterministic tiebreak; rank stable across reruns with same inputs (stub adapter).
 
 ## Section 8 — Forge elaboration
 
