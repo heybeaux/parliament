@@ -4,9 +4,9 @@ Per-section commits, just like `refine-ideate-forge`. Don't bundle.
 
 ## Section 1 — Spec lock
 
-- [ ] 1.1 `openspec validate add-brainstorm-mode --strict` passes.
-- [ ] 1.2 Walk Beaux through the spec; lock open questions in design.md.
-- [ ] 1.3 Merge spec change before any code lands.
+- [x] 1.1 `openspec validate add-brainstorm-mode --strict` passes.
+- [x] 1.2 Walk Beaux through the spec; lock open questions in design.md.
+- [ ] 1.3 Merge spec change before any code lands. *(deferred — per-section commit pattern; whole change merges at end)*
 
 ## Section 2 — Core: types + orchestrator skeleton
 

@@ -125,10 +125,14 @@ The break is acceptable because the current behavior is itself the bug (Pax's ha
 5. Release note flags the shape change and points callers at the new response schema.
 6. Rollback: revert the implementation change. Spec change can stay (it has no runtime effect); the alias routing in v0 can be restored from git history if absolutely necessary, but doing so reintroduces Pax's documented bug.
 
+## Resolved Decisions (locked 2026-05-24)
+
+- **Both judges authored a given idea.** Locked: option (a) — `score: null` plus `judge_skipped: true` on the idea record. Rationale: honest, rare, and avoids fabricating a score from a biased judge. The idea still appears in the ranked list, sorted to the bottom, with `judge_skipped: true` so the UI can flag it. Downstream forge MUST exclude `score: null` ideas from top-K selection (treat as ineligible, not as zero).
+- **Forge accepting an idea-ID list from a prior brainstorm.** Deferred to a follow-up change. v1 ships `POST /brainstorm/forge` as one-shot top-K only. If usage shows users want to cherry-pick winners from an old run, add `POST /brainstorm/:id/forge` with an optional `idea_ids` body field then.
+- **Cluster labels stay model-generated and un-normalized.** No taxonomy in v1. Labels are advisory; UI treats them as free-form strings.
+- **Rank weights live in TOML, overridable via request body.** TOML provides defaults under `[brainstorm.rank.weights]` (keys: `novelty`, `feasibility`, `fit`, `evidence`, all numeric; default 1.0 each). Request body MAY include `rank_weights: { novelty?, feasibility?, fit?, evidence? }` to override per-run. Body-supplied weights MUST be partial-replace (specified keys override; unspecified keys keep TOML default). Weights are normalized to sum to 1.0 before scoring.
+- **Judges score independently / parallel.** No anchoring. Locked.
+
 ## Open Questions
 
-- **Both judges authored a given idea (rare with 4 authors / 2 judges).** Per author-aware skip, an idea authored by both judges would have no judge left. Options: (a) skip the idea from ranking and surface it with `score: null` and a `judge_skipped: true` flag; (b) fall back to letting the original-author judge score it with a noted bias warning; (c) elevate the cluster's other ideas in rank by averaging. v1 spec leans toward (a) — explicit `score: null` is honest and rare. Confirm before implementation.
-- **Should forge accept an idea-ID list from a prior brainstorm run** so users can forge specific winners rather than always top-K? Tentatively yes, via `POST /brainstorm/:id/forge` as a *separate* operation alongside the one-shot `/brainstorm/forge`. Deferred to a follow-up change unless usage shows top-K isn't flexible enough.
-- **Cluster labels are model-generated and unstable.** Should they be normalized against a known taxonomy? Tentatively no — labels are advisory; normalization would require taxonomy maintenance that isn't worth it for v1.
-- **Should the rank weights live in TOML or in the request body?** Both. TOML for defaults, request body override for one-off runs. The implementation change decides the exact shape.
-- **Should judges see each other's scores (sequential / collaborative) or score independently (parallel)?** Independent / parallel. Sequential introduces anchoring bias that defeats the second-opinion purpose. Locked.
+(None — all resolved above. New questions surfaced during implementation get added back here and re-decided before the affected section lands.)
