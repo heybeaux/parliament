@@ -42,10 +42,10 @@ Per-section commits, just like `refine-ideate-forge`. Don't bundle.
 
 ## Section 6 — Cluster phase
 
-- [ ] 6.1 Implement `runClusterPhase()` — one model call (Opus 4.6 by default) that takes the deduped survivors and returns cluster labels + per-idea cluster assignments.
-- [ ] 6.2 Phase record carries the cluster map; rank phase reads it.
-- [ ] 6.3 Cluster output is advisory — if the cluster call fails, log a warning and proceed with cluster=null on all ideas. Do not fail the run.
-- [ ] 6.4 Unit tests: clean cluster; cluster call failure soft-fails; cluster output passed to rank.
+- [x] 6.1 Implement `runClusterPhase()` — one model call (Opus 4.6 by default) that takes the deduped survivors and returns cluster labels + per-idea cluster assignments.
+- [x] 6.2 Phase record carries the cluster map; rank phase reads it.
+- [x] 6.3 Cluster output is advisory — if the cluster call fails, log a warning and proceed with cluster=null on all ideas. Do not fail the run.
+- [x] 6.4 Unit tests: clean cluster; cluster call failure soft-fails; cluster output passed to rank.
 
 ## Section 7 — Rank phase
 

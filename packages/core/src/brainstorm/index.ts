@@ -40,3 +40,6 @@ export type { AdapterFactory } from './orchestrator.js';
 
 export { runIdeaDedupePhase, stableIdeaId } from './dedupe.js';
 export type { RunIdeaDedupeInput, IdeaDedupeOutput } from './dedupe.js';
+
+export { runClusterPhase } from './cluster.js';
+export type { RunClusterPhaseInput, ClusterPhaseOutput } from './cluster.js';

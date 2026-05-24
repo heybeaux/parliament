@@ -6,11 +6,13 @@
  *
  * Sections populated here:
  *   4 — divergentAuthorPrompt (divergent-generation phase)
- *   6 — clusterPrompt (cluster phase) — stub placeholder
+ *   6 — clusterPrompt (cluster phase)
  *   7 — rankPrompt (rank phase) — stub placeholder
  *
  * Spec: `openspec/changes/add-brainstorm-mode/specs/brainstorm-mode/spec.md`.
  */
+
+import type { BrainstormIdea } from './types.js';
 
 export interface PromptPair {
   system: string;
@@ -88,3 +90,86 @@ export const DIVERGENT_RETRY_INSTRUCTION =
   '"ideas" array. Each entry MUST include "title" (string), "one_liner" (string), ' +
   '"dimensions" (object with "problem", "audience", "mechanism" string fields), and ' +
   '"rationale" (string). No markdown fences, no commentary.';
+
+// ---------------------------------------------------------------------------
+// Cluster phase (Section 6)
+// ---------------------------------------------------------------------------
+
+export interface ClusterPromptInput {
+  /** Original user brainstorm prompt — gives the clusterer context. */
+  prompt: string;
+  /** Deduped survivors that need clustering. */
+  ideas: readonly BrainstormIdea[];
+}
+
+/**
+ * Builds the system + user prompt for the cluster phase.
+ *
+ * The clusterer is a single model (Opus 4.6 by default) that takes the
+ * deduped survivor ideas and emits a cluster_map: label → [idea_id, ...].
+ * Labels are model-generated free-form strings (per design.md — no taxonomy
+ * in v1). Cluster output is advisory: it serves as a UI hint and a rank-phase
+ * context primer, but does not affect scoring directly.
+ *
+ * Output shape is the same shape we'll persist on the phase record so the
+ * rank phase can consume it directly. Every surviving `idea_id` MUST appear
+ * in exactly one cluster.
+ */
+export function clusterPrompt({
+  prompt,
+  ideas,
+}: ClusterPromptInput): PromptPair {
+  const system = [
+    'You are a brainstorm clusterer. You take a flat list of candidate project',
+    'ideas and group them into thematic clusters.',
+    '',
+    'Your job is to find the natural thematic groups in this set of ideas, and',
+    'to label each group with a short descriptive phrase. Clusters are advisory',
+    'context for downstream judges — they do not change which ideas survive.',
+    '',
+    'Rules:',
+    '- Every idea_id MUST appear in exactly one cluster (no duplicates, no orphans).',
+    '- Cluster labels are 2–6 word free-form phrases. No taxonomy, no schema.',
+    '- Aim for 2–6 clusters total. Fewer is fine if the set is small or homogeneous.',
+    '- A single-idea cluster is acceptable when the idea is a genuine outlier.',
+    '',
+    'You MUST output ONLY a single JSON object with no surrounding prose, no markdown',
+    'fences, and no commentary. The JSON object MUST conform to this exact schema:',
+    '',
+    '{"clusters": [',
+    '  {',
+    '    "label": "<2–6 word cluster name>",',
+    '    "idea_ids": ["<idea_id>", "<idea_id>", ...]',
+    '  },',
+    '  ...',
+    ']}',
+    '',
+    'Output ONLY the JSON object. No preamble, no markdown, no trailing commentary.',
+  ].join('\n');
+
+  const ideaLines = ideas.map(
+    (i) => `- ${i.idea_id}: ${i.title} — ${i.one_liner}`,
+  );
+
+  const user = [
+    'The original brainstorm prompt was:',
+    '',
+    prompt,
+    '',
+    `Cluster the following ${ideas.length} candidate ${ideas.length === 1 ? 'idea' : 'ideas'} into 2–6 thematic groups.`,
+    'Use the idea_id values exactly as given:',
+    '',
+    ...ideaLines,
+    '',
+    'Return a JSON object with a "clusters" array. Every idea_id above MUST appear in exactly one cluster.',
+  ].join('\n');
+
+  return { system, user };
+}
+
+/** Retry instruction sent when the first cluster parse attempt fails. */
+export const CLUSTER_RETRY_INSTRUCTION =
+  "Your previous response wasn't valid JSON. Output ONLY the JSON object with a " +
+  '"clusters" array. Each entry MUST include "label" (string) and "idea_ids" ' +
+  '(array of strings). Every idea_id from the input MUST appear in exactly one ' +
+  'cluster. No markdown fences, no commentary.';
