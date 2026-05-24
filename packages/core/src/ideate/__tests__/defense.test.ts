@@ -3,6 +3,7 @@ import {
   parseDefenseOutput, 
   buildDefenseUserPrompt 
 } from '../defense.js';
+import type { Problem } from '../types.js';
 
 describe('Defense Parser', () => {
   it('should parse valid defense JSON', () => {
@@ -64,7 +65,9 @@ describe('Defense Parser', () => {
 describe('Defense Prompt Builder', () => {
   const idea = 'A magic toaster';
   const draft = 'Toasts bread magically.';
-  const critiques = [{ problem: 'Too hot', proposed_fix: 'Add fan', dimension: 'technical' }];
+  const critiques: readonly Problem[] = [
+    { problem: 'Too hot', proposed_fix: 'Add fan', dimension: 'technical' },
+  ];
 
   it('should include mode instructions for author_choice', () => {
     const prompt = buildDefenseUserPrompt(idea, draft, critiques, 'author_choice');

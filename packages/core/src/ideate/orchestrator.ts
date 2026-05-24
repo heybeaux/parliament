@@ -41,8 +41,10 @@ import {
   DEFENSE_SYSTEM_PROMPT,
   buildDefenseUserPrompt,
   parseDefenseOutput,
+  DEFENSE_RETRY_INSTRUCTION,
 } from './defense.js';
 import type {
+  DefenseEntry,
   IdeateMode,
   IdeateStyle,
   IdeationStatus,
@@ -440,6 +442,7 @@ interface SynthContext {
   unstructuredAdversarial: boolean;
   /** Lattice report when --lattice was passed; null otherwise. */
   lattice: LatticeReport | null;
+  dimensionsSummary?: string;
 }
 
 async function runSynth(
@@ -564,7 +567,7 @@ function generateDimensionsSummary(phases: readonly PhaseRecord[]): string {
 function makeContribution(
   slot: LineupAssignment,
   content: string,
-  extras: Partial<Pick<PhaseContribution, 'problems' | 'attempts' | 'unstructured'>> = {},
+  extras: Partial<Pick<PhaseContribution, 'problems' | 'attempts' | 'unstructured' | 'defenses'>> = {},
 ): PhaseContribution {
   const c: PhaseContribution = {
     role: slot.role,
@@ -575,6 +578,7 @@ function makeContribution(
   if (extras.problems !== undefined) c.problems = extras.problems;
   if (extras.attempts !== undefined) c.attempts = extras.attempts;
   if (extras.unstructured !== undefined) c.unstructured = extras.unstructured;
+  if (extras.defenses !== undefined) c.defenses = extras.defenses;
   return c;
 }
 

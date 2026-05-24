@@ -6,7 +6,7 @@ import { runIdeation, type AdapterFactory } from '../orchestrator.js';
 /**
  * Test adapter that returns a scripted response per (model, system-prompt-key) lookup.
  * The system-prompt-key is the FIRST line of the system prompt, which is stable
- * per role and lets us differentiate cooperative-build / adversarial / rebuttal /
+ * per role and lets us differentiate cooperative-build / adversarial / defense /
  * synth without coupling to full prompt strings.
  */
 type Script = Record<string, string | (() => string)>;
@@ -89,7 +89,7 @@ describe('runIdeation — cooperative sub-mode', () => {
     ]);
   });
 
-  it('does NOT run adversarial or rebuttal phases in cooperative sub-mode', async () => {
+  it('does NOT run adversarial or defense phases in cooperative sub-mode', async () => {
     const lineup = defaultLineup('cooperative');
     const factory = makeFactory({
       [`${ANY}::You are the Proposer in a cooperative product-ideation team.`]: 'P',
@@ -110,17 +110,26 @@ describe('runIdeation — cooperative sub-mode', () => {
       factory,
     );
     expect(result.phases.find((p) => p.phase === 'adversarial-critique')).toBeUndefined();
-    expect(result.phases.find((p) => p.phase === 'rebuttal-1')).toBeUndefined();
-    expect(result.phases.find((p) => p.phase === 'rebuttal-2')).toBeUndefined();
+    expect(result.phases.find((p) => p.phase === 'defense')).toBeUndefined();
   });
 });
 
 describe('runIdeation — adversarial sub-mode', () => {
-  it('runs cooperative + adversarial + rebuttal-1 + rebuttal-2 + synth (rebuttal cap is hard)', async () => {
+  it('runs cooperative + adversarial + defense + synth', async () => {
     const lineup = defaultLineup('adversarial');
     const adversarialJson = JSON.stringify({
       problems: [
         { problem: 'no auth story', proposed_fix: 'add OAuth', dimension: 'technical' },
+      ],
+    });
+    const defenseJson = JSON.stringify({
+      defenses: [
+        {
+          critique_id: '0',
+          stance: 'address',
+          reasoning: 'The critique is valid and worth fixing.',
+          draft_delta: 'Add OAuth support.',
+        },
       ],
     });
     const factory = makeFactory({
@@ -130,7 +139,8 @@ describe('runIdeation — adversarial sub-mode', () => {
       [`${ANY}::You are the Lateralist in a cooperative product-ideation team.`]: 'L',
       [`${ANY}::You are an adversarial reviewer evaluating a product idea. Your role is NOT to`]:
         adversarialJson,
-      [`${ANY}::You are responding to adversarial critique of the team's product idea.`]: 'rebuttal',
+      [`${ANY}::You are a cooperative author defending your product idea against structured critiques.`]:
+        defenseJson,
       [`${ANY}::You are synthesizing a product-ideation transcript into a final ideation document.`]:
         'final',
     });
@@ -148,8 +158,7 @@ describe('runIdeation — adversarial sub-mode', () => {
     expect(result.phases.map((p) => p.phase)).toEqual([
       'cooperative-build',
       'adversarial-critique',
-      'rebuttal-1',
-      'rebuttal-2',
+      'defense',
       'synth',
     ]);
     // Adversarial team produced 2 contributions (skeptic + devils-advocate).
@@ -161,7 +170,7 @@ describe('runIdeation — adversarial sub-mode', () => {
     expect(adv.contributions[0]!.attempts).toBe(1);
   });
 
-  it('skips rebuttal phases when adversarial produces zero problems (well-formed but no problems)', async () => {
+  it('skips defense phase when adversarial produces zero problems (well-formed but no problems)', async () => {
     // Empty problems[] returns null from parser (treated as malformed).
     // Use unstructured prose on both attempts so the orchestrator surfaces
     // unstructured contributions and finds no problems.
@@ -225,7 +234,20 @@ describe('runIdeation — adversarial sub-mode', () => {
             return { content: validJson }; // Always valid on first attempt.
           }
         }
-        if (head.startsWith('You are responding to adversarial critique')) return { content: 'r' };
+        if (head.startsWith('You are a cooperative author defending your product idea')) {
+          return {
+            content: JSON.stringify({
+              defenses: [
+                {
+                  critique_id: '0',
+                  stance: 'address',
+                  reasoning: 'Fix it.',
+                  draft_delta: 'Updated draft.',
+                },
+              ],
+            }),
+          };
+        }
         if (head.startsWith('You are synthesizing a product-ideation')) return { content: 'S' };
         throw new Error(`unexpected: ${head}`);
       },
@@ -256,6 +278,16 @@ describe('runIdeation — full sub-mode', () => {
     const adversarialJson = JSON.stringify({
       problems: [{ problem: 'p', proposed_fix: 'f', dimension: 'ux' }],
     });
+    const defenseJson = JSON.stringify({
+      defenses: [
+        {
+          critique_id: '0',
+          stance: 'address',
+          reasoning: 'The UX issue is valid.',
+          draft_delta: 'Revise the UX flow.',
+        },
+      ],
+    });
     const factory = makeFactory({
       [`${ANY}::You are the Proposer in a cooperative product-ideation team.`]: 'P',
       [`${ANY}::You are the Expander in a cooperative product-ideation team.`]: 'E',
@@ -263,7 +295,8 @@ describe('runIdeation — full sub-mode', () => {
       [`${ANY}::You are the Lateralist in a cooperative product-ideation team.`]: 'L',
       [`${ANY}::You are an adversarial reviewer evaluating a product idea. Your role is NOT to`]:
         adversarialJson,
-      [`${ANY}::You are responding to adversarial critique of the team's product idea.`]: 'r',
+      [`${ANY}::You are a cooperative author defending your product idea against structured critiques.`]:
+        defenseJson,
       [`${ANY}::You are synthesizing a product-ideation transcript into a final ideation document.`]:
         'final',
     });
@@ -279,7 +312,7 @@ describe('runIdeation — full sub-mode', () => {
     );
     expect(result.status).toBe('complete');
     expect(result.phases.find((p) => p.phase === 'cooperative-build')!.contributions).toHaveLength(8);
-    expect(result.phases.find((p) => p.phase === 'rebuttal-1')!.contributions).toHaveLength(8);
+    expect(result.phases.find((p) => p.phase === 'defense')!.contributions).toHaveLength(8);
     expect(result.synthesis).toBe('final');
   });
 });

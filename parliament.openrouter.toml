@@ -17,8 +17,8 @@ osi_threshold = 0.85
 server_port = 3000
 
 [neurotypes.proposer]
-# Alibaba Qwen — structured reasoning, $0.033/$0.130 per M tok
-model = "qwen/qwen-turbo"
+# Alibaba Qwen — structured reasoning
+model = "qwen/qwen3.6-flash"
 provider = "openrouter"
 system_prompt = "You are a structured reasoner. Propose a clear, well-reasoned initial response to the topic. Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists."
 
@@ -48,8 +48,8 @@ Field semantics:
 Output ONLY the JSON object. No preamble, no markdown, no trailing commentary."""
 
 [neurotypes.redAgent]
-# xAI Grok — disruption (fitting), $0.200/$0.500 per M tok
-model = "x-ai/grok-4.1-fast"
+# xAI Grok — disruption
+model = "x-ai/grok-4.20"
 provider = "openrouter"
 system_prompt = "You are a disruptor. Inject a challenging perspective that prevents premature consensus. Target the weakest assumption in the current debate. Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists."
 

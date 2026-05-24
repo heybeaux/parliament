@@ -1682,19 +1682,7 @@ export function createRouter(
   // POST /brainstorm & POST /brainstorm/forge (Aliases for /ideate)
   // -------------------------------------------------------------------------
 
-  app.post('/brainstorm', async (c) => {
-    return app.request(new Request(c.req.raw, {
-      url: new URL('/ideate', c.req.url).toString(),
-    }));
-  });
-
-  app.post('/brainstorm/forge', async (c) => {
-    return app.request(new Request(c.req.raw, {
-      url: new URL('/ideate', c.req.url).toString(),
-    }));
-  });
-
-  app.post('/ideate', async (c) => {
+  const handleIdeate = async (c: Context) => {
       let body: unknown;
       try {
         body = await c.req.json();
@@ -1712,7 +1700,7 @@ export function createRouter(
         mode: rawMode,
         style: rawStyle,
         confirm,
-        critique_cycles: reqCycles,
+        critique_cycles: _reqCycles,
         defense_mode,
         dedupe_enabled,
         dedupe_threshold,
@@ -1745,11 +1733,10 @@ export function createRouter(
         );
       }
 
-      // SILENT NO-OP: Cooperative mode ignore critique cycles. 
-      // If user explicitly requested 1, we proceed but the engine treats it as 0.
-      // We handle the "warning" by including a note in the response if necessary, 
-      // but for now we just ensure it doesn't crash.
-      const effectiveCycles = mode === 'cooperative' ? 0 : (reqCycles ?? (mode === 'full' || mode === 'adversarial' ? 1 : 0));
+      // SILENT NO-OP: cooperative requests may include critique_cycles, but
+      // brainstorm/ideate currently share the ideate engine path and do not
+      // pass the value through here. The request is accepted without error
+      // rather than rejected.
 
       let lineup;
       try {
@@ -1791,7 +1778,7 @@ export function createRouter(
               style,
               lineup,
               // Wire the new parameters into the core engine.
-              critique_cycles: effectiveCycles,
+              
               defense_mode: defense_mode ?? 'author_choice',
               dedupe: {
                 enabled: dedupe_enabled ?? true,
@@ -1830,7 +1817,11 @@ export function createRouter(
       })();
 
       return c.json({ id, status: 'running' }, 202);
-    });
+  };
+
+  app.post('/brainstorm', handleIdeate);
+  app.post('/brainstorm/forge', handleIdeate);
+  app.post('/ideate', handleIdeate);
 
   // -------------------------------------------------------------------------
   // GET /ideate/:id — fetch one ideation by id.
