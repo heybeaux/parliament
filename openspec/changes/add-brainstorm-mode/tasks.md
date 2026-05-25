@@ -92,16 +92,16 @@ Per-section commits, just like `refine-ideate-forge`. Don't bundle.
 
 ## Section 12 — Architectural lock test
 
-- [ ] 12.1 Test in `brainstorm/__tests__/no-ideate-coupling.test.ts` that greps the brainstorm orchestrator source and asserts it contains no `runIdeation` import or call.
-- [ ] 12.2 Same test asserts `runDedupePhase` IS imported (positive check — confirms intentional reuse).
+- [x] 12.1 Test in `brainstorm/__tests__/no-ideate-coupling.test.ts` that greps the brainstorm orchestrator source and asserts it contains no `runIdeation` import or call.
+- [x] 12.2 Same test asserts `runDedupePhase` IS imported (positive check — confirms intentional reuse). Un-gated: now checks `brainstorm/dedupe.ts` OR `orchestrator.ts` so the reuse contract survives future call-site refactors.
 
 ## Section 13 — Docs + release note
 
-- [ ] 13.1 Update `README.md` (and the existing brainstorm/forge handover doc) with the new shape.
-- [ ] 13.2 Release note in `CHANGELOG.md` flagging the `/brainstorm` response shape break.
-- [ ] 13.3 Confirm with Beaux before pushing (heybeaux/* gated-repo rule).
+- [x] 13.1 Update `README.md` (and the existing brainstorm/forge handover doc) with the new shape. New "Brainstorm" section added to README above the existing Ideate section, covering pipeline, modes, response shape, CLI flags, REST endpoints, and TOML overrides.
+- [x] 13.2 Release note in `CHANGELOG.md` (created) flagging the `/brainstorm` response shape break under "Breaking Changes".
+- [x] 13.3 Confirm with Beaux before pushing (heybeaux/* gated-repo rule).
 
 ## Section 14 — Spec validation
 
-- [ ] 14.1 `openspec validate add-brainstorm-mode --strict` passes.
-- [ ] 14.2 PR description includes a per-section completion checklist.
+- [x] 14.1 `openspec validate add-brainstorm-mode --strict` passes.
+- [x] 14.2 PR description includes a per-section completion checklist.
