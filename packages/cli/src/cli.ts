@@ -9,6 +9,8 @@
  *                                   [--model-proposer <id>] [--model-skeptic <id>]
  *                                   [--max-rounds <n>] [--config <path>]
  *   parliament get <id>
+ *   parliament brainstorm "<prompt>" [--forge] [--k=N] [--ideas-per-author=K]
+ *                                    [--print-lineup] [--config <path>]
  */
 
 import fs from 'node:fs';
@@ -43,6 +45,14 @@ import type {
   LatticeIdeateOptions,
   ResolvedLineup,
   TopologyStep,
+} from '@parliament/core';
+import {
+  resolveBrainstormLineup,
+} from '@parliament/core';
+import type {
+  BrainstormLineup,
+  BrainstormRankedIdea,
+  BrainstormRanking,
 } from '@parliament/core';
 import { printResult } from './display.js';
 
@@ -628,6 +638,237 @@ async function runIdeate(idea: string, opts: IdeateOptions): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Brainstorm command — talks to /brainstorm or /brainstorm/forge HTTP surface.
+//
+// `parliament brainstorm "<prompt>"` posts to /brainstorm (or /brainstorm/forge
+// with --forge), polls until the run reaches a terminal state, then renders
+// the ranked ideas as a numbered list with per-criterion scores.
+//
+// `--print-lineup` short-circuits before any network call and dumps the
+// resolved model assignments.
+// ---------------------------------------------------------------------------
+
+interface BrainstormOptions {
+  forge?: boolean;
+  k?: string;
+  ideasPerAuthor?: string;
+  printLineup?: boolean;
+  config?: string;
+  /** Polling cadence in ms; intended for tests. Default: 2000. */
+  pollIntervalMs?: string;
+  /** Hard timeout in ms for the polling loop. Default: 600_000 (10 min). */
+  pollTimeoutMs?: string;
+}
+
+/** Render a BrainstormLineup as multi-line plain text. */
+export function formatBrainstormLineup(lineup: BrainstormLineup): string {
+  const lines: string[] = [];
+  lines.push('Divergent authors:');
+  for (const a of lineup.divergentAuthors) {
+    lines.push(`  - ${a.model}`);
+  }
+  lines.push('Judges:');
+  for (const j of lineup.judges) {
+    lines.push(`  - ${j.model}`);
+  }
+  lines.push(`Cluster:         ${lineup.cluster.model}`);
+  lines.push(`Forge elaborator: ${lineup.forgeElaborator.model}`);
+  return lines.join('\n');
+}
+
+/** Render ranked ideas as a numbered list with per-criterion scores table. */
+function formatRankedIdeas(
+  rankings: readonly BrainstormRanking[],
+  phases: readonly { phase: string; ranked?: readonly BrainstormRankedIdea[] }[],
+): string {
+  // Prefer enriched BrainstormRankedIdea from the rank phase record.
+  const rankPhase = phases.find((p) => p.phase === 'idea-rank');
+  const enriched: readonly BrainstormRankedIdea[] | undefined = rankPhase?.ranked;
+
+  if (enriched !== undefined && enriched.length > 0) {
+    const lines: string[] = [];
+    for (const idea of enriched) {
+      const pos = idea.rank ?? '?';
+      const score = idea.final_score !== null ? idea.final_score.toFixed(2) : 'N/A';
+      lines.push(`${pos}. ${idea.title} (score: ${score})`);
+      lines.push(`   ${idea.one_liner}`);
+      if (idea.cluster != null) lines.push(`   Cluster: ${idea.cluster}`);
+      lines.push(
+        `   novelty=${fmtScore(idea.criteria_scores.novelty)} ` +
+          `feasibility=${fmtScore(idea.criteria_scores.feasibility)} ` +
+          `fit=${fmtScore(idea.criteria_scores.fit)} ` +
+          `evidence=${fmtScore(idea.criteria_scores.evidence)}`,
+      );
+      if (idea.judge_skipped) lines.push('   [judge skipped — all judges authored this idea]');
+    }
+    return lines.join('\n');
+  }
+
+  // Fallback: use raw BrainstormRanking list (no title/one_liner).
+  if (rankings.length === 0) return '(no rankings)';
+  return rankings
+    .map((r, i) => {
+      const score = r.score !== null ? r.score.toFixed(2) : 'N/A';
+      return (
+        `${i + 1}. ${r.idea_id} (score: ${score})\n` +
+        `   novelty=${fmtScore(r.per_criterion.novelty)} ` +
+        `feasibility=${fmtScore(r.per_criterion.feasibility)} ` +
+        `fit=${fmtScore(r.per_criterion.fit)} ` +
+        `evidence=${fmtScore(r.per_criterion.evidence)}`
+      );
+    })
+    .join('\n');
+}
+
+function fmtScore(v: number | null | undefined): string {
+  if (v === null || v === undefined) return 'N/A';
+  return v.toFixed(1);
+}
+
+interface BrainstormRecord {
+  id: string;
+  status: string;
+  phases: Array<{ phase: string; ranked?: BrainstormRankedIdea[] }>;
+  rankings: BrainstormRanking[];
+  elaborations?: Array<{ idea_id: string; elaboration: string | null; model: string; error?: string }> | null;
+  error?: string | null;
+}
+
+async function runBrainstormCommand(prompt: string, opts: BrainstormOptions): Promise<void> {
+  // --print-lineup short-circuits before any network or model call.
+  if (opts.printLineup === true) {
+    let lineup: BrainstormLineup;
+    try {
+      lineup = resolveBrainstormLineup(undefined);
+    } catch (err) {
+      process.stderr.write(
+        `Parliament: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+      process.exit(1);
+    }
+    process.stdout.write(`${formatBrainstormLineup(lineup)}\n`);
+    return;
+  }
+
+  const forge = opts.forge === true;
+
+  let forgeK: number | undefined;
+  if (opts.k !== undefined) {
+    forgeK = parseInt(opts.k, 10);
+    if (isNaN(forgeK) || forgeK < 1) {
+      process.stderr.write('Parliament: --k must be a positive integer\n');
+      process.exit(1);
+    }
+  }
+
+  let ideasPerAuthor: number | undefined;
+  if (opts.ideasPerAuthor !== undefined) {
+    ideasPerAuthor = parseInt(opts.ideasPerAuthor, 10);
+    if (isNaN(ideasPerAuthor) || ideasPerAuthor < 1) {
+      process.stderr.write('Parliament: --ideas-per-author must be a positive integer\n');
+      process.exit(1);
+    }
+  }
+
+  const baseUrl = process.env['PARLIAMENT_SERVER_URL'] ?? 'http://localhost:3030';
+  const endpoint = forge ? `${baseUrl}/brainstorm/forge` : `${baseUrl}/brainstorm`;
+
+  const body: Record<string, unknown> = { prompt };
+  if (ideasPerAuthor !== undefined) body['ideas_per_author'] = ideasPerAuthor;
+  if (forge && forgeK !== undefined) body['k'] = forgeK;
+
+  let post: Response;
+  try {
+    post = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    process.stderr.write(
+      `Parliament: failed to reach server at ${endpoint}: ${String(err)}\n`,
+    );
+    process.exit(1);
+  }
+  if (!post.ok) {
+    const text = await post.text();
+    process.stderr.write(
+      `Parliament: server returned ${post.status} from POST ${endpoint}: ${text}\n`,
+    );
+    process.exit(1);
+  }
+
+  const submitted = (await post.json()) as { id: string; status: string };
+  process.stdout.write(`Brainstorm ${submitted.id} started (status: ${submitted.status}).\n`);
+
+  const pollIntervalMs =
+    opts.pollIntervalMs !== undefined ? parseInt(opts.pollIntervalMs, 10) : 2000;
+  const pollTimeoutMs =
+    opts.pollTimeoutMs !== undefined ? parseInt(opts.pollTimeoutMs, 10) : 600_000;
+  if (isNaN(pollIntervalMs) || pollIntervalMs < 100) {
+    process.stderr.write('Parliament: --poll-interval-ms must be >= 100\n');
+    process.exit(1);
+  }
+  if (isNaN(pollTimeoutMs) || pollTimeoutMs < pollIntervalMs) {
+    process.stderr.write('Parliament: --poll-timeout-ms must be >= --poll-interval-ms\n');
+    process.exit(1);
+  }
+
+  const startedAt = Date.now();
+  const seenPhases = new Set<string>();
+  while (true) {
+    if (Date.now() - startedAt > pollTimeoutMs) {
+      process.stderr.write(
+        `Parliament: brainstorm ${submitted.id} did not finish within ${pollTimeoutMs}ms.\n`,
+      );
+      process.exit(1);
+    }
+    let getRes: Response;
+    try {
+      getRes = await fetch(`${baseUrl}/brainstorm/${submitted.id}`);
+    } catch (err) {
+      process.stderr.write(`Parliament: poll failed: ${String(err)}\n`);
+      process.exit(1);
+    }
+    if (!getRes.ok) {
+      process.stderr.write(
+        `Parliament: server returned ${getRes.status} from GET /brainstorm/${submitted.id}\n`,
+      );
+      process.exit(1);
+    }
+    const record = (await getRes.json()) as BrainstormRecord;
+    for (const phase of record.phases) {
+      if (!seenPhases.has(phase.phase)) {
+        seenPhases.add(phase.phase);
+        process.stdout.write(`  phase: ${phase.phase}\n`);
+      }
+    }
+    if (record.status !== 'running') {
+      if (record.status === 'error') {
+        process.stderr.write(
+          `Parliament: brainstorm failed: ${record.error ?? 'unknown error'}\n`,
+        );
+        process.exit(1);
+      }
+      process.stdout.write('\n--- Ranked Ideas ---\n');
+      process.stdout.write(`${formatRankedIdeas(record.rankings, record.phases)}\n`);
+      if (forge && record.elaborations != null && record.elaborations.length > 0) {
+        process.stdout.write('\n--- Forge Elaborations ---\n');
+        for (const e of record.elaborations) {
+          if (e.elaboration !== null) {
+            process.stdout.write(`[${e.idea_id}]\n${e.elaboration}\n\n`);
+          } else {
+            process.stdout.write(`[${e.idea_id}] elaboration failed: ${e.error ?? 'unknown'}\n\n`);
+          }
+        }
+      }
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Get command
 // ---------------------------------------------------------------------------
 
@@ -727,6 +968,42 @@ export function createProgram(): Command {
     .description('Fetch and display a past deliberation by ID from the Parliament server')
     .action(async (id: string) => {
       await runGet(id);
+    });
+
+  program
+    .command('brainstorm <prompt>')
+    .description(
+      'Run a multi-model divergent brainstorm on a prompt. Produces ranked candidate ideas with ' +
+        'per-criterion scores. Add --forge to elaborate the top-K winners.',
+    )
+    .option(
+      '--forge',
+      'Run forge elaboration on the top-K ranked ideas after brainstorming',
+      false,
+    )
+    .option(
+      '--k <n>',
+      'Forge breadth: number of top ideas to elaborate when --forge is set (default: 3)',
+    )
+    .option(
+      '--ideas-per-author <n>',
+      'Divergent fan-out: ideas each author generates (default: 5)',
+    )
+    .option(
+      '--print-lineup',
+      'Resolve and print the brainstorm lineup (authors, judges, elaborator) without making any model call',
+    )
+    .option('--config <path>', 'Path to parliament.toml config file (used by --print-lineup)')
+    .option(
+      '--poll-interval-ms <n>',
+      'Polling cadence (in ms) for /brainstorm/:id while the run is in flight. Default: 2000.',
+    )
+    .option(
+      '--poll-timeout-ms <n>',
+      'Maximum time (in ms) to wait for the brainstorm to finish. Default: 600000.',
+    )
+    .action(async (prompt: string, opts: BrainstormOptions) => {
+      await runBrainstormCommand(prompt, opts);
     });
 
   program
