@@ -30,7 +30,7 @@ import type { ModelAdapter } from '../adapters/base.js';
 // `brainstorm/dedupe.ts`. This re-export here makes the reuse explicit at the
 // orchestrator level so the architectural lock test
 // (__tests__/no-ideate-coupling.test.ts, task 12.2) can confirm it.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+ 
 import { runDedupePhase as _runDedupePhase } from '../ideate/dedupe.js';
 import { runDivergentGeneration } from './divergent.js';
 import { runIdeaDedupePhase } from './dedupe.js';
