@@ -77,11 +77,11 @@ Per-section commits, just like `refine-ideate-forge`. Don't bundle.
 
 ## Section 10 — CLI
 
-- [ ] 10.1 New `parliament brainstorm "<prompt>"` command in the CLI.
-- [ ] 10.2 Flags: `--forge` (toggles forge phase), `--k=N` (forge breadth, default 3), `--ideas-per-author=K` (divergent fan-out, default 5).
-- [ ] 10.3 `--print-lineup` prints the resolved lineup including judges and forge elaborator.
-- [ ] 10.4 Polling output renders ranked ideas as a numbered list with per-criterion scores in a compact table.
-- [ ] 10.5 Integration test: end-to-end CLI invocation with a stub server.
+- [x] 10.1 New `parliament brainstorm "<prompt>"` command in the CLI.
+- [x] 10.2 Flags: `--forge` (toggles forge phase), `--k=N` (forge breadth, default 3), `--ideas-per-author=K` (divergent fan-out, default 5).
+- [x] 10.3 `--print-lineup` prints the resolved lineup including judges and forge elaborator.
+- [x] 10.4 Polling output renders ranked ideas as a numbered list with per-criterion scores in a compact table.
+- [x] 10.5 Integration test: end-to-end CLI invocation with a stub server.
 
 ## Section 11 — TOML
 
