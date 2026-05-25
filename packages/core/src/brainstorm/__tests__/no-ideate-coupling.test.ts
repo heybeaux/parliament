@@ -88,24 +88,28 @@ describe('Brainstorm Architectural Locks', () => {
     ).toEqual([]);
   });
 
-  // Positive check for Section 12.2 — confirms intentional reuse of the
-  // dedupe primitive. Currently the orchestrator is a stub, so this test
-  // tolerates the absence of the import and gets enforced once Section 5
-  // lands. The check is gated on the orchestrator no longer throwing
-  // "not yet implemented" — meaning real wiring exists.
-  it('reuses runDedupePhase once the orchestrator is implemented', () => {
-    const orchPath = join(brainstormDir, 'orchestrator.ts');
-    const src = readFileSync(orchPath, 'utf8');
-    const isStub = /runBrainstorm is not yet implemented/.test(src);
-    if (isStub) {
-      // Skip — Section 5 hasn't landed yet. This branch disappears when
-      // the orchestrator is real, at which point the positive check
-      // becomes load-bearing.
-      return;
-    }
+  // Section 12.2 — positive check confirming intentional reuse of the
+  // dedupe primitive. Section 5 landed the real wiring in brainstorm/dedupe.ts
+  // (which the orchestrator delegates to). The check accepts the import in
+  // EITHER file so that future refactors which move the call site don't
+  // silently drop the reuse contract.
+  it('reuses runDedupePhase from ../ideate/dedupe somewhere in the brainstorm module', () => {
+    const dedupeImportRe = /from\s+['"]\.\.\/ideate\/dedupe(\.js)?['"]/;
+    const candidates = [
+      join(brainstormDir, 'dedupe.ts'),
+      join(brainstormDir, 'orchestrator.ts'),
+    ];
+    const found = candidates.some((p) => {
+      try {
+        return dedupeImportRe.test(readFileSync(p, 'utf8'));
+      } catch {
+        return false;
+      }
+    });
     expect(
-      /from\s+['"]\.\.\/ideate\/dedupe(\.js)?['"]/.test(src),
-      'Orchestrator should import runDedupePhase from ../ideate/dedupe (intentional reuse)',
+      found,
+      'At least one brainstorm source (dedupe.ts or orchestrator.ts) must import ' +
+        'runDedupePhase from ../ideate/dedupe — intentional primitive reuse.',
     ).toBe(true);
   });
 });
