@@ -37,7 +37,7 @@ export {
 } from './lineup.js';
 
 export { runBrainstorm } from './orchestrator.js';
-export type { AdapterFactory } from './orchestrator.js';
+export type { AdapterFactory, RunBrainstormOptions } from './orchestrator.js';
 
 export { runIdeaDedupePhase, stableIdeaId } from './dedupe.js';
 export type { RunIdeaDedupeInput, IdeaDedupeOutput } from './dedupe.js';
@@ -47,5 +47,11 @@ export type { RunClusterPhaseInput, ClusterPhaseOutput } from './cluster.js';
 
 export { runRankPhase } from './rank.js';
 export type { RunRankPhaseInput, RankPhaseOutput } from './rank.js';
+
+export { runDivergentGeneration } from './divergent.js';
+export type {
+  RunDivergentGenerationInput,
+  DivergentGenerationOutput,
+} from './divergent.js';
 
 export { elaborateIdea, forgeTopK } from './forge.js';

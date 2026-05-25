@@ -207,3 +207,31 @@ export {
 } from './ideate/adversarial.js';
 export type { AdapterFactory, RunIdeationInput, RunIdeationResult } from './ideate/orchestrator.js';
 export { runIdeation, formatLatticeReport } from './ideate/orchestrator.js';
+
+// Brainstorm mode — Section 9 surface for server wiring. See
+// `packages/core/src/brainstorm/index.ts` for the full surface.
+export type {
+  BrainstormMode,
+  BrainstormCriterion,
+  BrainstormLineup,
+  BrainstormLineupAssignment,
+  BrainstormIdea,
+  BrainstormRanking,
+  BrainstormRankedIdea,
+  ForgeElaboration,
+  BrainstormPhaseId,
+  BrainstormPhaseRecord,
+  BrainstormStatus,
+  BrainstormRankWeights,
+  RunBrainstormInput,
+  RunBrainstormResult,
+  RunBrainstormOptions,
+} from './brainstorm/index.js';
+export {
+  BRAINSTORM_CRITERIA,
+  DEFAULT_RANK_WEIGHTS,
+  defaultBrainstormLineup,
+  resolveBrainstormLineup,
+  resolveRankWeights,
+  runBrainstorm,
+} from './brainstorm/index.js';

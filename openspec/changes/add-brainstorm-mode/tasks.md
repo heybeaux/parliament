@@ -67,13 +67,13 @@ Per-section commits, just like `refine-ideate-forge`. Don't bundle.
 
 ## Section 9 — Server: routes + persistence
 
-- [ ] 9.1 New `brainstorms` table migration. Columns: `id TEXT PK`, `created_at TEXT`, `prompt TEXT`, `mode TEXT`, `status TEXT`, `lineup JSON`, `phases JSON`, `rankings JSON`, `elaborations JSON NULL`, `error TEXT NULL`.
-- [ ] 9.2 New file `packages/server/src/routes/brainstorm.ts`. Two distinct handlers: `handleBrainstorm` and `handleBrainstormForge`. They MUST NOT share a handler.
-- [ ] 9.3 Zod schemas for `BrainstormRequest` and `BrainstormForgeRequest`. Schemas differ on the `mode` literal and on whether `k` is accepted.
-- [ ] 9.4 `POST /brainstorm` and `POST /brainstorm/forge` register the two handlers. Existing `app.post('/brainstorm', handleIdeate)` and `app.post('/brainstorm/forge', handleIdeate)` MUST be removed.
-- [ ] 9.5 `GET /brainstorm/:id` reads only from `brainstorms`. MUST NOT fall back to `ideations`.
-- [ ] 9.6 Fire-and-forget pattern matches `/ideate`: 202 with `{ id, status: 'running' }`; background runner persists phases as they complete.
-- [ ] 9.7 Integration tests: round-trip POST → poll → complete; forge variant produces elaborations; plain brainstorm has `elaborations: null` in response.
+- [x] 9.1 New `brainstorms` table migration. Columns: `id TEXT PK`, `created_at TEXT`, `prompt TEXT`, `mode TEXT`, `status TEXT`, `lineup JSON`, `phases JSON`, `rankings JSON`, `elaborations JSON NULL`, `error TEXT NULL`.
+- [x] 9.2 New file `packages/server/src/routes/brainstorm.ts`. Two distinct handlers: `handleBrainstorm` and `handleBrainstormForge`. They MUST NOT share a handler.
+- [x] 9.3 Zod schemas for `BrainstormRequest` and `BrainstormForgeRequest`. Schemas differ on the `mode` literal and on whether `k` is accepted.
+- [x] 9.4 `POST /brainstorm` and `POST /brainstorm/forge` register the two handlers. Existing `app.post('/brainstorm', handleIdeate)` and `app.post('/brainstorm/forge', handleIdeate)` MUST be removed.
+- [x] 9.5 `GET /brainstorm/:id` reads only from `brainstorms`. MUST NOT fall back to `ideations`.
+- [x] 9.6 Fire-and-forget pattern matches `/ideate`: 202 with `{ id, status: 'running' }`; background runner persists phases as they complete.
+- [x] 9.7 Integration tests: round-trip POST → poll → complete; forge variant produces elaborations; plain brainstorm has `elaborations: null` in response.
 
 ## Section 10 — CLI
 
