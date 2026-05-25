@@ -341,7 +341,7 @@ async function attachMemoryRecall(
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    // eslint-disable-next-line no-console
+     
     console.warn(`[parliament] memory.recall failed: ${message}`);
   }
 }
@@ -365,7 +365,7 @@ async function attachContextResolution(
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    // eslint-disable-next-line no-console
+     
     console.warn(`[parliament] context.resolve failed: ${message}`);
   }
   return 0;
@@ -387,7 +387,7 @@ function dispatchMemoryRemember(
   }
   void provider.remember(outcome, { agentId }).catch((err: unknown) => {
     const message = err instanceof Error ? err.message : String(err);
-    // eslint-disable-next-line no-console
+     
     console.warn(`[parliament] memory.remember failed: ${message}`);
   });
 }
