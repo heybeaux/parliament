@@ -85,10 +85,10 @@ Per-section commits, just like `refine-ideate-forge`. Don't bundle.
 
 ## Section 11 — TOML
 
-- [ ] 11.1 New `[brainstorm]` section with `lineup`, `rank.weights`, `ideas_per_author`, `forge.k` keys.
-- [ ] 11.2 Validation: weights must sum to ~1.0; `ideas_per_author` must be in [1, 20]; `forge.k` must be in [1, 10].
-- [ ] 11.3 Sample config block added to `parliament.openrouter.toml` (commented out).
-- [ ] 11.4 Loader tests: defaults applied; overrides applied; invalid values rejected.
+- [x] 11.1 New `[brainstorm]` section with `lineup`, `rank.weights`, `ideas_per_author`, `forge.k` keys.
+- [x] 11.2 Validation: weights must sum to ~1.0; `ideas_per_author` must be in [1, 20]; `forge.k` must be in [1, 10].
+- [x] 11.3 Sample config block added to `parliament.openrouter.toml` (commented out).
+- [x] 11.4 Loader tests: defaults applied; overrides applied; invalid values rejected.
 
 ## Section 12 — Architectural lock test
 
