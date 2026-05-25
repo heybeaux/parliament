@@ -63,6 +63,7 @@ import {
   DEFAULT_LIMIT,
   MAX_LIMIT,
 } from './deliberations.js';
+import { registerBrainstormRoutes } from './routes/brainstorm.js';
 import { inflightBroker, type InflightEvent } from './inflight.js';
 import { loadServerConfig, type ServerConfig } from './config.js';
 import { corsMiddleware } from './middleware/cors.js';
@@ -1819,9 +1820,14 @@ export function createRouter(
       return c.json({ id, status: 'running' }, 202);
   };
 
-  app.post('/brainstorm', handleIdeate);
-  app.post('/brainstorm/forge', handleIdeate);
   app.post('/ideate', handleIdeate);
+
+  // -------------------------------------------------------------------------
+  // /brainstorm — distinct routes with real pipeline semantics.
+  // Replaces the former handleIdeate aliases (see migration plan in
+  // openspec/changes/add-brainstorm-mode/design.md §migration-plan).
+  // -------------------------------------------------------------------------
+  registerBrainstormRoutes(app, db);
 
   // -------------------------------------------------------------------------
   // GET /ideate/:id — fetch one ideation by id.

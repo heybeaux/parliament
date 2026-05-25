@@ -8,6 +8,7 @@ import type {
   UpstreamErrorContext,
 } from '@parliament/core';
 import { ensureIdeationsTable } from './ideations.js';
+import { ensureBrainstormsTable } from './brainstorms.js';
 
 export { Database };
 
@@ -161,6 +162,7 @@ export function initDb(path = 'parliament.db'): Database.Database {
   );
 
   ensureIdeationsTable(db);
+  ensureBrainstormsTable(db);
 
   return db;
 }
