@@ -22,3 +22,5 @@ node_modules/
 # tracking causes recurring merge conflicts and noisy diffs without any
 # upside — it's a local cache, not source.
 *.tsbuildinfo
+.history
+.DS_Store

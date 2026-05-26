@@ -165,6 +165,101 @@ Topology presets compose neurotypes into reusable deliberation shapes. Pick one 
 
 Built-in presets always include their full metadata (`name`, `description`, `best_for`, step list, plus `requires_neurotypes` / `missing_neurotypes`) under `GET /presets`, so a UI picker can render them without a second round-trip. User-defined presets author the same fields under `[topology.presets.<id>]`.
 
+## Brainstorm
+
+Parliament's `/brainstorm` mode is a **divergent-generation + adversarial-ranking workflow** for open-ended idea generation. Where `/ideate` refines a single candidate idea through cooperative build and adversarial critique, **brainstorm** generates a fan of distinct ideas, deduplicates them, clusters them, and scores them across multiple criteria with author-aware judge skipping — so no judge scores an idea it authored.
+
+### Pipeline
+
+```
+divergent-generation → idea-dedupe → idea-cluster → idea-rank → [forge-elaboration]
+```
+
+Each phase records a `BrainstormPhaseRecord` (`phase`, `timestamp`, phase-specific payload) that persists in real time.
+
+### Modes
+
+| Mode              | Description                                                                          |
+| ----------------- | ------------------------------------------------------------------------------------ |
+| `brainstorm`      | Runs divergent generation through ranking; returns phases + rankings.                |
+| `brainstorm/forge`| Same pipeline plus a parallel forge-elaboration pass over the top-K ranked ideas.   |
+
+### Response shape
+
+`POST /brainstorm` and `POST /brainstorm/forge` both return `202 { id, status: 'running' }` immediately. Poll `GET /brainstorm/:id` for the completed record:
+
+```jsonc
+{
+  "id": "<uuid>",
+  "status": "complete",
+  "phases": [
+    { "phase": "divergent-generation", "timestamp": "...", "ideas": [...] },
+    { "phase": "idea-dedupe",          "timestamp": "...", "survivors": [...] },
+    { "phase": "idea-cluster",         "timestamp": "...", "clusters": {...} },
+    { "phase": "idea-rank",            "timestamp": "...", "scores": [...] }
+  ],
+  "rankings": [
+    { "idea_id": "...", "rank": 1, "score": 0.87, "scores_by_criterion": {...} }
+  ],
+  "elaborations": null   // present (array) only for brainstorm/forge runs
+}
+```
+
+> **Breaking change vs. the old alias:** Prior to `add-brainstorm-mode`, `POST /brainstorm` and `POST /brainstorm/forge` were aliases for `runIdeation()` and returned the ideate response shape. They now return the brainstorm shape above. See [CHANGELOG.md](CHANGELOG.md).
+
+### CLI
+
+```
+parliament brainstorm "<prompt>" [options]
+  --forge                   Run the forge-elaboration phase on top-K ideas
+  --k <n>                   Number of ideas to elaborate in forge mode (default 3)
+  --ideas-per-author <k>    Divergent fan-out per author (default 5)
+  --print-lineup            Print the resolved lineup (authors, judges, elaborator) and exit
+  --config <path>           Path to parliament.toml
+```
+
+```bash
+# Basic brainstorm
+parliament brainstorm "Ways to reduce meeting fatigue in remote teams"
+
+# With forge elaboration on the top 3 ideas
+parliament brainstorm "Ways to reduce meeting fatigue" --forge --k 3
+
+# Inspect the lineup before running
+parliament brainstorm "..." --print-lineup
+```
+
+### REST API
+
+| Endpoint                  | Description                                                                                         |
+| ------------------------- | --------------------------------------------------------------------------------------------------- |
+| `POST /brainstorm`        | Start a brainstorm run. Body: `{ prompt, ideasPerAuthor? }`. Returns `202 { id, status }`.          |
+| `POST /brainstorm/forge`  | Start a brainstorm + forge run. Body: `{ prompt, ideasPerAuthor?, k? }`. Returns `202 { id, status }`. |
+| `GET  /brainstorm/:id`    | Fetch a stored brainstorm by UUID. Returns phases, rankings, and (for forge) elaborations.          |
+
+### TOML overrides
+
+```toml
+[brainstorm]
+ideas_per_author = 5    # divergent fan-out per author; range [1, 20]
+
+[brainstorm.lineup]
+# Override authors, judges, and forge elaborator by model ID
+# (same partial-replace semantics as ideate.lineup)
+
+[brainstorm.rank.weights]
+# Partial-replace on default equal weights; auto-normalized to sum=1.0
+novelty     = 0.4
+feasibility = 0.3
+fit         = 0.2
+evidence    = 0.1
+
+[brainstorm.forge]
+k = 3   # number of top-ranked ideas to elaborate; range [1, 10]
+```
+
+Criteria: `novelty`, `feasibility`, `fit`, `evidence` (equal weights by default, auto-normalized if partially overridden).
+
 ## Ideate
 
 Parliament's `/ideate` mode is a **second top-level workflow** parallel to deliberation. Where deliberation pits agents against a topic until they reach consensus, **ideate** runs a frontier-model lineup over a single product idea, gathers structured critique, and produces one synthesized ideation document. It bypasses the deliberation engine entirely (no rounds, no OSI, no Sentry) — the orchestrator drives a fixed phase pipeline instead.
@@ -207,6 +302,11 @@ parliament ideate <idea> [options]
   --config <path>           Path to parliament.toml
   --poll-interval-ms <n>    Polling cadence (default 2000)
   --poll-timeout-ms <n>     Hard timeout for the polling loop (default 600000)
+  --lattice                 Wrap each model call with @heybeaux/lattice-adapter-parliament
+                            for State Contract validation, Circuit Breaker enforcement, and
+                            ConsensusReducer-based agreement tracking. Off by default.
+  --audit-log <path>        JSONL audit log target when --lattice is set.
+                            Default: ./parliament-audit.jsonl
 ```
 
 `--mode=full` is gated: the CLI prompts `[y/N]` interactively, or you can pass `--yes` for scripted runs. The HTTP surface enforces the same gate via `confirm: true` on the request body.
@@ -262,6 +362,41 @@ Run `parliament ideate "<idea>" --print-lineup --mode=<mode>` to verify the reso
 ### Cost guidance
 
 `cooperative` is the cheap default — four models for one cooperative-build pass plus a synth pass (~$0.05–$0.20 per run depending on idea size). `adversarial` adds two rebuttal rounds and an adversarial team (~$0.15–$0.40). `full` runs all 8 frontier models plus the adversarial team and two rebuttals — expect **$0.30–$1.00 per run**, which is why the confirm gate exists. Use `--print-lineup` to dry-run before committing.
+
+### Lattice integration
+
+When you pass `--lattice=true`, every model call (cooperative + adversarial + rebuttal) is routed through [`@heybeaux/lattice-adapter-parliament`](https://www.npmjs.com/package/@heybeaux/lattice-adapter-parliament). Each response is wrapped in a typed **State Contract**, validated through a tiered **Circuit Breaker** (`L1+L2` for cooperative roles, `L1` only for adversarial — they're contrarian by design), and the cooperative team's contracts are reduced through `ParliamentReducer` to surface an agreement ratio + structured conflicts.
+
+```bash
+# Cooperative ideation with full Lattice coordination
+pnpm parliament ideate "browser extension that summarises long PRs" --lattice
+
+# Custom audit log path
+pnpm parliament ideate "..." --lattice --audit-log ./logs/run-001.jsonl
+
+# Combine with other modes
+pnpm parliament ideate "..." --mode full --yes --lattice
+```
+
+Lattice is **opt-in** (default `false`) so existing users see no behavior change. When enabled, the synthesis output gains a "Lattice Coordination Report" block:
+
+```
+## Lattice Coordination Report
+- Trace ID: `01KR5HTC8179F69Y1JZJCX7S5M`
+- Agreement Ratio: 0.67
+- Consensus: Partial
+- Conflicts: 1 (mainPoint)
+- Model Pass Rates: anthropic/claude-opus-4-6 passed, openai/gpt-5 passed, google/gemini-2.5-pro failed (L1+L2)
+- Audit Log: `./parliament-audit.jsonl`
+```
+
+The audit log is plain **JSONL**, one record per wrapped model call:
+
+```json
+{"traceId":"01KR5...","agentId":"anthropic/claude-opus-4-6","role":"proposer","isAdversarial":false,"passed":true,"timestamp":"2026-05-08T17:32:01.123Z","contractId":"01KR5..."}
+```
+
+Defaults match the spec: `shadowMode: true` (Circuit Breaker failures never block a run), `minAgreementRatio: 0.6`, `consensusFields: ['mainPoint', 'supportingArguments', 'conclusion']`. The audit log lives at `./parliament-audit.jsonl` unless overridden via `--audit-log`. Compliance teams can ingest the file directly — every record is independently parseable and self-contained.
 
 ## Architecture
 

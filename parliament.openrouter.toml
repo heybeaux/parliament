@@ -17,8 +17,8 @@ osi_threshold = 0.85
 server_port = 3030
 
 [neurotypes.proposer]
-# Alibaba Qwen — structured reasoning, $0.033/$0.130 per M tok
-model = "qwen/qwen-turbo"
+# Alibaba Qwen — structured reasoning
+model = "qwen/qwen3.6-flash"
 provider = "openrouter"
 system_prompt = "You are a structured reasoner. Propose a clear, well-reasoned initial response to the topic. Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists."
 
@@ -48,8 +48,8 @@ Field semantics:
 Output ONLY the JSON object. No preamble, no markdown, no trailing commentary."""
 
 [neurotypes.redAgent]
-# xAI Grok — disruption (fitting), $0.200/$0.500 per M tok
-model = "x-ai/grok-4.1-fast"
+# xAI Grok — disruption
+model = "x-ai/grok-4.20"
 provider = "openrouter"
 system_prompt = "You are a disruptor. Inject a challenging perspective that prevents premature consensus. Target the weakest assumption in the current debate. Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists."
 
@@ -106,3 +106,39 @@ system_prompt = "Built-in Pragmatist agent — runtime supplies the prompt."
 model = "meta-llama/llama-3.1-8b-instruct"
 provider = "openrouter"
 system_prompt = "Built-in Adversary agent — runtime supplies the prompt."
+
+# ---------------------------------------------------------------------------
+# [brainstorm] — optional overrides for brainstorm / brainstorm-forge mode.
+# Uncomment and edit any subset; omitted keys fall back to in-code defaults.
+# ---------------------------------------------------------------------------
+#
+# [brainstorm]
+# # Number of ideas each divergent author produces (default 5, max 20).
+# ideas_per_author = 5
+#
+# # Lineup overrides — each key strict-replaces the default list / model.
+# # lineup.divergentAuthors = [
+# #   "anthropic/claude-opus-4-6",
+# #   "google/gemini-2.5-pro",
+# #   "openai/gpt-5",
+# #   "deepseek/deepseek-v4-flash",
+# # ]
+# # lineup.judges = [
+# #   "anthropic/claude-sonnet-4-6",
+# #   "openai/gpt-5",
+# # ]
+# # lineup.cluster = "anthropic/claude-opus-4-6"
+# # lineup.forgeElaborator = "anthropic/claude-opus-4-6"
+#
+# # Per-criterion ranking weights. Partial-replace on defaults; auto-normalized
+# # to sum=1.0 at run time. Values must be finite and non-negative.
+# [brainstorm.rank.weights]
+# novelty      = 0.25
+# feasibility  = 0.25
+# fit          = 0.25
+# evidence     = 0.25
+#
+# # Forge phase: number of top-K ideas to elaborate (default 3, max 10).
+# # Only consulted when mode = 'brainstorm/forge'.
+# [brainstorm.forge]
+# k = 3

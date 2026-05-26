@@ -1,0 +1,125 @@
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index 0c381e8db6429d2bbf452609a9ffd9d6cdb12dce..9e87ef6b91abe1802a6cc0748d8f3834d16339e7 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -677,3 +677,29 @@ interface RedactOptions {
+ declare function redactContract<TIn = unknown, TOut = unknown>(contract: StateContract<TIn, TOut>, options?: RedactOptions): StateContract<TIn, TOut>;
+ 
+ export { type Assumption, type BudgetRecord, CURRENT_SCHEMA_VERSION, CircuitBreaker, type CircuitBreakerConfig, type CircuitMetrics, type CircuitState, type Constraint, type ConstraintSeverity, type ContractPayload, ContractValidationError, type CreateContractOptions, type Decision, type DecisionType, type EmbeddingProvider, EventEmitter, HandoffFailure, type JudgeProvider, type JudgeResult, type LatticeEvent, type LatticeEventHandler, type LatticeEventType, type PipelineAgentConfig, PipelineBuilder, PipelineExecutor, type PipelineFailureBehavior, type PipelineResult, type RedactOptions, type RiskLevel, type ValidationResult$1 as SchemaValidationResult, SchemaValidator, SchemaVersionError, type SensitivityLevel, type StateContract, TieredCircuitBreaker, type TieredCircuitBreakerConfig, type ValidationResult as TieredValidationResult, type ValidationTier, type WrapAgentConfig, type WrappedAgent, createContract, globalEmitter, pipeline, redactContract, validateContract, wrapAgent };
++
++// === Stub added via pnpm patch — upstream @heybeaux/lattice-core@0.1.0 omits this class.
++declare class ComplianceAuditLog {
++  constructor(opts?: { logPath?: string });
++  append(record: unknown): void;
++  flush(): void;
++}
++export { ComplianceAuditLog };
++
++declare interface ConsensusReducerConfig {
++  conflictStrategy?: string;
++  minAgreementRatio?: number;
++  consensusFields?: readonly string[];
++  includeIndividualOutputs?: boolean;
++}
++declare class ConsensusReducer {
++  constructor(config?: ConsensusReducerConfig);
++  reduce(contracts: StateContract[]): {
++    output: Record<string, unknown>;
++    conflicts: Array<{ field: string; values: Array<{ agentId: string; value: unknown }>; resolution: string }>;
++    agreementRatio: number;
++    consensus: boolean;
++  };
++  createReducedContract(result: { output: Record<string, unknown> }, contracts: StateContract[], agentId: string, traceId: string | null): StateContract;
++}
++export { ConsensusReducer, type ConsensusReducerConfig };
+diff --git a/dist/index.js b/dist/index.js
+index b1bb9939a7e4239ba4f1754bda9bf53ad28bcbb6..8d33803153e73ebeb4a69892968e4759bfc2011e 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -1086,3 +1086,86 @@ export {
+   wrapAgent
+ };
+ //# sourceMappingURL=index.js.map
++// === Stub added via pnpm patch — upstream @heybeaux/lattice-core@0.1.0 omits this class
++// but @heybeaux/lattice-adapter-parliament@0.2.1 imports it. The Parliament integration
++// supplies its own audit-log writer, so this stub is intentionally a no-op fallback.
++class ComplianceAuditLog {
++  constructor(opts) { this.logPath = opts && opts.logPath; }
++  append() {}
++  flush() {}
++}
++export { ComplianceAuditLog };
++// === Stub added via pnpm patch — upstream @heybeaux/lattice-core@0.1.0 omits ConsensusReducer
++// but @heybeaux/lattice-adapter-parliament@0.2.1 depends on it. Implements the minimum
++// surface the adapter calls: `reduce(contracts)` and `createReducedContract(...)`.
++//
++// Behaviour mirrors the adapter's expectations:
++//   - `reduce` returns `{ output, conflicts, agreementRatio, consensus }`
++//   - `consensus` is `true` iff `agreementRatio >= minAgreementRatio`
++//   - For each `consensusFields` entry, agents whose contract `outputs.payload[field]`
++//     stringifies identically are considered to agree. Agreement ratio is the
++//     average over the consensus fields of (max-cohort-size / total-agents).
++//   - Conflicts are emitted for fields where >1 distinct stringified value exists.
++class ConsensusReducer {
++  constructor(config) {
++    this.config = {
++      conflictStrategy: (config && config.conflictStrategy) || 'flag-only',
++      minAgreementRatio: (config && config.minAgreementRatio) != null ? config.minAgreementRatio : 0.6,
++      consensusFields: (config && config.consensusFields) || ['mainPoint', 'supportingArguments', 'conclusion'],
++      includeIndividualOutputs: (config && config.includeIndividualOutputs) !== false,
++    };
++  }
++  _payload(contract) {
++    if (contract && contract.outputs && contract.outputs.payload) return contract.outputs.payload;
++    return contract && contract.outputs ? contract.outputs : {};
++  }
++  reduce(contracts) {
++    const fields = this.config.consensusFields;
++    const total = contracts.length;
++    const conflicts = [];
++    let ratioSum = 0;
++    const agreedValues = {};
++    for (const field of fields) {
++      const buckets = new Map();
++      for (const c of contracts) {
++        const payload = this._payload(c);
++        const v = payload ? payload[field] : undefined;
++        const key = JSON.stringify(v);
++        const bucket = buckets.get(key) || { value: v, agents: [] };
++        bucket.agents.push(c.fromAgent || c.agentId || 'unknown');
++        buckets.set(key, bucket);
++      }
++      let maxCount = 0;
++      let majorityValue;
++      for (const b of buckets.values()) {
++        if (b.agents.length > maxCount) {
++          maxCount = b.agents.length;
++          majorityValue = b.value;
++        }
++      }
++      ratioSum += total > 0 ? maxCount / total : 1;
++      agreedValues[field] = majorityValue;
++      if (buckets.size > 1) {
++        const values = [];
++        for (const b of buckets.values()) {
++          for (const agent of b.agents) values.push({ agentId: agent, value: b.value });
++        }
++        conflicts.push({ field, values, resolution: this.config.conflictStrategy });
++      }
++    }
++    const agreementRatio = fields.length > 0 ? ratioSum / fields.length : 1;
++    const consensus = agreementRatio >= this.config.minAgreementRatio;
++    return { output: agreedValues, conflicts, agreementRatio, consensus };
++  }
++  createReducedContract(result, contracts, agentId, traceId) {
++    const tid = traceId || (contracts[0] && contracts[0].traceId) || agentId;
++    return createContract({
++      fromAgent: agentId,
++      traceId: tid,
++      inputs: { sourceContractCount: contracts.length },
++      outputs: result.output,
++      budget: { tokensUsed: 0, callsMade: 0, wallClockMs: 0 },
++    });
++  }
++}
++export { ConsensusReducer };

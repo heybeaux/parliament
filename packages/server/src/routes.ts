@@ -63,6 +63,7 @@ import {
   DEFAULT_LIMIT,
   MAX_LIMIT,
 } from './deliberations.js';
+import { registerBrainstormRoutes } from './routes/brainstorm.js';
 import { inflightBroker, type InflightEvent } from './inflight.js';
 import { loadServerConfig, type ServerConfig } from './config.js';
 import { corsMiddleware } from './middleware/cors.js';
@@ -183,6 +184,26 @@ const DeliberateBodySchema = z.object({
       structured_output: z.boolean().optional(),
     })
     .optional(),
+  /**
+   * Optional Lattice coordination block. When `enabled: true`, the engine
+   * wraps every steppable + parallel-sibling agent's `generate` call with
+   * `@heybeaux/lattice-adapter-parliament` so each response becomes a
+   * State Contract validated through a tiered Circuit Breaker (L1+L2 for
+   * cooperative neurotypes, L1 only for the adversarial ones — Skeptic,
+   * Devil's Advocate, Adversary). The synthesizer / RedAgent / Sentry are
+   * intentionally NOT wrapped (structural infrastructure, not contract
+   * participants). Defaults preserve pre-integration behaviour: a missing
+   * block is treated as `enabled: false`. Mirrors the `/ideate` shape so
+   * a single client SDK can target both routes.
+   */
+  lattice: z
+    .object({
+      enabled: z.boolean(),
+      auditLogPath: z.string().min(1).optional(),
+      minAgreementRatio: z.number().min(0).max(1).optional(),
+      shadowMode: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -202,6 +223,45 @@ const IdeateBodySchema = z.object({
    * other sub-modes.
    */
   confirm: z.boolean().optional(),
+  /**
+   * The number of adversarial critique cycles to run. 
+   * Valid values: {0, 1}. Default depends on mode (adversarial/full=1, coop=0).
+   */
+  critique_cycles: z.number().int().min(0).max(1).optional(),
+  /**
+   * Defense mode governing the defense phase. 
+   * Options: 'address' | 'double_down' | 'author_choice'. Default: 'author_choice'.
+   */
+  defense_mode: z.enum(['address', 'double_down', 'author_choice']).optional(),
+  /**
+   * Master enable/disable for idea-level dedupe. Defaults to true.
+   */
+  dedupe_enabled: z.boolean().optional(),
+  /**
+   * Cosine threshold for dedupe collapse. Default 0.85. Range [0, 1].
+   */
+  dedupe_threshold: z.number().min(0).max(1).optional(),
+  /**
+   * Explicit request to dedupe critiques. 
+   * HARD LOCK: This is disabled by design; requests with this set to true 
+   * are rejected with a 400.
+   */
+  dedupe_critiques: z.boolean().optional(),
+  /**
+   * Optional Lattice coordination block (PAR-Lattice). When `enabled:
+   * true`, the orchestrator wraps each model call with State Contracts +
+   * Circuit Breakers and runs the cooperative team through
+   * ParliamentReducer. Defaults preserve pre-integration behaviour: a
+   * missing block is treated as `enabled: false`.
+   */
+  lattice: z
+    .object({
+      enabled: z.boolean(),
+      auditLogPath: z.string().min(1).optional(),
+      minAgreementRatio: z.number().min(0).max(1).optional(),
+      shadowMode: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -1018,6 +1078,7 @@ export function createRouter(
       sources: requestSources,
       config: configOverrides,
       transform: transformFlags,
+      lattice: latticeOptions,
     } = parsed.data;
 
     // PAR-32 / PRD D2: only `retry_on_upstream_500: true` engages the
@@ -1180,6 +1241,7 @@ export function createRouter(
           ...topologyConfig,
           onTurn,
           onEvent,
+          ...(latticeOptions !== undefined ? { lattice: latticeOptions } : {}),
         });
         try {
           markCompleted(db, id, result);
@@ -1617,119 +1679,155 @@ export function createRouter(
   // omit the Idempotency-Key header by hashing (account, idea, mode, style)
   // within a 30s window.
   // -------------------------------------------------------------------------
-  app.post('/ideate', async (c) => {
-    let body: unknown;
-    try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ error: 'Invalid JSON body' }, 400);
-    }
+    // -------------------------------------------------------------------------
+  // POST /brainstorm & POST /brainstorm/forge (Aliases for /ideate)
+  // -------------------------------------------------------------------------
 
-    const parsed = IdeateBodySchema.safeParse(body);
-    if (!parsed.success) {
-      return c.json({ error: 'Validation failed', issues: parsed.error.issues }, 400);
-    }
-
-    const mode: IdeateMode = parsed.data.mode ?? 'cooperative';
-    const style: IdeateStyle = parsed.data.style ?? 'collective';
-    const idea = parsed.data.idea;
-
-    // Cost gate — full mode is opt-in only. The error message names the
-    // missing field so SDK callers can wire the prompt without guessing.
-    if (mode === 'full' && parsed.data.confirm !== true) {
-      return c.json(
-        {
-          error: {
-            code: 'confirm_required',
-            message:
-              'mode "full" runs 8 models and requires `confirm: true` in the request body to proceed.',
-          },
-        },
-        400,
-      );
-    }
-
-    let lineup;
-    try {
-      // Pull `[ideate]` overrides from parliament.toml — strict-by-default
-      // semantics live inside `resolveLineup`. An invalid override (e.g. a
-      // skeptic role under cooperative) throws synchronously so the caller
-      // sees the misconfiguration instead of a silently-wrong lineup.
-      const cfg = loadConfig();
-      lineup = resolveLineup(mode, cfg.ideate);
-    } catch (err) {
-      return c.json(
-        { error: `Failed to resolve lineup: ${err instanceof Error ? err.message : String(err)}` },
-        500,
-      );
-    }
-
-    const accountId =
-      (c.get(AUTH_CTX_ACCOUNT_ID) as string | undefined) ?? OSS_ACCOUNT_ID;
-
-    // In-flight dedup: a concurrent POST with the same (account, idea, mode,
-    // style) within the 30s window returns the existing id rather than
-    // starting a second run. The Idempotency-Key header gives the same
-    // guarantee for callers that pass it; this tracker is the fallback.
-    const inflightKey = buildIdeationInflightKey({ accountId, idea, mode, style });
-    const existing = ideationInflight.lookup(inflightKey);
-    if (existing !== null) {
-      return c.json({ id: existing, status: 'running' }, 202);
-    }
-
-    const id = crypto.randomUUID();
-    try {
-      createIdeationRow(db, { id, accountId, idea, mode, style, lineup });
-    } catch (err) {
-      return c.json(
-        { error: `Failed to persist placeholder: ${err instanceof Error ? err.message : String(err)}` },
-        500,
-      );
-    }
-    ideationInflight.register(inflightKey, id);
-
-    // Background runner — same fire-and-forget shape as /deliberate. The
-    // factory closes over `createAdapter` so the orchestrator can reach
-    // each model via parliament.toml's [neurotypes.*] mapping without
-    // importing the factory directly.
-    void (async () => {
+  const handleIdeate = async (c: Context) => {
+      let body: unknown;
       try {
-        const result = await runIdeation(
-          { idea, mode, style, lineup },
-          (model) => createAdapter(model),
-        );
-        finalizeIdeation(db, id, {
-          status: result.status,
-          phases: result.phases,
-          synthesis: result.synthesis,
-          error: result.error,
-        });
-      } catch (err) {
-        // `runIdeation` already catches inside its own try/finally and
-        // returns `status: 'error'`; this branch only fires on a truly
-        // unexpected throw outside that catch (e.g. an adapter factory
-        // bug). Still record it so the row reaches a terminal state.
-        const message = err instanceof Error ? err.message : String(err);
-        try {
-          finalizeIdeation(db, id, {
-            status: 'error',
-            phases: [],
-            synthesis: null,
-            error: message,
-          });
-        } catch (persistErr) {
-          console.error(
-            `Parliament: failed to mark ideation ${id} failed:`,
-            persistErr,
-          );
-        }
-      } finally {
-        ideationInflight.release(inflightKey);
+        body = await c.req.json();
+      } catch {
+        return c.json({ error: 'Invalid JSON body' }, 400);
       }
-    })();
 
-    return c.json({ id, status: 'running' }, 202);
-  });
+      const parsed = IdeateBodySchema.safeParse(body);
+      if (!parsed.success) {
+        return c.json({ error: 'Validation failed', issues: parsed.error.issues }, 400);
+      }
+
+      const {
+        idea,
+        mode: rawMode,
+        style: rawStyle,
+        confirm,
+        critique_cycles: _reqCycles,
+        defense_mode,
+        dedupe_enabled,
+        dedupe_threshold,
+        dedupe_critiques,
+        lattice,
+      } = parsed.data;
+
+      // PUBLIC LOCK: Reject any attempt to dedupe critiques (multi-model signal is sacred).
+      if (dedupe_critiques === true) {
+        return c.json(
+          { error: 'critique dedupe disabled by design — multi-model perspective signal is preserved' },
+          400,
+        );
+      }
+
+      const mode: IdeateMode = rawMode ?? 'cooperative';
+      const style: IdeateStyle = rawStyle ?? 'collective';
+
+      // Cost gate — full mode is opt-in only.
+      if (mode === 'full' && confirm !== true) {
+        return c.json(
+          {
+            error: {
+              code: 'confirm_required',
+              message:
+                'mode "full" runs 8 models and requires `confirm: true` in the request body to proceed.',
+            },
+          },
+          400,
+        );
+      }
+
+      // SILENT NO-OP: cooperative requests may include critique_cycles, but
+      // brainstorm/ideate currently share the ideate engine path and do not
+      // pass the value through here. The request is accepted without error
+      // rather than rejected.
+
+      let lineup;
+      try {
+        const cfg = loadConfig();
+        lineup = resolveLineup(mode, cfg.ideate);
+      } catch (err) {
+        return c.json(
+          { error: `Failed to resolve lineup: ${err instanceof Error ? err.message : String(err)}` },
+          500,
+        );
+      }
+
+      const accountId =
+        (c.get(AUTH_CTX_ACCOUNT_ID) as string | undefined) ?? OSS_ACCOUNT_ID;
+
+      const inflightKey = buildIdeationInflightKey({ accountId, idea, mode, style });
+      const existing = ideationInflight.lookup(inflightKey);
+      if (existing !== null) {
+        return c.json({ id: existing, status: 'running' }, 202);
+      }
+
+      const id = crypto.randomUUID();
+      try {
+        createIdeationRow(db, { id, accountId, idea, mode, style, lineup });
+      } catch (err) {
+        return c.json(
+          { error: `Failed to persist placeholder: ${err instanceof Error ? err.message : String(err)}` },
+          500,
+        );
+      }
+      ideationInflight.register(inflightKey, id);
+
+      void (async () => {
+        try {
+          const result = await runIdeation(
+            {
+              idea,
+              mode,
+              style,
+              lineup,
+              // Wire the new parameters into the core engine.
+              
+              defense_mode: defense_mode ?? 'author_choice',
+              dedupe: {
+                enabled: dedupe_enabled ?? true,
+                threshold: dedupe_threshold ?? 0.85,
+              },
+              ...(lattice !== undefined ? { lattice } : {}),
+            },
+            (model) => createAdapter(model),
+          );
+          finalizeIdeation(db, id, {
+            status: result.status,
+            phases: result.phases,
+            synthesis: result.synthesis,
+            error: result.error,
+            lattice: result.lattice ?? null,
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          try {
+            finalizeIdeation(db, id, {
+              status: 'error',
+              phases: [],
+              synthesis: null,
+              error: message,
+              lattice: null,
+            });
+          } catch (persistErr) {
+            console.error(
+              `Parliament: failed to mark ideation ${id} failed:`,
+              persistErr,
+            );
+          }
+        } finally {
+          ideationInflight.release(inflightKey);
+        }
+      })();
+
+      return c.json({ id, status: 'running' }, 202);
+  };
+
+  app.post('/ideate', handleIdeate);
+
+  // -------------------------------------------------------------------------
+  // /brainstorm — distinct routes with real pipeline semantics.
+  // Replaces the former handleIdeate aliases (see migration plan in
+  // openspec/changes/add-brainstorm-mode/design.md §migration-plan).
+  // -------------------------------------------------------------------------
+  registerBrainstormRoutes(app, db);
 
   // -------------------------------------------------------------------------
   // GET /ideate/:id — fetch one ideation by id.

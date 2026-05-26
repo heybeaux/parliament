@@ -24,26 +24,39 @@ import {
   parseAdversarialOutput,
 } from './adversarial.js';
 import {
+  DEFAULT_DEDUPE_THRESHOLD,
+  DEFAULT_PROVIDER_ORDER,
+  runDedupePhase,
+  type DedupeEmbedder,
+  type DedupeProviderId,
+} from './dedupe.js';
+import { LatticeRunner } from './lattice.js';
+import {
   COOPERATIVE_PROMPTS,
-  REBUTTAL_SYSTEM_PROMPT,
   SYNTH_SYSTEM_PROMPT,
   buildCooperativeUserPrompt,
-  buildRebuttalUserPrompt,
   buildSynthUserPrompt,
 } from './prompts.js';
+import {
+  DEFENSE_SYSTEM_PROMPT,
+  buildDefenseUserPrompt,
+  parseDefenseOutput,
+  DEFENSE_RETRY_INSTRUCTION,
+} from './defense.js';
 import type {
+  DefenseEntry,
   IdeateMode,
   IdeateStyle,
   IdeationStatus,
+  LatticeIdeateOptions,
+  LatticeReport,
   LineupAssignment,
   PhaseContribution,
   PhaseRecord,
   Problem,
   ResolvedLineup,
+  DefenseMode,
 } from './types.js';
-
-/** Hard cap on rebuttal rounds; the spec fixes this in code, not config. */
-const REBUTTAL_ROUND_CAP = 2;
 
 /**
  * Adapter factory injected by callers. Production code wires this to
@@ -58,6 +71,32 @@ export interface RunIdeationInput {
   mode: IdeateMode;
   style: IdeateStyle;
   lineup: ResolvedLineup;
+  /**
+   * Optional Lattice coordination wrap. When `lattice.enabled` is `false`
+   * (the default — opt-in flag from the CLI), the orchestrator runs the
+   * legacy code path with byte-identical behavior.
+   */
+  lattice?: LatticeIdeateOptions;
+  /**
+   * Idea-level dedupe between cooperative-build and adversarial-critique.
+   * Defaults to enabled with threshold 0.85 and provider order ['local','cloud'].
+   * Set `enabled: false` to skip the phase entirely. The `embedder` seam is
+   * for tests; production code uses the built-in HTTP embedder.
+   *
+   * NOTE: dedupe runs on cooperative DRAFTS only. Critiques are NEVER
+   * deduped — see `dedupe.ts` architectural lock + `assertCritiquesNotDeduped`.
+   */
+  dedupe?: {
+    enabled?: boolean;
+    threshold?: number;
+    providerOrder?: readonly DedupeProviderId[];
+    embedder?: DedupeEmbedder;
+  };
+  /**
+   * Defense mode governing the defense phase. 
+   * Defaults to 'author_choice'.
+   */
+  defense_mode?: DefenseMode;
 }
 
 export interface RunIdeationResult {
@@ -65,6 +104,8 @@ export interface RunIdeationResult {
   phases: PhaseRecord[];
   synthesis: string | null;
   error: string | null;
+  /** Populated only when the run was launched with `--lattice=true`. */
+  lattice?: LatticeReport;
 }
 
 /**
@@ -77,57 +118,76 @@ export async function runIdeation(
   factory: AdapterFactory,
 ): Promise<RunIdeationResult> {
   const phases: PhaseRecord[] = [];
+  // Lattice wrap is strict opt-in (`lattice.enabled === true`). When absent
+  // or disabled the orchestrator behaves exactly as it did pre-integration.
+  const runner =
+    input.lattice?.enabled === true ? new LatticeRunner(input.lattice) : null;
 
   try {
-    const cooperative = await runCooperativeBuild(input, factory);
+    const cooperative = await runCooperativeBuild(input, factory, runner);
     phases.push(cooperative);
+
+    // Dedupe phase. Runs by default; opt-out via dedupe.enabled === false.
+    // Soft-fails — provider outage surfaces as phase warning, drafts pass
+    // through untouched so the rest of the pipeline keeps running. The
+    // resulting PhaseRecord is the canonical "phase.dedupe" event surface
+    // (ideate has no separate event bus; consumers read phases[]).
+    //
+    // We preserve the original cooperative PhaseRecord (transcript fidelity)
+    // and route `liveDrafts` — the dedupe survivors — into downstream phases.
+    let liveDrafts: readonly PhaseContribution[] = cooperative.contributions;
+    const dedupePhase = await runIdeaDedupePhase(input, cooperative.contributions);
+    if (dedupePhase !== null) {
+      phases.push(dedupePhase);
+      liveDrafts = dedupePhase.contributions;
+    }
 
     let problems: readonly Problem[] = [];
     let unstructuredAdversarial = false;
 
     if (input.mode === 'adversarial' || input.mode === 'full') {
-      const adversarial = await runAdversarialCritique(input, factory);
+      // ARCHITECTURAL LOCK: Critiques MUST NOT be deduped. 
+      // Multi-model perspective signal is preserved by design.
+      const adversarial = await runAdversarialCritique(input, factory, runner);
       phases.push(adversarial);
       problems = collectProblems(adversarial);
       unstructuredAdversarial = adversarial.contributions.some((c) => c.unstructured === true);
 
       if (problems.length > 0) {
-        const rebuttalTurns: string[] = [];
-        for (let round: 1 | 2 = 1; round <= REBUTTAL_ROUND_CAP; round = (round + 1) as 1 | 2) {
-          const rebuttal = await runRebuttal(input, factory, {
-            problems,
-            draft: contributionsToProse(cooperative.contributions),
-            priorRebuttals: rebuttalTurns,
-            round,
-          });
-          phases.push(rebuttal);
-          rebuttalTurns.push(...rebuttal.contributions.map((c) => c.content));
-          // Cap is hard — round 2 always synthesizes regardless of unresolved
-          // problems. There is no early-exit shortcut on round 1; the spec
-          // explicitly forbids configurability and keeps the loop simple.
-          if (round === REBUTTAL_ROUND_CAP) break;
-        }
+        const defense = await runDefensePhase(input, factory, runner, {
+          problems,
+          draft: contributionsToProse(liveDrafts),
+        });
+        phases.push(defense);
       }
     }
 
+    // Build the Lattice report BEFORE synthesis so the synthesizer can
+    // reference agreement ratios and conflicts in its output prose.
+    const latticeReport = runner !== null ? runner.buildReport() : null;
+
     const synth = await runSynth(input, factory, {
-      cooperativeTurns: cooperative.contributions.map((c) => c.content),
+      cooperativeTurns: liveDrafts.map((c) => c.content),
       adversarialTurns: phases
         .filter((p) => p.phase === 'adversarial-critique')
         .flatMap((p) => p.contributions.map((c) => c.content)),
       rebuttalTurns: phases
-        .filter((p) => p.phase === 'rebuttal-1' || p.phase === 'rebuttal-2')
+        .filter((p) => p.phase === 'defense')
         .flatMap((p) => p.contributions.map((c) => c.content)),
       unstructuredAdversarial,
+      lattice: latticeReport,
+      dimensionsSummary: generateDimensionsSummary(phases),
     });
     phases.push(synth);
 
-    return {
+    const result: RunIdeationResult = {
       status: 'complete',
       phases,
       synthesis: synth.synthesis ?? null,
       error: null,
     };
+    if (latticeReport !== null) result.lattice = latticeReport;
+    return result;
   } catch (err) {
     return {
       status: 'error',
@@ -143,12 +203,13 @@ export async function runIdeation(
 async function runCooperativeBuild(
   input: RunIdeationInput,
   factory: AdapterFactory,
+  runner: LatticeRunner | null,
 ): Promise<PhaseRecord> {
   const team = input.lineup.team.cooperative;
   const contributions: PhaseContribution[] =
     input.style === 'individual'
-      ? await runCooperativeIndividual(input, factory, team)
-      : await runCooperativeCollective(input, factory, team);
+      ? await runCooperativeIndividual(input, factory, runner, team)
+      : await runCooperativeCollective(input, factory, runner, team);
 
   return {
     phase: 'cooperative-build',
@@ -160,6 +221,7 @@ async function runCooperativeBuild(
 async function runCooperativeIndividual(
   input: RunIdeationInput,
   factory: AdapterFactory,
+  runner: LatticeRunner | null,
   team: readonly LineupAssignment[],
 ): Promise<PhaseContribution[]> {
   // Each agent sees only the original idea, no peers. Run concurrently.
@@ -167,8 +229,10 @@ async function runCooperativeIndividual(
     const adapter = factory(slot.model);
     const userPrompt = buildCooperativeUserPrompt(input.idea, []);
     const systemPrompt = COOPERATIVE_PROMPTS[slot.role as keyof typeof COOPERATIVE_PROMPTS];
-    const result = await adapter.generate(userPrompt, systemPrompt);
-    return makeContribution(slot, result.content);
+    const content = await callModel(runner, slot, false, () =>
+      adapter.generate(userPrompt, systemPrompt).then((r) => r.content),
+    );
+    return makeContribution(slot, content);
   });
   return Promise.all(tasks);
 }
@@ -176,6 +240,7 @@ async function runCooperativeIndividual(
 async function runCooperativeCollective(
   input: RunIdeationInput,
   factory: AdapterFactory,
+  runner: LatticeRunner | null,
   team: readonly LineupAssignment[],
 ): Promise<PhaseContribution[]> {
   // Each agent sees prior turns and builds on them. Sequential by definition.
@@ -187,8 +252,10 @@ async function runCooperativeCollective(
       out.map((c) => c.content),
     );
     const systemPrompt = COOPERATIVE_PROMPTS[slot.role as keyof typeof COOPERATIVE_PROMPTS];
-    const result = await adapter.generate(userPrompt, systemPrompt);
-    out.push(makeContribution(slot, result.content));
+    const content = await callModel(runner, slot, false, () =>
+      adapter.generate(userPrompt, systemPrompt).then((r) => r.content),
+    );
+    out.push(makeContribution(slot, content));
   }
   return out;
 }
@@ -198,12 +265,13 @@ async function runCooperativeCollective(
 async function runAdversarialCritique(
   input: RunIdeationInput,
   factory: AdapterFactory,
+  runner: LatticeRunner | null,
 ): Promise<PhaseRecord> {
   const team = input.lineup.team.adversarial;
   // Critique is style-independent: always parallel. Each adversarial agent
   // reads the cooperative draft (so far) and emits structured problem-fix.
   // Tasks are independent — Promise.all preserves registration order.
-  const tasks = team.map((slot) => runAdversarialOne(input, factory, slot));
+  const tasks = team.map((slot) => runAdversarialOne(input, factory, runner, slot));
   const contributions = await Promise.all(tasks);
 
   const warnings: string[] = [];
@@ -226,15 +294,19 @@ async function runAdversarialCritique(
 async function runAdversarialOne(
   input: RunIdeationInput,
   factory: AdapterFactory,
+  runner: LatticeRunner | null,
   slot: LineupAssignment,
 ): Promise<PhaseContribution> {
   const adapter = factory(slot.model);
-  // First attempt with the canonical system prompt.
+  // First attempt with the canonical system prompt. Adversarial roles use
+  // L1-only validation — the wrap layer infers this from `isAdversarial`.
   const userPrompt = `# Idea\n\n${input.idea.trim()}\n\n# Your structured critique`;
-  const first = await adapter.generate(userPrompt, ADVERSARIAL_SYSTEM_PROMPT);
-  const firstParsed = parseAdversarialOutput(first.content);
+  const firstContent = await callModel(runner, slot, true, () =>
+    adapter.generate(userPrompt, ADVERSARIAL_SYSTEM_PROMPT).then((r) => r.content),
+  );
+  const firstParsed = parseAdversarialOutput(firstContent);
   if (firstParsed !== null) {
-    return makeContribution(slot, first.content, {
+    return makeContribution(slot, firstContent, {
       problems: firstParsed,
       attempts: 1,
     });
@@ -242,10 +314,12 @@ async function runAdversarialOne(
 
   // Retry once with a stricter "JSON only" instruction.
   const retryPrompt = `${userPrompt}\n\n${ADVERSARIAL_RETRY_INSTRUCTION}`;
-  const second = await adapter.generate(retryPrompt, ADVERSARIAL_SYSTEM_PROMPT);
-  const secondParsed = parseAdversarialOutput(second.content);
+  const secondContent = await callModel(runner, slot, true, () =>
+    adapter.generate(retryPrompt, ADVERSARIAL_SYSTEM_PROMPT).then((r) => r.content),
+  );
+  const secondParsed = parseAdversarialOutput(secondContent);
   if (secondParsed !== null) {
-    return makeContribution(slot, second.content, {
+    return makeContribution(slot, secondContent, {
       problems: secondParsed,
       attempts: 2,
     });
@@ -253,44 +327,110 @@ async function runAdversarialOne(
 
   // Both attempts failed — preserve raw prose from the SECOND attempt
   // (it's the more recent and was prompted with stricter instructions).
-  return makeContribution(slot, second.content, {
+  return makeContribution(slot, secondContent, {
     attempts: 2,
     unstructured: true,
   });
 }
 
-// ---------- rebuttal phase ----------
+// ---------- defense phase ----------
 
-interface RebuttalContext {
+interface DefenseContext {
   problems: readonly Problem[];
   draft: string;
-  priorRebuttals: readonly string[];
-  round: 1 | 2;
 }
 
-async function runRebuttal(
+async function runDefensePhase(
   input: RunIdeationInput,
   factory: AdapterFactory,
-  ctx: RebuttalContext,
+  runner: LatticeRunner | null,
+  ctx: DefenseContext,
 ): Promise<PhaseRecord> {
   const team = input.lineup.team.cooperative;
   const out: PhaseContribution[] = [];
-  // Sequential — rebuttal builds a coherent response, not parallel takes.
+  const warnings: string[] = [];
+
+  // Sequential - defense is a coherent response to the pooled critiques.
   for (const slot of team) {
     const adapter = factory(slot.model);
-    const userPrompt = buildRebuttalUserPrompt({
-      idea: input.idea,
-      draft: ctx.draft,
-      problems: ctx.problems.map((p) => ({ problem: p.problem, proposed_fix: p.proposed_fix })),
-      priorRebuttals: ctx.round === 1 ? [] : ctx.priorRebuttals,
-    });
-    const result = await adapter.generate(userPrompt, REBUTTAL_SYSTEM_PROMPT);
-    out.push(makeContribution(slot, result.content));
+    const mode = input.defense_mode ?? 'author_choice';
+    const userPrompt = buildDefenseUserPrompt(
+      input.idea,
+      ctx.draft,
+      ctx.problems,
+      mode,
+    );
+
+    // First attempt with the canonical system prompt.
+    const firstContent = await callModel(runner, slot, false, () =>
+      adapter.generate(userPrompt, DEFENSE_SYSTEM_PROMPT).then((r) => r.content),
+    );
+    let firstParsed = parseDefenseOutput(firstContent);
+
+    // Stance validation for 'address' or 'double_down' modes.
+    if (firstParsed !== null && mode !== 'author_choice') {
+      const violates = firstParsed.defenses.some((d) => d.stance !== mode);
+      if (violates) firstParsed = null; // Trigger retry
+    }
+
+    if (firstParsed !== null) {
+      out.push(makeContribution(slot, firstContent, {
+        defenses: firstParsed.defenses,
+      }));
+    } else {
+      // Retry once with a stricter instruction.
+      const retryPrompt = `${userPrompt}\n\n${DEFENSE_RETRY_INSTRUCTION}`;
+      const secondContent = await callModel(runner, slot, false, () =>
+        adapter.generate(retryPrompt, DEFENSE_SYSTEM_PROMPT).then((r) => r.content),
+      );
+      const secondParsed = parseDefenseOutput(secondContent);
+
+      if (secondParsed !== null) {
+        // Even on retry, if mode is strict and it still violates, we persist but warn.
+        let finalParsed = secondParsed;
+        if (mode !== 'author_choice' && secondParsed.defenses.some((d) => d.stance !== mode)) {
+          warnings.push(`${slot.role} (${slot.model}) violated defense_mode ${mode} after retry; persisted as best-effort.`);
+        }
+
+        out.push(makeContribution(slot, secondContent, {
+          defenses: finalParsed.defenses,
+        }));
+      } else {
+        // Both attempts failed parsing - preserve raw prose.
+        warnings.push(`${slot.role} (${slot.model}) emitted unstructured defense after one retry; surfaced as best-effort.`);
+        out.push(makeContribution(slot, secondContent));
+      }
+    }
   }
-  return {
-    phase: ctx.round === 1 ? 'rebuttal-1' : 'rebuttal-2',
+
+  const record: PhaseRecord = {
+    phase: 'defense',
     contributions: out,
   };
+
+  // Roll up all structured defenses for the phase record.
+  const allDefenses: DefenseEntry[] = [];
+  for (const c of out) {
+    if (c.defenses) allDefenses.push(...c.defenses);
+  }
+  record.defenses = allDefenses;
+
+  if (warnings.length > 0) record.warnings = warnings;
+  return record;
+}
+
+/** @deprecated use runDefensePhase */
+export async function runRebuttal(
+  input: RunIdeationInput,
+  factory: AdapterFactory,
+  runner: LatticeRunner | null,
+  _ctx: unknown, // legacy context shape
+): Promise<PhaseRecord> {
+  const ctx = _ctx as Record<string, unknown>;
+  return runDefensePhase(input, factory, runner, {
+    problems: ctx.problems as Problem[],
+    draft: ctx.draft as string,
+  });
 }
 
 // ---------- synth phase ----------
@@ -300,6 +440,9 @@ interface SynthContext {
   adversarialTurns: readonly string[];
   rebuttalTurns: readonly string[];
   unstructuredAdversarial: boolean;
+  /** Lattice report when --lattice was passed; null otherwise. */
+  lattice: LatticeReport | null;
+  dimensionsSummary?: string;
 }
 
 async function runSynth(
@@ -308,15 +451,27 @@ async function runSynth(
   ctx: SynthContext,
 ): Promise<PhaseRecord> {
   const adapter = factory(input.lineup.synth);
-  const userPrompt = buildSynthUserPrompt({
+  const baseUserPrompt = buildSynthUserPrompt({
     idea: input.idea,
     cooperativeTurns: ctx.cooperativeTurns,
     adversarialTurns: ctx.adversarialTurns,
     rebuttalTurns: ctx.rebuttalTurns,
     unstructuredAdversarial: ctx.unstructuredAdversarial,
   });
+  // When Lattice ran, prepend a small advisory block so the synthesizer can
+  // reference agreement ratios + conflicts in its prose, and append the
+  // canonical "Lattice Coordination Report" section to the synthesis output
+  // for downstream rendering.
+  const userPrompt =
+    ctx.lattice !== null
+      ? `${buildLatticeSynthHeader(ctx.lattice)}\n\n${baseUserPrompt}`
+      : baseUserPrompt;
   const result = await adapter.generate(userPrompt, SYNTH_SYSTEM_PROMPT);
-  const synthesis = result.content.trim();
+  const trimmed = result.content.trim();
+  const synthesis =
+    ctx.lattice !== null
+      ? `${trimmed}\n\n${formatLatticeReport(ctx.lattice)}`
+      : trimmed;
   return {
     phase: 'synth',
     contributions: [
@@ -331,12 +486,88 @@ async function runSynth(
   };
 }
 
+// ---------- dedupe phase ----------
+
+/**
+ * Run the idea-level dedupe phase between cooperative-build and
+ * adversarial-critique. Returns `null` when dedupe is disabled (caller
+ * skips pushing anything onto `phases`). Otherwise returns a fully-formed
+ * `PhaseRecord` whose `contributions` are the kept survivors (in original
+ * order), with `record.dedupe` carrying the merge map, threshold, provider,
+ * and skip flag, and `record.warnings` set on soft-fail.
+ *
+ * Note: ideate does not have a separate event bus. The "phase.dedupe event"
+ * called for in the spec is realized as this PhaseRecord pushed onto
+ * `phases` — same payload, same observability, single channel.
+ */
+async function runIdeaDedupePhase(
+  input: RunIdeationInput,
+  drafts: readonly PhaseContribution[],
+): Promise<PhaseRecord | null> {
+  const dedupeOpts = input.dedupe;
+  if (dedupeOpts?.enabled === false) return null;
+
+  const result = await runDedupePhase(drafts, {
+    threshold: dedupeOpts?.threshold ?? DEFAULT_DEDUPE_THRESHOLD,
+    providerOrder: dedupeOpts?.providerOrder ?? DEFAULT_PROVIDER_ORDER,
+    ...(dedupeOpts?.embedder !== undefined ? { embedder: dedupeOpts.embedder } : {}),
+  });
+
+  // Build synthetic IDs in the SAME shape dedupe used (`role#index`) so the
+  // kept-IDs list on the record matches the merge_into map keys/values.
+  const allIds = drafts.map((d, i) => `${d.role}#${i}`);
+  const keptIds: string[] = [];
+  for (let i = 0; i < drafts.length; i++) {
+    if (!Object.prototype.hasOwnProperty.call(result.merged_into, allIds[i]!)) {
+      keptIds.push(allIds[i]!);
+    }
+  }
+
+  const record: PhaseRecord = {
+    phase: 'dedupe',
+    contributions: result.kept,
+    dedupe: {
+      kept: keptIds,
+      merged_into: result.merged_into,
+      threshold: result.threshold,
+      provider: result.provider,
+      skipped: result.skipped,
+    },
+  };
+  if (result.warning !== undefined) {
+    record.warnings = [result.warning];
+  }
+  return record;
+}
+
 // ---------- helpers ----------
+
+/**
+ * Generates a summary of critique dimensions to help the synthesizer group problems.
+ */
+function generateDimensionsSummary(phases: readonly PhaseRecord[]): string {
+  const adversarial = phases.find((p) => p.phase === 'adversarial-critique');
+  if (!adversarial) return '';
+
+  const counts: Record<string, number> = {};
+  for (const c of adversarial.contributions) {
+    if (!c.problems) continue;
+    for (const p of c.problems) {
+      counts[p.dimension] = (counts[p.dimension] || 0) + 1;
+    }
+  }
+
+  const summary = Object.entries(counts)
+    .map(([dim, count]) => `${dim}: ${count}`)
+    .join(', ');
+
+  return summary || 'No structured dimensions identified.';
+}
 
 function makeContribution(
   slot: LineupAssignment,
   content: string,
-  extras: Partial<Pick<PhaseContribution, 'problems' | 'attempts' | 'unstructured'>> = {},
+  extras: Partial<Pick<PhaseContribution, 'problems' | 'attempts' | 'unstructured' | 'defenses'>> = {},
 ): PhaseContribution {
   const c: PhaseContribution = {
     role: slot.role,
@@ -347,6 +578,7 @@ function makeContribution(
   if (extras.problems !== undefined) c.problems = extras.problems;
   if (extras.attempts !== undefined) c.attempts = extras.attempts;
   if (extras.unstructured !== undefined) c.unstructured = extras.unstructured;
+  if (extras.defenses !== undefined) c.defenses = extras.defenses;
   return c;
 }
 
@@ -360,4 +592,92 @@ function collectProblems(record: PhaseRecord): readonly Problem[] {
     if (c.problems !== undefined) out.push(...c.problems);
   }
   return out;
+}
+
+/**
+ * Bridge between Parliament's `adapter.generate(prompt, system)` shape and
+ * the Lattice wrap. When `runner` is null we just await the underlying call
+ * and return its content directly — pre-integration code path. When the
+ * runner is present, we register a Lattice-wrapped invocation that creates
+ * a State Contract, runs Circuit Breaker validation, and persists an audit
+ * log entry. The returned content is identical in both branches; only the
+ * side effects (contract creation + audit logging) differ.
+ */
+async function callModel(
+  runner: LatticeRunner | null,
+  slot: LineupAssignment,
+  isAdversarial: boolean,
+  modelCall: () => Promise<string>,
+): Promise<string> {
+  if (runner === null) {
+    return modelCall();
+  }
+  const outcome = await runner.wrap(
+    {
+      id: slot.model,
+      role: slot.role,
+      isAdversarial,
+    },
+    modelCall,
+  );
+  return outcome.content;
+}
+
+/**
+ * Synthesis prompt prefix used only when Lattice ran. The synthesizer reads
+ * agreement ratio + conflicts so it can call them out in prose without
+ * re-deriving them from raw transcripts.
+ */
+function buildLatticeSynthHeader(report: LatticeReport): string {
+  const conflicts = report.conflicts.length === 0
+    ? 'No conflicts surfaced.'
+    : report.conflicts
+        .map(
+          (c) =>
+            `- ${c.field}: ${c.values.length} divergent positions (resolution: ${c.resolution})`,
+        )
+        .join('\n');
+  return [
+    '# Lattice Coordination Context',
+    '',
+    `Trace ID: ${report.traceId}`,
+    `Agreement ratio: ${report.agreementRatio.toFixed(2)}`,
+    `Consensus reached: ${report.consensusReached ? 'yes' : 'no'}`,
+    `Conflicts:\n${conflicts}`,
+    '',
+    'Use this context only as supplementary signal — do not block on it.',
+  ].join('\n');
+}
+
+/**
+ * Render the canonical "Lattice Coordination Report" section appended to the
+ * synthesis output when --lattice=true. Format matches the spec exactly so
+ * downstream parsers (UI, audit pipelines) see a stable surface.
+ */
+export function formatLatticeReport(report: LatticeReport): string {
+  const passRates = report.modelOutcomes
+    .map((o) => `${o.agentId} ${o.passed ? 'passed' : `failed (${o.breakerTier})`}`)
+    .join(', ');
+  const conflictsLine =
+    report.conflicts.length === 0
+      ? '0'
+      : `${report.conflicts.length} (${report.conflicts
+          .map((c) => c.field)
+          .join(', ')})`;
+  const consensus = report.consensusReached
+    ? 'Reached'
+    : report.agreementRatio > 0
+      ? 'Partial'
+      : 'None';
+  const auditLine =
+    report.auditLogPath !== null ? `\`${report.auditLogPath}\`` : '(disabled)';
+  return [
+    '## Lattice Coordination Report',
+    `- Trace ID: \`${report.traceId}\``,
+    `- Agreement Ratio: ${report.agreementRatio.toFixed(2)}`,
+    `- Consensus: ${consensus}`,
+    `- Conflicts: ${conflictsLine}`,
+    `- Model Pass Rates: ${passRates}`,
+    `- Audit Log: ${auditLine}`,
+  ].join('\n');
 }

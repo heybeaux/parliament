@@ -35,7 +35,7 @@ function formatLatencyMs(ms: number): string {
 
 export function TurnCard({ turn, index }: Props) {
   const style = roleStyle(turn.agent);
-  const time = new Date(turn.timestamp).toLocaleTimeString([], {
+  const time = new Date(turn.timestamp).toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
   });

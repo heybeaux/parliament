@@ -52,18 +52,130 @@ export function buildCooperativeUserPrompt(idea: string, priorTurns: readonly st
 }
 
 /**
- * Rebuttal prompt — the cooperative team responds to the structured
- * problems raised by the adversarial team. Each problem gets a focused fix
- * proposal. Builds on the prior rebuttal turns when round 2 runs.
+ * Defense prompt — the cooperative team responds to the structured
+ * problems raised by the adversarial team. Each problem gets a per-critique
+ * STANCE (`address` rewrites the relevant draft slice; `double_down` keeps
+ * position and justifies). The defense_mode parameter controls whether the
+ * author picks per critique (`author_choice`) or the orchestrator forces a
+ * single stance for every defense.
+ *
+ * Output is structured JSON:
+ *   { defenses: [
+ *       { critique_id, stance: 'address'|'double_down', reasoning,
+ *         draft_delta?: string }
+ *     ] }
+ *
+ * Spec: `openspec/changes/refine-ideate-forge/specs/ideate-mode/spec.md`.
  */
-export const REBUTTAL_SYSTEM_PROMPT = [
+export type DefenseMode = 'address' | 'double_down' | 'author_choice';
+
+export const DEFENSE_SYSTEM_PROMPT_AUTHOR_CHOICE = [
   'You are responding to adversarial critique of the team\'s product idea.',
-  'For each problem raised, propose a concrete change to the idea that addresses',
-  'it — or, if you judge the critique mistaken, explain briefly why and what the',
-  'critic is missing. Be specific and bounded; do not re-pitch the idea wholesale.',
-  'Output 4–8 sentences of dense prose.',
+  'For each problem raised, pick a stance per critique:',
+  '  - "address": revise the relevant slice of the draft to fix the problem.',
+  '  - "double_down": keep your position and explain in one paragraph why the',
+  '    critic is missing the point.',
+  '',
+  'Output ONLY a single JSON object with no surrounding prose:',
+  '',
+  '{"defenses": [',
+  '  {"critique_id": "<id>",',
+  '   "stance": "address" | "double_down",',
+  '   "reasoning": "<one or two sentences>",',
+  '   "draft_delta": "<the revised slice — REQUIRED when stance is address, omit on double_down>"',
+  '  }, ...',
+  ']}',
+  '',
+  'Include exactly one defense per critique. Output ONLY the JSON object.',
 ].join('\n');
 
+export const DEFENSE_SYSTEM_PROMPT_ADDRESS_FORCED = [
+  'You are responding to adversarial critique of the team\'s product idea.',
+  'For every critique you MUST take stance "address": revise the relevant',
+  'slice of the draft to fix the problem. `double_down` is NOT permitted in',
+  'this run.',
+  '',
+  'Output ONLY a single JSON object with no surrounding prose:',
+  '',
+  '{"defenses": [',
+  '  {"critique_id": "<id>",',
+  '   "stance": "address",',
+  '   "reasoning": "<one or two sentences>",',
+  '   "draft_delta": "<the revised slice — REQUIRED>"',
+  '  }, ...',
+  ']}',
+  '',
+  'Include exactly one defense per critique. Output ONLY the JSON object.',
+].join('\n');
+
+export const DEFENSE_SYSTEM_PROMPT_DOUBLE_DOWN_FORCED = [
+  'You are responding to adversarial critique of the team\'s product idea.',
+  'For every critique you MUST take stance "double_down": keep your position',
+  'and explain in one paragraph why the critic is missing the point.',
+  '`address` is NOT permitted in this run.',
+  '',
+  'Output ONLY a single JSON object with no surrounding prose:',
+  '',
+  '{"defenses": [',
+  '  {"critique_id": "<id>",',
+  '   "stance": "double_down",',
+  '   "reasoning": "<one paragraph explaining the position>"',
+  '  }, ...',
+  ']}',
+  '',
+  'Do NOT include `draft_delta`. Include exactly one defense per critique.',
+  'Output ONLY the JSON object.',
+].join('\n');
+
+/**
+ * Backward-compat: the old "rebuttal" prose prompt is preserved as an
+ * alias of the author-choice defense prompt for any external consumer
+ * that imported `REBUTTAL_SYSTEM_PROMPT` directly.
+ *
+ * @deprecated Use one of the `DEFENSE_SYSTEM_PROMPT_*` constants.
+ */
+export const REBUTTAL_SYSTEM_PROMPT = DEFENSE_SYSTEM_PROMPT_AUTHOR_CHOICE;
+
+export const DEFENSE_RETRY_INSTRUCTION =
+  "Your previous response wasn't valid JSON for the defense schema. Output ONLY " +
+  'the JSON object with the "defenses" array, nothing else.';
+
+export interface DefensePromptInput {
+  idea: string;
+  draft: string;
+  problems: ReadonlyArray<{
+    critique_id: string;
+    problem: string;
+    proposed_fix: string;
+    dimension: string;
+  }>;
+  mode: DefenseMode;
+}
+
+export function buildDefenseUserPrompt(input: DefensePromptInput): string {
+  const lines: string[] = [
+    `# Idea\n\n${input.idea.trim()}`,
+    `# Draft synthesis so far\n\n${input.draft.trim()}`,
+    '# Critiques',
+    ...input.problems.map(
+      (p) =>
+        `- id: \`${p.critique_id}\`\n  dimension: ${p.dimension}\n  problem: ${p.problem}\n  proposed_fix: ${p.proposed_fix}`,
+    ),
+  ];
+  if (input.mode === 'address') {
+    lines.push('# Reminder', 'Every defense MUST use stance "address".');
+  } else if (input.mode === 'double_down') {
+    lines.push('# Reminder', 'Every defense MUST use stance "double_down".');
+  }
+  lines.push('# Your structured defense');
+  return lines.join('\n\n');
+}
+
+/**
+ * Back-compat alias for the pre-refine `buildRebuttalUserPrompt` shape.
+ *
+ * @deprecated Use `buildDefenseUserPrompt` with the new structured input.
+ */
 export interface RebuttalPromptInput {
   idea: string;
   draft: string;
@@ -71,6 +183,11 @@ export interface RebuttalPromptInput {
   priorRebuttals: readonly string[];
 }
 
+/**
+ * @deprecated Use `buildDefenseUserPrompt`. This alias preserves the
+ * pre-refine builder shape for external consumers; internally the
+ * orchestrator now uses the structured defense flow.
+ */
 export function buildRebuttalUserPrompt(input: RebuttalPromptInput): string {
   const lines: string[] = [
     `# Idea\n\n${input.idea.trim()}`,
@@ -110,8 +227,19 @@ export interface SynthPromptInput {
   idea: string;
   cooperativeTurns: readonly string[];
   adversarialTurns: readonly string[];
+  /**
+   * Defense turns (previously "rebuttal"). Field name kept stable for
+   * minimal churn in callers; semantically these are now the structured
+   * defense outputs rendered to prose for the synthesizer.
+   */
   rebuttalTurns: readonly string[];
   unstructuredAdversarial: boolean;
+  /**
+   * Optional dimension grouping hint — when present, the synthesizer is
+   * told to group critiques by dimension and weight them in synthesis.
+   * Field is additive; callers from before the refine change can omit it.
+   */
+  dimensionsSummary?: string;
 }
 
 export function buildSynthUserPrompt(input: SynthPromptInput): string {
@@ -133,8 +261,15 @@ export function buildSynthUserPrompt(input: SynthPromptInput): string {
   }
   if (input.rebuttalTurns.length > 0) {
     lines.push(
-      '# Rebuttal turns',
-      ...input.rebuttalTurns.map((t, i) => `## Rebuttal ${i + 1}\n${t.trim()}`),
+      '# Defense turns',
+      ...input.rebuttalTurns.map((t, i) => `## Defense ${i + 1}\n${t.trim()}`),
+    );
+  }
+  if (input.dimensionsSummary !== undefined && input.dimensionsSummary.length > 0) {
+    lines.push(
+      '# Critique dimension grouping',
+      input.dimensionsSummary,
+      'Group critiques by dimension in your synthesis. Treat legal critiques as load-bearing; UX/business/technical/market critiques as priorities to weigh; `other` as advisory.',
     );
   }
   lines.push('# Final ideation document');

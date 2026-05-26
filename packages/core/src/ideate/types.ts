@@ -59,16 +59,47 @@ export interface ResolvedLineup {
 }
 
 /**
- * The four ideate phases, in canonical execution order. Not every phase runs
- * for every sub-mode (cooperative skips adversarial + rebuttal; the rebuttal
- * phase may run 1 or 2 rounds in `adversarial`/`full`).
+ * The ideate phases, in canonical execution order. Post `refine-ideate-forge`
+ * the pipeline is:
+ *
+ *   cooperative-build → dedupe → adversarial-critique → defense → synth
+ *
+ * Legacy phase IDs `rebuttal-1` / `rebuttal-2` remain in the union for
+ * backward compatibility — old persisted rows (pre-refine) may still carry
+ * them. The orchestrator no longer emits these IDs in new runs.
  */
 export type IdeatePhaseId =
   | 'cooperative-build'
+  | 'dedupe'
   | 'adversarial-critique'
+  | 'defense'
   | 'rebuttal-1'
   | 'rebuttal-2'
   | 'synth';
+
+/** Closed enum of critique dimensions (`refine-ideate-forge`). */
+export type ProblemDimension =
+  | 'ux'
+  | 'business'
+  | 'technical'
+  | 'market'
+  | 'legal'
+  | 'other';
+
+/** Defense response stance — per-critique. */
+export type DefenseStance = 'address' | 'double_down';
+
+/** Defense mode — orchestrator-level setting governing the defense phase. */
+export type DefenseMode = 'address' | 'double_down' | 'author_choice';
+
+/** One structured defense entry from a cooperative author. */
+export interface DefenseEntry {
+  critique_id: string;
+  stance: DefenseStance;
+  reasoning: string;
+  /** Required when `stance === 'address'`; omitted on `double_down`. */
+  draft_delta?: string;
+}
 
 /**
  * One agent contribution within a phase. Mirrors `Turn` in the deliberation
@@ -88,6 +119,13 @@ export interface PhaseContribution {
   attempts?: number;
   /** Adversarial only — true when both attempts failed and prose was preserved. */
   unstructured?: boolean;
+  /**
+   * Defense phase only — parsed defense entries the author produced for the
+   * critiques they responded to. Set on success of the structured parser;
+   * absent when both parse attempts failed (raw prose is preserved in
+   * `content` instead).
+   */
+  defenses?: readonly DefenseEntry[];
   /** ISO 8601 timestamp the contribution was recorded. */
   timestamp: string;
 }
@@ -101,6 +139,13 @@ export interface PhaseContribution {
 export interface Problem {
   problem: string;
   proposed_fix: string;
+  /**
+   * Closed-enum dimension tag (`refine-ideate-forge`). REQUIRED on new
+   * adversarial outputs; existing persisted Problem rows from pre-refine
+   * runs may omit it (the union is widened by an optional read from
+   * legacy JSON, but new writers always emit it).
+   */
+  dimension: ProblemDimension;
 }
 
 /**
@@ -117,6 +162,24 @@ export interface PhaseRecord {
   synthesis?: string;
   /** Set when the phase emitted any structured warnings (e.g. unstructured adversarial output). */
   warnings?: readonly string[];
+  /**
+   * Set on `dedupe` only. Captures the merge map, kept survivor IDs, the
+   * threshold used, and which provider produced the embeddings. Soft-fail
+   * mode (`skipped: true`) preserves the warning in `warnings` and leaves
+   * `merged_into` empty.
+   */
+  dedupe?: {
+    kept: readonly string[];
+    merged_into: Record<string, string>;
+    threshold: number;
+    provider: 'local' | 'cloud' | null;
+    skipped: boolean;
+  };
+  /**
+   * Set on `defense` only. Captures the structured per-critique defense
+   * entries. Per-author breakdown lives in `contributions[].defenses`.
+   */
+  defenses?: readonly DefenseEntry[];
 }
 
 /**
@@ -141,6 +204,64 @@ export interface IdeationRecord {
   phases: readonly PhaseRecord[];
   synthesis: string | null;
   error: string | null;
+  /** Optional Lattice coordination report when the run was launched with `--lattice`. */
+  lattice?: LatticeReport | null;
+}
+
+/**
+ * Lattice coordination metadata aggregated across all per-phase wrapped
+ * model calls. Surfaced both on the `RunIdeationResult` and (eventually)
+ * on the persisted `IdeationRecord` so consumers can ship audit reports
+ * without re-running the deliberation.
+ *
+ * Phase-bucketed contracts let the synthesizer (and the human-facing
+ * "Lattice Coordination Report") attribute conflicts and pass/fail outcomes
+ * to the cooperative-build, adversarial-critique, or rebuttal step that
+ * generated them.
+ */
+export interface LatticeReport {
+  /** Whether the run was actually wrapped with Lattice (false = bypassed). */
+  enabled: boolean;
+  /** ULID-style trace ID of the cooperative-build phase (or first wrapped phase). */
+  traceId: string;
+  /** Aggregate ratio of models that agreed on the consensus fields. */
+  agreementRatio: number;
+  /** True when the agreement ratio met the configured `minAgreementRatio`. */
+  consensusReached: boolean;
+  /** Conflicts surfaced by ConsensusReducer across the cooperative team. */
+  conflicts: ReadonlyArray<{
+    field: string;
+    values: ReadonlyArray<{ agentId: string; value: unknown }>;
+    resolution: string;
+  }>;
+  /** Per-model pass/fail outcome for the cooperative + adversarial wrap. */
+  modelOutcomes: ReadonlyArray<{
+    agentId: string;
+    role: string;
+    isAdversarial: boolean;
+    passed: boolean;
+    breakerTier: 'L1' | 'L1+L2';
+  }>;
+  /** Path the audit log was written to (or `null` when no path was supplied). */
+  auditLogPath: string | null;
+}
+
+/**
+ * Caller-supplied Lattice options. When `enabled` is false, the orchestrator
+ * runs unchanged. Default `shadowMode: true` ensures Circuit Breaker failures
+ * NEVER abort a deliberation — they only surface in the report.
+ */
+export interface LatticeIdeateOptions {
+  enabled: boolean;
+  /** Path to the JSONL audit log. Defaults to `./parliament-audit.jsonl`. */
+  auditLogPath?: string;
+  /** ConsensusReducer minimum agreement ratio. Defaults to 0.6. */
+  minAgreementRatio?: number;
+  /**
+   * Default to `true` — Lattice never blocks a Parliament deliberation. Set
+   * to `false` only in tests that want to assert raw breaker behavior.
+   */
+  shadowMode?: boolean;
 }
 
 /**
@@ -160,7 +281,29 @@ export interface IdeateSynthOverrides {
   full?: string;
 }
 
+/**
+ * `[ideate.dedupe]` TOML block. All fields optional with in-code defaults;
+ * the parser validates each at load time and surfaces invalid values as
+ * boot-time errors.
+ */
+export interface IdeateDedupeConfig {
+  /** Provider attempt order. Default `["local", "cloud"]`. */
+  provider_order?: readonly ('local' | 'cloud')[];
+  /** Cosine threshold for collapse. Default `0.85`. Must be in `[0, 1]`. */
+  threshold?: number;
+  /** Master enable/disable. Default `true`. */
+  enabled?: boolean;
+}
+
+/** `[ideate.defense]` TOML block. */
+export interface IdeateDefenseConfig {
+  /** Default defense_mode for runs that don't override per-request. */
+  mode?: DefenseMode;
+}
+
 export interface IdeateConfig {
   lineup?: IdeateLineupOverrides;
   synth?: IdeateSynthOverrides;
+  dedupe?: IdeateDedupeConfig;
+  defense?: IdeateDefenseConfig;
 }

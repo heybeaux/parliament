@@ -13,6 +13,8 @@ import {
 } from './memory.js';
 import { ACRContextProvider, type ContextProvider } from './context.js';
 import type { IdeateConfig, IdeateMode, LineupRole } from './ideate/types.js';
+import type { BrainstormConfig } from './brainstorm/types.js';
+import { BRAINSTORM_CRITERIA } from './brainstorm/types.js';
 
 export interface NeurotypeConfig {
   model: string;
@@ -148,6 +150,12 @@ export interface ParliamentTomlConfig {
    * `@parliament/core/src/ideate/lineup.ts` apply unchanged.
    */
   ideate: IdeateConfig;
+  /**
+   * Optional `[brainstorm]` block — lineup, rank weights, ideas_per_author,
+   * and forge.k overrides for brainstorm mode. Missing → in-code defaults
+   * from `@parliament/core/src/brainstorm/lineup.ts` apply unchanged.
+   */
+  brainstorm: BrainstormConfig;
 }
 
 const DEFAULT_CONFIG_FILENAME = 'parliament.toml';
@@ -334,8 +342,9 @@ function validateConfig(raw: unknown, configPath: string): ParliamentTomlConfig 
   const memory = parseMemoryConfig(top['memory'], configPath);
   const context = parseContextConfig(top['context'], configPath);
   const ideate = parseIdeateConfig(top['ideate'], configPath);
+  const brainstorm = parseBrainstormConfig(top['brainstorm'], configPath);
 
-  return { neurotypes, parliament, memory, context, ideate };
+  return { neurotypes, parliament, memory, context, ideate, brainstorm };
 }
 
 /**
@@ -582,6 +591,155 @@ function parseIdeateConfig(raw: unknown, configPath: string): IdeateConfig {
       synth[mode] = value;
     }
     if (Object.keys(synth).length > 0) out.synth = synth;
+  }
+
+  return out;
+}
+
+/**
+ * Parses the optional `[brainstorm]` block. Missing → empty `BrainstormConfig`
+ * so `resolveBrainstormLineup` and `resolveRankWeights` fall through to in-code
+ * defaults unchanged.
+ *
+ * Structural validation here; semantic validation (negative weights, empty model
+ * lists, etc.) lives in the resolver functions so it fires whether overrides
+ * arrive from TOML or programmatic callers.
+ *
+ * 11.2 constraints enforced at the TOML layer:
+ *   - `ideas_per_author` must be an integer in [1, 20]
+ *   - `forge.k` must be an integer in [1, 10]
+ *   - weight values must be finite and non-negative (NaN/negative/Infinity
+ *     rejected here; the all-zero and normalization path stays in resolveRankWeights)
+ */
+function parseBrainstormConfig(raw: unknown, configPath: string): BrainstormConfig {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`Parliament: [brainstorm] in "${configPath}" must be a TOML table`);
+  }
+  const entry = raw as Record<string, unknown>;
+  const out: BrainstormConfig = {};
+
+  // [brainstorm.lineup] — structural check only; semantic validation in resolveBrainstormLineup
+  const lineupRaw = entry['lineup'];
+  if (lineupRaw !== undefined) {
+    if (typeof lineupRaw !== 'object' || lineupRaw === null || Array.isArray(lineupRaw)) {
+      throw new Error(
+        `Parliament: [brainstorm.lineup] in "${configPath}" must be a TOML table`,
+      );
+    }
+    const lineupEntry = lineupRaw as Record<string, unknown>;
+    const lineupOut: NonNullable<BrainstormConfig['lineup']> = {};
+
+    const arrayKeys = ['divergentAuthors', 'judges'] as const;
+    for (const key of arrayKeys) {
+      const v = lineupEntry[key];
+      if (v === undefined) continue;
+      if (!Array.isArray(v)) {
+        throw new Error(
+          `Parliament: [brainstorm.lineup.${key}] in "${configPath}" must be an array of model IDs`,
+        );
+      }
+      for (let i = 0; i < v.length; i++) {
+        if (typeof v[i] !== 'string') {
+          throw new Error(
+            `Parliament: [brainstorm.lineup.${key}][${i}] in "${configPath}" must be a string`,
+          );
+        }
+      }
+      lineupOut[key] = v as string[];
+    }
+
+    const stringKeys = ['cluster', 'forgeElaborator'] as const;
+    for (const key of stringKeys) {
+      const v = lineupEntry[key];
+      if (v === undefined) continue;
+      if (typeof v !== 'string') {
+        throw new Error(
+          `Parliament: [brainstorm.lineup.${key}] in "${configPath}" must be a string`,
+        );
+      }
+      lineupOut[key] = v;
+    }
+
+    if (Object.keys(lineupOut).length > 0) out.lineup = lineupOut;
+  }
+
+  // [brainstorm.rank.weights] — validate each present weight is finite + non-negative
+  const rankRaw = entry['rank'];
+  if (rankRaw !== undefined) {
+    if (typeof rankRaw !== 'object' || rankRaw === null || Array.isArray(rankRaw)) {
+      throw new Error(
+        `Parliament: [brainstorm.rank] in "${configPath}" must be a TOML table`,
+      );
+    }
+    const rankEntry = rankRaw as Record<string, unknown>;
+    const weightsRaw = rankEntry['weights'];
+    if (weightsRaw !== undefined) {
+      if (typeof weightsRaw !== 'object' || weightsRaw === null || Array.isArray(weightsRaw)) {
+        throw new Error(
+          `Parliament: [brainstorm.rank.weights] in "${configPath}" must be a TOML table`,
+        );
+      }
+      const weightsEntry = weightsRaw as Record<string, unknown>;
+      const weightsOut: NonNullable<NonNullable<BrainstormConfig['rank']>['weights']> = {};
+      for (const criterion of BRAINSTORM_CRITERIA) {
+        const v = weightsEntry[criterion];
+        if (v === undefined) continue;
+        if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) {
+          throw new Error(
+            `Parliament: [brainstorm.rank.weights.${criterion}] in "${configPath}" must be a finite non-negative number, got ${JSON.stringify(v)}`,
+          );
+        }
+        weightsOut[criterion] = v;
+      }
+      if (Object.keys(weightsOut).length > 0) out.rank = { weights: weightsOut };
+    } else if (Object.keys(rankEntry).length > 0) {
+      // rank table present but no weights key — still valid, just a no-op
+      out.rank = {};
+    }
+  }
+
+  // ideas_per_author — integer in [1, 20]
+  const ideasPerAuthorRaw = entry['ideas_per_author'];
+  if (ideasPerAuthorRaw !== undefined) {
+    if (
+      typeof ideasPerAuthorRaw !== 'number' ||
+      !Number.isInteger(ideasPerAuthorRaw) ||
+      ideasPerAuthorRaw < 1 ||
+      ideasPerAuthorRaw > 20
+    ) {
+      throw new Error(
+        `Parliament: [brainstorm] ideas_per_author in "${configPath}" must be an integer in [1, 20], got ${JSON.stringify(ideasPerAuthorRaw)}`,
+      );
+    }
+    out.ideas_per_author = ideasPerAuthorRaw;
+  }
+
+  // [brainstorm.forge] — k must be integer in [1, 10]
+  const forgeRaw = entry['forge'];
+  if (forgeRaw !== undefined) {
+    if (typeof forgeRaw !== 'object' || forgeRaw === null || Array.isArray(forgeRaw)) {
+      throw new Error(
+        `Parliament: [brainstorm.forge] in "${configPath}" must be a TOML table`,
+      );
+    }
+    const forgeEntry = forgeRaw as Record<string, unknown>;
+    const kRaw = forgeEntry['k'];
+    if (kRaw !== undefined) {
+      if (
+        typeof kRaw !== 'number' ||
+        !Number.isInteger(kRaw) ||
+        kRaw < 1 ||
+        kRaw > 10
+      ) {
+        throw new Error(
+          `Parliament: [brainstorm.forge.k] in "${configPath}" must be an integer in [1, 10], got ${JSON.stringify(kRaw)}`,
+        );
+      }
+      out.forge = { k: kRaw };
+    } else {
+      out.forge = {};
+    }
   }
 
   return out;

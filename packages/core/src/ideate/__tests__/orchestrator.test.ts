@@ -6,7 +6,7 @@ import { runIdeation, type AdapterFactory } from '../orchestrator.js';
 /**
  * Test adapter that returns a scripted response per (model, system-prompt-key) lookup.
  * The system-prompt-key is the FIRST line of the system prompt, which is stable
- * per role and lets us differentiate cooperative-build / adversarial / rebuttal /
+ * per role and lets us differentiate cooperative-build / adversarial / defense /
  * synth without coupling to full prompt strings.
  */
 type Script = Record<string, string | (() => string)>;
@@ -40,7 +40,15 @@ describe('runIdeation — cooperative sub-mode', () => {
         'final synthesis',
     });
     const result = await runIdeation(
-      { idea: 'A wearable that detects mood drift', mode: 'cooperative', style: 'collective', lineup },
+      {
+        idea: 'A wearable that detects mood drift',
+        mode: 'cooperative',
+        style: 'collective',
+        lineup,
+        // Section 1: disable dedupe in legacy tests — it has its own coverage
+        // in dedupe.test.ts + the dedupe-runs-by-default test below.
+        dedupe: { enabled: false },
+      },
       factory,
     );
     expect(result.status).toBe('complete');
@@ -62,7 +70,13 @@ describe('runIdeation — cooperative sub-mode', () => {
         'final',
     });
     const result = await runIdeation(
-      { idea: 'idea', mode: 'cooperative', style: 'individual', lineup },
+      {
+        idea: 'idea',
+        mode: 'cooperative',
+        style: 'individual',
+        lineup,
+        dedupe: { enabled: false },
+      },
       factory,
     );
     expect(result.status).toBe('complete');
@@ -75,7 +89,7 @@ describe('runIdeation — cooperative sub-mode', () => {
     ]);
   });
 
-  it('does NOT run adversarial or rebuttal phases in cooperative sub-mode', async () => {
+  it('does NOT run adversarial or defense phases in cooperative sub-mode', async () => {
     const lineup = defaultLineup('cooperative');
     const factory = makeFactory({
       [`${ANY}::You are the Proposer in a cooperative product-ideation team.`]: 'P',
@@ -86,20 +100,37 @@ describe('runIdeation — cooperative sub-mode', () => {
         'S',
     });
     const result = await runIdeation(
-      { idea: 'i', mode: 'cooperative', style: 'collective', lineup },
+      {
+        idea: 'i',
+        mode: 'cooperative',
+        style: 'collective',
+        lineup,
+        dedupe: { enabled: false },
+      },
       factory,
     );
     expect(result.phases.find((p) => p.phase === 'adversarial-critique')).toBeUndefined();
-    expect(result.phases.find((p) => p.phase === 'rebuttal-1')).toBeUndefined();
-    expect(result.phases.find((p) => p.phase === 'rebuttal-2')).toBeUndefined();
+    expect(result.phases.find((p) => p.phase === 'defense')).toBeUndefined();
   });
 });
 
 describe('runIdeation — adversarial sub-mode', () => {
-  it('runs cooperative + adversarial + rebuttal-1 + rebuttal-2 + synth (rebuttal cap is hard)', async () => {
+  it('runs cooperative + adversarial + defense + synth', async () => {
     const lineup = defaultLineup('adversarial');
     const adversarialJson = JSON.stringify({
-      problems: [{ problem: 'no auth story', proposed_fix: 'add OAuth' }],
+      problems: [
+        { problem: 'no auth story', proposed_fix: 'add OAuth', dimension: 'technical' },
+      ],
+    });
+    const defenseJson = JSON.stringify({
+      defenses: [
+        {
+          critique_id: '0',
+          stance: 'address',
+          reasoning: 'The critique is valid and worth fixing.',
+          draft_delta: 'Add OAuth support.',
+        },
+      ],
     });
     const factory = makeFactory({
       [`${ANY}::You are the Proposer in a cooperative product-ideation team.`]: 'P',
@@ -108,32 +139,38 @@ describe('runIdeation — adversarial sub-mode', () => {
       [`${ANY}::You are the Lateralist in a cooperative product-ideation team.`]: 'L',
       [`${ANY}::You are an adversarial reviewer evaluating a product idea. Your role is NOT to`]:
         adversarialJson,
-      [`${ANY}::You are responding to adversarial critique of the team's product idea.`]: 'rebuttal',
+      [`${ANY}::You are a cooperative author defending your product idea against structured critiques.`]:
+        defenseJson,
       [`${ANY}::You are synthesizing a product-ideation transcript into a final ideation document.`]:
         'final',
     });
     const result = await runIdeation(
-      { idea: 'i', mode: 'adversarial', style: 'collective', lineup },
+      {
+        idea: 'i',
+        mode: 'adversarial',
+        style: 'collective',
+        lineup,
+        dedupe: { enabled: false },
+      },
       factory,
     );
     expect(result.status).toBe('complete');
     expect(result.phases.map((p) => p.phase)).toEqual([
       'cooperative-build',
       'adversarial-critique',
-      'rebuttal-1',
-      'rebuttal-2',
+      'defense',
       'synth',
     ]);
     // Adversarial team produced 2 contributions (skeptic + devils-advocate).
     const adv = result.phases.find((p) => p.phase === 'adversarial-critique')!;
     expect(adv.contributions).toHaveLength(2);
     expect(adv.contributions[0]!.problems).toEqual([
-      { problem: 'no auth story', proposed_fix: 'add OAuth' },
+      { problem: 'no auth story', proposed_fix: 'add OAuth', dimension: 'technical' },
     ]);
     expect(adv.contributions[0]!.attempts).toBe(1);
   });
 
-  it('skips rebuttal phases when adversarial produces zero problems (well-formed but no problems)', async () => {
+  it('skips defense phase when adversarial produces zero problems (well-formed but no problems)', async () => {
     // Empty problems[] returns null from parser (treated as malformed).
     // Use unstructured prose on both attempts so the orchestrator surfaces
     // unstructured contributions and finds no problems.
@@ -149,7 +186,13 @@ describe('runIdeation — adversarial sub-mode', () => {
         'final',
     });
     const result = await runIdeation(
-      { idea: 'i', mode: 'adversarial', style: 'collective', lineup },
+      {
+        idea: 'i',
+        mode: 'adversarial',
+        style: 'collective',
+        lineup,
+        dedupe: { enabled: false },
+      },
       factory,
     );
     expect(result.status).toBe('complete');
@@ -169,7 +212,7 @@ describe('runIdeation — adversarial sub-mode', () => {
     let skepticCalls = 0;
     let daCalls = 0;
     const validJson = JSON.stringify({
-      problems: [{ problem: 'X', proposed_fix: 'Y' }],
+      problems: [{ problem: 'X', proposed_fix: 'Y', dimension: 'technical' }],
     });
     const factory: AdapterFactory = (model: string) => ({
       modelName: model,
@@ -191,13 +234,32 @@ describe('runIdeation — adversarial sub-mode', () => {
             return { content: validJson }; // Always valid on first attempt.
           }
         }
-        if (head.startsWith('You are responding to adversarial critique')) return { content: 'r' };
+        if (head.startsWith('You are a cooperative author defending your product idea')) {
+          return {
+            content: JSON.stringify({
+              defenses: [
+                {
+                  critique_id: '0',
+                  stance: 'address',
+                  reasoning: 'Fix it.',
+                  draft_delta: 'Updated draft.',
+                },
+              ],
+            }),
+          };
+        }
         if (head.startsWith('You are synthesizing a product-ideation')) return { content: 'S' };
         throw new Error(`unexpected: ${head}`);
       },
     });
     const result = await runIdeation(
-      { idea: 'i', mode: 'adversarial', style: 'collective', lineup },
+      {
+        idea: 'i',
+        mode: 'adversarial',
+        style: 'collective',
+        lineup,
+        dedupe: { enabled: false },
+      },
       factory,
     );
     expect(result.status).toBe('complete');
@@ -214,7 +276,17 @@ describe('runIdeation — full sub-mode', () => {
   it('runs the full pipeline with the 8-model cooperative team', async () => {
     const lineup = defaultLineup('full');
     const adversarialJson = JSON.stringify({
-      problems: [{ problem: 'p', proposed_fix: 'f' }],
+      problems: [{ problem: 'p', proposed_fix: 'f', dimension: 'ux' }],
+    });
+    const defenseJson = JSON.stringify({
+      defenses: [
+        {
+          critique_id: '0',
+          stance: 'address',
+          reasoning: 'The UX issue is valid.',
+          draft_delta: 'Revise the UX flow.',
+        },
+      ],
     });
     const factory = makeFactory({
       [`${ANY}::You are the Proposer in a cooperative product-ideation team.`]: 'P',
@@ -223,17 +295,24 @@ describe('runIdeation — full sub-mode', () => {
       [`${ANY}::You are the Lateralist in a cooperative product-ideation team.`]: 'L',
       [`${ANY}::You are an adversarial reviewer evaluating a product idea. Your role is NOT to`]:
         adversarialJson,
-      [`${ANY}::You are responding to adversarial critique of the team's product idea.`]: 'r',
+      [`${ANY}::You are a cooperative author defending your product idea against structured critiques.`]:
+        defenseJson,
       [`${ANY}::You are synthesizing a product-ideation transcript into a final ideation document.`]:
         'final',
     });
     const result = await runIdeation(
-      { idea: 'i', mode: 'full', style: 'collective', lineup },
+      {
+        idea: 'i',
+        mode: 'full',
+        style: 'collective',
+        lineup,
+        dedupe: { enabled: false },
+      },
       factory,
     );
     expect(result.status).toBe('complete');
     expect(result.phases.find((p) => p.phase === 'cooperative-build')!.contributions).toHaveLength(8);
-    expect(result.phases.find((p) => p.phase === 'rebuttal-1')!.contributions).toHaveLength(8);
+    expect(result.phases.find((p) => p.phase === 'defense')!.contributions).toHaveLength(8);
     expect(result.synthesis).toBe('final');
   });
 });
@@ -253,12 +332,163 @@ describe('runIdeation — error handling', () => {
       },
     });
     const result = await runIdeation(
-      { idea: 'i', mode: 'cooperative', style: 'collective', lineup },
+      {
+        idea: 'i',
+        mode: 'cooperative',
+        style: 'collective',
+        lineup,
+        dedupe: { enabled: false },
+      },
       factory,
     );
     expect(result.status).toBe('error');
     expect(result.error).toMatch(/upstream timeout/);
     // No completed phases (cooperative-build aborted before yielding a record).
     expect(result.phases).toHaveLength(0);
+  });
+});
+
+describe('runIdeation — dedupe phase wiring (Section 1)', () => {
+  it('runs dedupe by default between cooperative-build and synth, with stub embedder', async () => {
+    const lineup = defaultLineup('cooperative');
+    const factory = makeFactory({
+      [`${ANY}::You are the Proposer in a cooperative product-ideation team.`]: 'P-turn',
+      [`${ANY}::You are the Expander in a cooperative product-ideation team.`]: 'E-turn',
+      [`${ANY}::You are the Pragmatist in a cooperative product-ideation team.`]: 'Pr-turn',
+      [`${ANY}::You are the Lateralist in a cooperative product-ideation team.`]: 'L-turn',
+      [`${ANY}::You are synthesizing a product-ideation transcript into a final ideation document.`]:
+        'synth',
+    });
+    // Stub embedder: orthogonal vectors for each draft → no collapses, but
+    // the dedupe phase still records itself with provider='local'.
+    const result = await runIdeation(
+      {
+        idea: 'i',
+        mode: 'cooperative',
+        style: 'collective',
+        lineup,
+        dedupe: {
+          embedder: async (_provider, texts) =>
+            texts.map((_t, i) => {
+              const v = new Array(8).fill(0) as number[];
+              v[i] = 1;
+              return v;
+            }),
+        },
+      },
+      factory,
+    );
+    expect(result.status).toBe('complete');
+    expect(result.phases.map((p) => p.phase)).toEqual([
+      'cooperative-build',
+      'dedupe',
+      'synth',
+    ]);
+    const dedupe = result.phases.find((p) => p.phase === 'dedupe')!;
+    expect(dedupe.dedupe).toBeDefined();
+    expect(dedupe.dedupe!.provider).toBe('local');
+    expect(dedupe.dedupe!.skipped).toBe(false);
+    expect(dedupe.dedupe!.threshold).toBe(0.85);
+    // Orthogonal vectors → all 4 drafts kept.
+    expect(dedupe.contributions).toHaveLength(4);
+    expect(dedupe.dedupe!.merged_into).toEqual({});
+  });
+
+  it('collapses duplicate drafts before synth so synth sees only survivors', async () => {
+    const lineup = defaultLineup('cooperative');
+    let synthSawTurns: readonly string[] = [];
+    const factory: AdapterFactory = (model: string) => ({
+      modelName: model,
+      async generate(prompt: string, system?: string): Promise<AdapterResult> {
+        const head = (system ?? '').split('\n')[0] ?? '';
+        if (head.startsWith('You are the Proposer')) return { content: 'identical' };
+        if (head.startsWith('You are the Expander')) return { content: 'identical' };
+        if (head.startsWith('You are the Pragmatist')) return { content: 'identical' };
+        if (head.startsWith('You are the Lateralist')) return { content: 'identical' };
+        if (head.startsWith('You are synthesizing')) {
+          // Capture the cooperative-turn count that the synth prompt was built from.
+          // Cooperative turns appear as lines in the prompt — count occurrences
+          // of the duplicate text.
+          synthSawTurns = prompt.split('\n').filter((l) => l.includes('identical'));
+          return { content: 'synth' };
+        }
+        throw new Error(`unexpected: ${head}`);
+      },
+    });
+    const result = await runIdeation(
+      {
+        idea: 'i',
+        mode: 'cooperative',
+        style: 'collective',
+        lineup,
+        dedupe: {
+          // All identical → all collapse to a single survivor.
+          embedder: async (_p, texts) => texts.map(() => [1, 0, 0]),
+        },
+      },
+      factory,
+    );
+    expect(result.status).toBe('complete');
+    const dedupe = result.phases.find((p) => p.phase === 'dedupe')!;
+    expect(dedupe.contributions).toHaveLength(1);
+    // Synth received only the surviving (deduped) drafts. Original 4 collapsed → 1.
+    expect(synthSawTurns.length).toBe(1);
+  });
+
+  it('soft-fails when both providers error: skips dedupe, surfaces warning, drafts pass through', async () => {
+    const lineup = defaultLineup('cooperative');
+    const factory = makeFactory({
+      [`${ANY}::You are the Proposer in a cooperative product-ideation team.`]: 'P',
+      [`${ANY}::You are the Expander in a cooperative product-ideation team.`]: 'E',
+      [`${ANY}::You are the Pragmatist in a cooperative product-ideation team.`]: 'Pr',
+      [`${ANY}::You are the Lateralist in a cooperative product-ideation team.`]: 'L',
+      [`${ANY}::You are synthesizing a product-ideation transcript into a final ideation document.`]:
+        'S',
+    });
+    const result = await runIdeation(
+      {
+        idea: 'i',
+        mode: 'cooperative',
+        style: 'collective',
+        lineup,
+        dedupe: {
+          embedder: async () => {
+            throw new Error('provider down');
+          },
+        },
+      },
+      factory,
+    );
+    expect(result.status).toBe('complete');
+    const dedupe = result.phases.find((p) => p.phase === 'dedupe')!;
+    expect(dedupe.dedupe!.skipped).toBe(true);
+    expect(dedupe.dedupe!.provider).toBeNull();
+    expect(dedupe.warnings).toBeDefined();
+    expect(dedupe.warnings![0]).toMatch(/provider down/);
+    // Drafts pass through untouched on skip.
+    expect(dedupe.contributions).toHaveLength(4);
+  });
+
+  it('dedupe.enabled === false skips the phase entirely (no record on phases[])', async () => {
+    const lineup = defaultLineup('cooperative');
+    const factory = makeFactory({
+      [`${ANY}::You are the Proposer in a cooperative product-ideation team.`]: 'P',
+      [`${ANY}::You are the Expander in a cooperative product-ideation team.`]: 'E',
+      [`${ANY}::You are the Pragmatist in a cooperative product-ideation team.`]: 'Pr',
+      [`${ANY}::You are the Lateralist in a cooperative product-ideation team.`]: 'L',
+      [`${ANY}::You are synthesizing a product-ideation transcript into a final ideation document.`]:
+        'S',
+    });
+    const result = await runIdeation(
+      {
+        idea: 'i',
+        mode: 'cooperative',
+        style: 'collective',
+        lineup,
+        dedupe: { enabled: false },
+      },
+      factory,
+    );
+    expect(result.phases.find((p) => p.phase === 'dedupe')).toBeUndefined();
   });
 });

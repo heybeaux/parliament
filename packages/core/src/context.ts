@@ -1,5 +1,5 @@
-import { resolve as acrResolve, calculateBudget, scanCapabilities } from '@acr/core';
-import type { ResolutionPlan } from '@acr/schema';
+import { resolve as acrResolve, calculateBudget, scanCapabilities } from '@agentcapabilityruntime/core';
+import type { ResolutionPlan } from '@agentcapabilityruntime/schema';
 
 export interface ResolvedContext {
   capabilities: string[];

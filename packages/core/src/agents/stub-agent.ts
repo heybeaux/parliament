@@ -32,7 +32,7 @@ export class StubNeurotypeAgent extends AgentBase {
     this.neurotype = neurotype;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   async generate(_blackboard: Blackboard): Promise<AgentResult> {
     return {
       content: `[${this.role} stub — implementation pending]`,
