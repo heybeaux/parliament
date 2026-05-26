@@ -31,7 +31,7 @@ describe('defaultLineup', () => {
 
   it('full uses all 8 models on the cooperative side and Gemini for synth', () => {
     const r = defaultLineup('full');
-    expect(r.synth).toBe('google/gemini-2.5-pro');
+    expect(r.synth).toBe('google/gemini-pro-latest');
     expect(r.team.cooperative).toHaveLength(8);
     const models = r.team.cooperative.map((s) => s.model);
     expect(models).toContain(CLOSED_MODELS.opus);
@@ -48,7 +48,7 @@ describe('defaultLineup', () => {
   it('synth defaults match the spec: Opus 4.6 for cooperative+adversarial, Gemini for full', () => {
     expect(SYNTH_DEFAULTS.cooperative).toBe(CLOSED_MODELS.opus);
     expect(SYNTH_DEFAULTS.adversarial).toBe(CLOSED_MODELS.opus);
-    expect(SYNTH_DEFAULTS.full).toBe('google/gemini-2.5-pro');
+    expect(SYNTH_DEFAULTS.full).toBe('google/gemini-pro-latest');
   });
 });
 
