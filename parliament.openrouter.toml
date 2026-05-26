@@ -14,7 +14,7 @@ confidence_threshold = 0.7
 red_agent_interval = 2
 osi_enabled = true
 osi_threshold = 0.85
-server_port = 3000
+server_port = 3030
 
 [neurotypes.proposer]
 # Alibaba Qwen — structured reasoning

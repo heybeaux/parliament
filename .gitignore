@@ -17,9 +17,10 @@ node_modules/
 *.js.map
 *.db
 *.sqlite
-packages/cli/tsconfig.tsbuildinfo
-packages/core/tsconfig.tsbuildinfo
-packages/server/tsconfig.tsbuildinfo
+
+# TypeScript incremental-build cache. Regenerated on every `tsc -b` run, so
+# tracking causes recurring merge conflicts and noisy diffs without any
+# upside — it's a local cache, not source.
+*.tsbuildinfo
 .history
 .DS_Store
-packages/*/tsconfig.tsbuildinfo
