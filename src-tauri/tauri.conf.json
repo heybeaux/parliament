@@ -1,0 +1,42 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Parliament",
+  "version": "0.1.0",
+  "identifier": "ai.parliament.desktop",
+  "build": {
+    "frontendDist": "../packages/ui/dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "cd packages/ui && pnpm dev",
+    "beforeBuildCommand": "pnpm build && cd packages/ui && pnpm build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Parliament",
+        "width": 1280,
+        "height": 800,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' http://localhost:3001 http://127.0.0.1:3001; connect-src http://localhost:3001 http://127.0.0.1:3001 ws://localhost:* ws://127.0.0.1:*; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "dmg",
+    "icon": ["icons/128x128.png"],
+    "macOS": {
+      "entitlements": null,
+      "exceptionDomain": "",
+      "frameworks": [],
+      "providerShortName": null,
+      "signingIdentity": null
+    }
+  },
+  "plugins": {
+    "shell": {
+      "open": true
+    }
+  }
+}

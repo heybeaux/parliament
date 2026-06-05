@@ -7,7 +7,7 @@ import type {
   TranscriptFile,
 } from './types';
 
-const BASE = '/api';
+const BASE = (import.meta.env.VITE_PARLIAMENT_API ?? '') + '/api';
 
 async function jsonOrThrow<T>(res: Response): Promise<T> {
   if (!res.ok) {

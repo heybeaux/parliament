@@ -23,3 +23,17 @@ packages/server/tsconfig.tsbuildinfo
 .history
 .DS_Store
 packages/*/tsconfig.tsbuildinfo
+
+# Tauri / Rust build artifacts
+src-tauri/target/
+src-tauri/gen/
+
+# Agent workspace contamination (do not commit)
+.openclaw/
+agentdb.rvf
+agentdb.rvf.lock
+SOUL.md
+IDENTITY.md
+USER.md
+HEARTBEAT.md
+TOOLS.md
