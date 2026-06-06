@@ -51,6 +51,14 @@ cp    packages/server/package.json "$RESOURCES_DIR/packages/server/package.json"
 cp -r packages/core/dist    "$RESOURCES_DIR/packages/core/dist"
 cp    packages/core/package.json   "$RESOURCES_DIR/packages/core/package.json"
 
+# ── 4b. Bundle the OpenRouter-default desktop config ──────────────────────
+# Ships as `parliament.toml` at the resource root. The Tauri sidecar points
+# PARLIAMENT_CONFIG at this absolute path so the server resolves it regardless
+# of cwd (there's no repo root inside the .app). The OpenRouter API key is NOT
+# in this file — it's supplied at runtime via the Settings panel.
+echo "==> bundle-sidecar: bundling desktop OpenRouter config..."
+cp parliament.desktop.toml "$RESOURCES_DIR/parliament.toml"
+
 # ── 5. Install public runtime deps via npm ────────────────────────────────
 # This gets better-sqlite3 (with native rebuild), @node-rs/argon2, hono, etc.
 # npm compiles better-sqlite3 against the current node's ABI.
@@ -213,7 +221,13 @@ echo "==> bundle-sidecar: smoke-testing bundled server..."
 BUNDLED_NODE="$BINARIES_DIR/node-$TARGET_TRIPLE"
 SERVER_ENTRY="$RESOURCES_DIR/packages/server/dist/index.js"
 
+# Point at the bundled desktop config + openrouter provider so the smoke test
+# exercises the exact config the .app ships with. No key is set, so /health
+# will report models unreachable — that's fine; we only assert the server
+# boots and answers, which proves config resolution + native modules work.
 PORT=19399 PARLIAMENT_SERVER_HOST=127.0.0.1 \
+  PARLIAMENT_CONFIG="$(cd "$RESOURCES_DIR" && pwd)/parliament.toml" \
+  PARLIAMENT_PROVIDER=openrouter \
   "$BUNDLED_NODE" "$SERVER_ENTRY" &
 SMOKE_PID=$!
 sleep 2

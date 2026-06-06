@@ -35,16 +35,33 @@ fn bundled_server_entry() -> std::path::PathBuf {
     }
 }
 
+fn bundled_config_path() -> std::path::PathBuf {
+    if cfg!(debug_assertions) {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("parliament.desktop.toml")
+    } else {
+        // Resources/server/parliament.toml — bundled by scripts/bundle-sidecar.sh
+        let exe = std::env::current_exe().unwrap();
+        let contents = exe.parent().unwrap().parent().unwrap();
+        contents.join("Resources/server/parliament.toml")
+    }
+}
+
 fn spawn_server() -> Option<std::process::Child> {
     let node_bin = bundled_node();
     let server_entry = bundled_server_entry();
+    let config_path = bundled_config_path();
 
     println!(
         "Parliament: spawning server
-  node:  {}
-  entry: {}",
+  node:   {}
+  entry:  {}
+  config: {}",
         node_bin.display(),
-        server_entry.display()
+        server_entry.display(),
+        config_path.display()
     );
 
     if !node_bin.exists() {
@@ -68,6 +85,11 @@ fn spawn_server() -> Option<std::process::Child> {
         .arg(&server_entry)
         .env("PORT", SERVER_PORT)
         .env("PARLIAMENT_SERVER_HOST", "127.0.0.1")
+        // Desktop default: OpenRouter for every role. The key is loaded by the
+        // server from ~/.parliament/settings.json (written by the Settings
+        // panel) or the OPENROUTER_API_KEY env var.
+        .env("PARLIAMENT_PROVIDER", "openrouter")
+        .env("PARLIAMENT_CONFIG", &config_path)
         .spawn()
     {
         Ok(child) => {

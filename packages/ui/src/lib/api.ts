@@ -138,3 +138,24 @@ export async function getHealth(): Promise<HealthResponse> {
   const res = await fetch(`${BASE}/health`);
   return jsonOrThrow<HealthResponse>(res);
 }
+
+export interface SettingsStatus {
+  provider: string;
+  openrouter_key_configured: boolean;
+  openrouter_key_hint: string | null;
+  key_source: 'env' | 'file' | null;
+}
+
+export async function getSettings(): Promise<SettingsStatus> {
+  const res = await fetch(`${BASE}/settings`);
+  return jsonOrThrow<SettingsStatus>(res);
+}
+
+export async function saveOpenRouterKey(key: string): Promise<SettingsStatus> {
+  const res = await fetch(`${BASE}/settings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ openrouter_api_key: key }),
+  });
+  return jsonOrThrow<SettingsStatus>(res);
+}

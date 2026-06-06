@@ -4,6 +4,7 @@ import { NewDeliberation } from './components/NewDeliberation';
 import { Timeline } from './components/Timeline';
 import { TranscriptList } from './components/TranscriptList';
 import { HealthBar } from './components/HealthBar';
+import { SettingsPanel } from './components/SettingsPanel';
 import { getDeliberation, getTranscript, startDeliberation } from './lib/api';
 import {
   clearActiveDeliberationId,
@@ -30,6 +31,8 @@ export default function App() {
   const [elapsed, setElapsed] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [healthKey, setHealthKey] = useState(0);
   const timerRef = useRef<number | null>(null);
 
   // PAR-26: when a deliberation reaches its terminal status the hook
@@ -250,7 +253,19 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-3">
-              <HealthBar />
+              <HealthBar refreshKey={healthKey} />
+              {/* Settings */}
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(true)}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-white/5 hover:text-zinc-200"
+                aria-label="Open settings"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                </svg>
+              </button>
               {/* Mobile sidebar toggle */}
               <button
                 type="button"
@@ -349,6 +364,12 @@ export default function App() {
           </AnimatePresence>
         </div>
       </main>
+
+      <SettingsPanel
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onSaved={() => setHealthKey((k) => k + 1)}
+      />
     </div>
   );
 }

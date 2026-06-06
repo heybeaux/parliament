@@ -67,6 +67,7 @@ import { registerBrainstormRoutes } from './routes/brainstorm.js';
 import { inflightBroker, type InflightEvent } from './inflight.js';
 import { loadServerConfig, type ServerConfig } from './config.js';
 import { corsMiddleware } from './middleware/cors.js';
+import { loadSettings, saveSettings } from './settings.js';
 import { bearerAuth, AUTH_CTX_ACCOUNT_ID } from './middleware/auth.js';
 import { idempotency } from './middleware/idempotency.js';
 import { rateLimit } from './middleware/rateLimit.js';
@@ -926,6 +927,56 @@ export function createRouter(
   app.use('/deliberate', async (c, next) => {
     if (c.req.method !== 'POST') return next();
     return deliberateLimiter(c, next);
+  });
+
+  // -------------------------------------------------------------------------
+  // GET /settings — non-secret status the UI needs to render the settings
+  // panel. Never returns the key itself; only whether one is configured and
+  // (if so) a masked suffix so the user can confirm which key is saved.
+  // -------------------------------------------------------------------------
+  app.get('/settings', (c) => {
+    const key = process.env['OPENROUTER_API_KEY'] ?? loadSettings().openrouter_api_key;
+    const configured = Boolean(key && key.length > 0);
+    return c.json({
+      provider: 'openrouter',
+      openrouter_key_configured: configured,
+      openrouter_key_hint: configured ? `…${(key as string).slice(-4)}` : null,
+      key_source: process.env['OPENROUTER_API_KEY'] ? 'env' : configured ? 'file' : null,
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /settings — persist the OpenRouter key to ~/.parliament/settings.json
+  // and apply it to the running process so the next deliberation / health
+  // probe uses it immediately (no restart). Body: { openrouter_api_key }.
+  // -------------------------------------------------------------------------
+  app.post('/settings', async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'invalid_json' }, 400);
+    }
+    const parsed = z
+      .object({ openrouter_api_key: z.string().trim().min(1) })
+      .safeParse(body);
+    if (!parsed.success) {
+      return c.json(
+        { error: 'invalid_body', detail: 'openrouter_api_key (non-empty string) is required' },
+        400,
+      );
+    }
+    const key = parsed.data.openrouter_api_key;
+    saveSettings({ openrouter_api_key: key });
+    // Apply immediately so this process picks it up without a restart. We set
+    // env directly (overriding any prior value) because the user just made an
+    // explicit choice via the UI.
+    process.env['OPENROUTER_API_KEY'] = key;
+    return c.json({
+      ok: true,
+      openrouter_key_configured: true,
+      openrouter_key_hint: `…${key.slice(-4)}`,
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -2002,5 +2053,15 @@ export function createRouter(
     return c.body(null, 204);
   });
 
-  return app;
+  // -------------------------------------------------------------------------
+  // Production parity: the desktop app serves the UI from a file:// origin and
+  // talks to the server at http://127.0.0.1:3000/api/* (no Vite dev proxy to
+  // strip the prefix). Mount every route under /api as well so the same UI
+  // build works in dev (proxy rewrites /api → /) and in the packaged app
+  // (calls /api directly). Root-level paths remain for the CLI / direct API.
+  // -------------------------------------------------------------------------
+  const outer = new Hono<RouterVariables>();
+  outer.route('/api', app);
+  outer.route('/', app);
+  return outer;
 }
