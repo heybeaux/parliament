@@ -7,7 +7,6 @@ import { z } from 'zod';
 import type { Database } from 'better-sqlite3';
 import {
   DeliberationEngine,
-  ModelConnectionError,
   Retrying5xxAdapter,
   TopologyValidationError,
   UpstreamProviderError,
@@ -1027,8 +1026,13 @@ export function createRouter(
           return;
         }
 
-        const adapter = createAdapter(neurotype.model, neurotype.provider);
         try {
+          // createAdapter() can throw synchronously — e.g. provider
+          // "openrouter" with no OPENROUTER_API_KEY configured yet. That's a
+          // normal first-run state for the desktop app (user hasn't pasted
+          // their key), so it must report "unreachable" (→ UI shows Offline +
+          // prompts Settings), NOT crash the whole /health probe with a 500.
+          const adapter = createAdapter(neurotype.model, neurotype.provider);
           // PAR-23: adapter.generate now returns AdapterResult; the
           // healthcheck only cares whether the round-trip succeeded — we
           // discard both the prose and the telemetry meta.
@@ -1039,12 +1043,8 @@ export function createRouter(
             ),
           ]);
           modelStatuses[role] = 'connected';
-        } catch (err) {
-          if (err instanceof ModelConnectionError || err instanceof Error) {
-            modelStatuses[role] = 'unreachable';
-          } else {
-            modelStatuses[role] = 'unreachable';
-          }
+        } catch {
+          modelStatuses[role] = 'unreachable';
         }
       }),
     );
