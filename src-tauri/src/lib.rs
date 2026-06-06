@@ -1,5 +1,5 @@
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager};
+use tauri::Manager;
 
 const SERVER_PORT: &str = "3000";
 
