@@ -7,6 +7,22 @@ import {
   truncateUpstreamBody,
 } from './base.js';
 
+/** Default per-call LLM timeout (ms) when env is unset/invalid. */
+const DEFAULT_LLM_TIMEOUT_MS = 120_000;
+
+/**
+ * Resolve the per-call LLM timeout from `PARLIAMENT_LLM_TIMEOUT_MS`, falling
+ * back to {@link DEFAULT_LLM_TIMEOUT_MS}. A non-positive or unparseable value
+ * is ignored (we never want a 0ms timeout that aborts every call instantly).
+ */
+function resolveLlmTimeoutMs(): number {
+  const raw = process.env.PARLIAMENT_LLM_TIMEOUT_MS;
+  if (raw === undefined || raw === '') return DEFAULT_LLM_TIMEOUT_MS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_LLM_TIMEOUT_MS;
+  return Math.floor(parsed);
+}
+
 interface OpenAIChatResponse {
   choices: Array<{
     message: {
@@ -71,6 +87,14 @@ export class OpenAICompatAdapter implements ModelAdapter {
 
     const startedAt = Date.now();
 
+    // Per-call wall-clock timeout. A stalled provider response (no bytes, no
+    // close) would otherwise hang this fetch forever — and since the engine
+    // runs sequential steps without a block timeout, one hung call freezes the
+    // entire deliberation in `in_flight` with no terminal status. Bound it.
+    const timeoutMs = resolveLlmTimeoutMs();
+    const tag = `${this.provider}/${this.model}`;
+    console.error(`[parliament:llm] → ${tag} request (timeout ${timeoutMs}ms)`);
+
     let response: Response;
     try {
       response = await fetch(`${this.baseUrl}/chat/completions`, {
@@ -84,8 +108,23 @@ export class OpenAICompatAdapter implements ModelAdapter {
           model: this.model,
           messages,
         }),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (err) {
+      const elapsed = Date.now() - startedAt;
+      // AbortSignal.timeout fires a DOMException named 'TimeoutError'.
+      if (err instanceof Error && err.name === 'TimeoutError') {
+        console.error(
+          `[parliament:llm] ✗ ${tag} TIMED OUT after ${elapsed}ms (limit ${timeoutMs}ms)`,
+        );
+        throw new ModelConnectionError(
+          `${this.provider} call to ${this.model} timed out after ${timeoutMs}ms`,
+          err,
+        );
+      }
+      console.error(
+        `[parliament:llm] ✗ ${tag} connection failed after ${elapsed}ms: ${String(err)}`,
+      );
       throw new ModelConnectionError(
         `OpenAI-compat connection failed: ${String(err)}`,
         err,
@@ -116,6 +155,7 @@ export class OpenAICompatAdapter implements ModelAdapter {
 
     const data = (await response.json()) as OpenAIChatResponse;
     const latencyMs = Date.now() - startedAt;
+    console.error(`[parliament:llm] ✓ ${tag} ok in ${latencyMs}ms`);
 
     const meta: AdapterMeta = {
       latencyMs,
