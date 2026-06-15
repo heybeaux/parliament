@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aop.dev/schema/v0.1/agent-observation-event",
+  "$comment": "VENDORED COPY. Source of truth: heybeaux/sonder aop/schema/v0.1/agent-observation-event.schema.json. Kept in sync manually; Parliament vendors it so the reasoning-projection conformance test can validate without a cross-repo dependency. Do not edit here — update in sonder and re-copy.",
+  "title": "Agent Observation Event",
+  "description": "Language-neutral envelope for agent COGNITIVE observability — what an agent knew, was authorized to do, predicted, intended, and concluded. The cognitive sibling of an OpenTelemetry span; AOP standardizes the fields the OTel GenAI SIG defers to the application layer. Derived from Sonder's SonderEventCore (packages/core/src/types/event.ts); chain/signature fields are Sonder-implementation concerns and are intentionally NOT part of this spec.",
+  "type": "object",
+  "required": ["aop_version", "id", "agent_id", "task_id", "timestamp"],
+  "additionalProperties": true,
+  "properties": {
+    "aop_version": {
+      "const": "0.1",
+      "description": "Spec version of this envelope. Non-negotiable for a standard; lets consumers branch on schema evolution independently of any implementation's internal version."
+    },
+    "id": { "type": "string", "description": "Globally unique event id. ULID recommended (lexically sortable)." },
+    "agent_id": { "type": "string" },
+    "task_id": { "type": "string" },
+    "parent_id": { "type": "string", "description": "Predecessor event id — forms the causal chain." },
+    "timestamp": { "type": "string", "format": "date-time", "description": "ISO 8601 UTC." },
+
+    "trace_context": {
+      "type": "object",
+      "description": "OpenTelemetry interop. Links this cognitive event to the execution-layer span that ran. Makes AOP complementary to OTel, not a competitor.",
+      "properties": {
+        "trace_id": { "type": "string" },
+        "span_id": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "capabilities": { "$ref": "#/$defs/capabilities" },
+    "memory": { "$ref": "#/$defs/memory" },
+    "reasoning": { "$ref": "#/$defs/reasoning" },
+    "governance": { "$ref": "#/$defs/governance" },
+    "prediction": { "$ref": "#/$defs/prediction" },
+    "intent": { "$ref": "#/$defs/intent" },
+
+    "outcome": { "$ref": "#/$defs/outcome" },
+    "resources": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Resources/paths this action touched (files, tables, URLs). Source for rollback/overlap detection."
+    },
+    "paths": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Filesystem paths touched. Narrower alias of resources for the file-write case."
+    },
+
+    "payload": { "description": "Opaque action payload. Not interpreted by the spec." },
+    "metadata": { "type": "object", "description": "Free-form. Implementations attach impl-specific blocks here (e.g. redaction evidence, chain/signature)." }
+  },
+
+  "$defs": {
+    "lod_level": { "enum": ["index", "summary", "standard", "deep"] },
+
+    "capabilities": {
+      "type": "object",
+      "description": "CAN DO — what capabilities were mounted, at what resolution, within what budget.",
+      "required": ["mounted", "resolution", "budget_used", "budget_limit"],
+      "properties": {
+        "mounted": { "type": "array", "items": { "type": "string" } },
+        "resolution": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/lod_level" }
+        },
+        "budget_used": { "type": "number" },
+        "budget_limit": { "type": "number" }
+      }
+    },
+
+    "memory": {
+      "type": "object",
+      "description": "KNOWS — what memory was consulted, and with what confidence.",
+      "required": ["refs", "confidence"],
+      "properties": {
+        "refs": { "type": "array", "items": { "type": "string" } },
+        "query": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "dream_cycle": { "type": "string" }
+      }
+    },
+
+    "reasoning": {
+      "type": "object",
+      "description": "THINKS — what deliberation concluded, and whether there was dissent.",
+      "required": ["model", "neurotypes", "consensus", "dissent", "osi", "rounds"],
+      "properties": {
+        "model": { "type": "string" },
+        "neurotypes": { "type": "array", "items": { "type": "string" } },
+        "consensus": { "type": "boolean" },
+        "dissent": { "type": "array", "items": { "type": "string" } },
+        "osi": { "type": "number" },
+        "rounds": { "type": "integer", "minimum": 0 }
+      }
+    },
+
+    "governance": {
+      "type": "object",
+      "description": "DID — was the handoff valid against the state contract, and what policy evidence supports that.",
+      "required": ["contract_id", "validated", "l1_pass", "l2_pass", "l3_pass", "violations", "circuit_state"],
+      "properties": {
+        "contract_id": { "type": "string" },
+        "validated": { "type": "boolean" },
+        "l1_pass": { "type": "boolean" },
+        "l2_pass": { "type": "boolean" },
+        "l3_pass": { "type": "boolean" },
+        "violations": { "type": "array", "items": { "type": "string" } },
+        "circuit_state": { "enum": ["closed", "open", "half-open"] },
+        "tier": { "type": "string", "description": "'+'-joined list of policy tiers that produced evidence, e.g. 'L0+L1'. Absent for non-policy emitters." },
+        "evidence": {
+          "type": "array",
+          "description": "Per-rule policy evidence. Required when tier references L1/L2/L3 (sign-refusal); optional otherwise.",
+          "items": { "$ref": "#/$defs/policy_evidence_row" }
+        },
+        "approval_gate": { "$ref": "#/$defs/approval_gate" }
+      }
+    },
+
+    "policy_evidence_row": {
+      "type": "object",
+      "required": ["rule_id", "rule_kind", "outcome"],
+      "properties": {
+        "rule_id": { "type": "string" },
+        "rule_kind": { "type": "string" },
+        "path": { "type": "string" },
+        "outcome": { "enum": ["pass", "deny", "mask"] },
+        "matched": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    },
+
+    "approval_gate": {
+      "type": "object",
+      "description": "Pre-emit human/supervisor approval gate. When state is 'pending', a conformant producer SHOULD abort before persistence and resolve out-of-band.",
+      "required": ["state", "gate_id", "default_action"],
+      "properties": {
+        "state": { "enum": ["pending", "allowed", "denied"] },
+        "gate_id": { "type": "string" },
+        "reason": { "type": "string" },
+        "default_action": { "enum": ["deny", "allow"] },
+        "expires_at": { "type": "string", "format": "date-time" }
+      }
+    },
+
+    "prediction": {
+      "type": "object",
+      "description": "THINKS WILL HAPPEN — predicted outcome with Bayesian (Beta) confidence.",
+      "required": ["outcome", "confidence", "alpha", "beta", "model_id"],
+      "properties": {
+        "outcome": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "alpha": { "type": "number" },
+        "beta": { "type": "number" },
+        "model_id": { "type": "string" }
+      }
+    },
+
+    "intent": {
+      "type": "object",
+      "description": "WILL DO — the planned action and its StepTrace.",
+      "required": ["action", "step_trace_id", "skipped", "constraint_injected"],
+      "properties": {
+        "action": { "type": "string" },
+        "step_trace_id": { "type": "string" },
+        "skipped": { "type": "boolean" },
+        "skip_reason": { "type": "string" },
+        "constraint_injected": { "type": "boolean" }
+      }
+    },
+
+    "outcome": {
+      "type": "object",
+      "description": "Structured post-execution outcome, written back after a gated action runs. Absent on pre-execution decision events.",
+      "required": ["isError"],
+      "properties": {
+        "exit_code": { "type": "integer", "description": "Process/tool exit code. 0 = clean." },
+        "isError": { "type": "boolean" },
+        "error": { "type": "string" }
+      }
+    }
+  }
+}

@@ -21,5 +21,9 @@
     "@heybeaux/lattice-adapter-parliament": "0.2.1",
     "@heybeaux/lattice-core": "0.1.0",
     "smol-toml": "^1.6.1"
+  },
+  "devDependencies": {
+    "ajv": "^8.17.0",
+    "ajv-formats": "^3.0.1"
   }
 }
