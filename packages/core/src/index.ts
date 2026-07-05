@@ -168,6 +168,23 @@ export {
 } from './criterion.js';
 
 export type {
+  Claim,
+  FactCheckResult,
+  FactStore,
+  FactCheckedCitation,
+  FactCheckedPosition,
+  FactCheckedPositionAudit,
+  FactCheckedTally,
+  FactCheckedBlockedReason,
+  FactCheckAuditOptions,
+} from './factcheck.js';
+export {
+  TableFactStore,
+  auditPositionWithFactCheck,
+  tallyWithFactCheck,
+} from './factcheck.js';
+
+export type {
   MemoryLayer,
   MemoryFragment,
   MemoryOutcome,

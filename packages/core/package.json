@@ -12,6 +12,10 @@
     "./criterion": {
       "import": "./dist/criterion.js",
       "types": "./dist/criterion.d.ts"
+    },
+    "./factcheck": {
+      "import": "./dist/factcheck.js",
+      "types": "./dist/factcheck.d.ts"
     }
   },
   "scripts": {
