@@ -8,6 +8,10 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./criterion": {
+      "import": "./dist/criterion.js",
+      "types": "./dist/criterion.d.ts"
     }
   },
   "scripts": {
