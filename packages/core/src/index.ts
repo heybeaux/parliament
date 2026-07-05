@@ -153,6 +153,21 @@ export {
 } from './osi.js';
 
 export type {
+  DecisionCriterion,
+  EvidenceCitation,
+  AuditedPosition,
+  PositionAudit,
+  AuditedTally,
+  BlockedReason,
+} from './criterion.js';
+export {
+  criterionId,
+  makeCriterion,
+  auditPosition,
+  tallyWithAudit,
+} from './criterion.js';
+
+export type {
   MemoryLayer,
   MemoryFragment,
   MemoryOutcome,
