@@ -74,6 +74,13 @@ importers:
       smol-toml:
         specifier: ^1.6.1
         version: 1.6.1
+    devDependencies:
+      ajv:
+        specifier: ^8.17.0
+        version: 8.20.0
+      ajv-formats:
+        specifier: ^3.0.1
+        version: 3.0.1(ajv@8.20.0)
 
   packages/server:
     dependencies:

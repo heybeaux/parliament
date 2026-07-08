@@ -153,6 +153,38 @@ export {
 } from './osi.js';
 
 export type {
+  DecisionCriterion,
+  EvidenceCitation,
+  AuditedPosition,
+  PositionAudit,
+  AuditedTally,
+  BlockedReason,
+} from './criterion.js';
+export {
+  criterionId,
+  makeCriterion,
+  auditPosition,
+  tallyWithAudit,
+} from './criterion.js';
+
+export type {
+  Claim,
+  FactCheckResult,
+  FactStore,
+  FactCheckedCitation,
+  FactCheckedPosition,
+  FactCheckedPositionAudit,
+  FactCheckedTally,
+  FactCheckedBlockedReason,
+  FactCheckAuditOptions,
+} from './factcheck.js';
+export {
+  TableFactStore,
+  auditPositionWithFactCheck,
+  tallyWithFactCheck,
+} from './factcheck.js';
+
+export type {
   MemoryLayer,
   MemoryFragment,
   MemoryOutcome,
@@ -235,3 +267,15 @@ export {
   resolveRankWeights,
   runBrainstorm,
 } from './brainstorm/index.js';
+
+export {
+  AOP_VERSION,
+  deriveReasoning,
+  toAopReasoningObservation,
+} from './aop/index.js';
+export type {
+  AopReasoning,
+  AopReasoningObservation,
+  AopTraceContext,
+  ToAopReasoningOptions,
+} from './aop/index.js';

@@ -34,10 +34,8 @@ export const CLOSED_MODELS = {
 export const OPEN_MODELS = {
   qwen: 'qwen/qwen-turbo',
   deepseek: 'deepseek/deepseek-v4-flash',
-  mistral: 'mistralai/mistral-nemo',
-  // nemotron-nano-9b-v2 was delisted from OpenRouter (paid endpoint 404s);
-  // nemotron-3-nano-30b-a3b is its live successor.
-  nemotron: 'nvidia/nemotron-3-nano-30b-a3b',
+  mistral: 'mistralai/mistral-large-2512',
+  nemotron: 'nvidia/nemotron-3-super-120b-a12b',
 } as const;
 
 // Synthesizer routing — Opus 4.6 for tighter cooperative/adversarial runs;
@@ -46,7 +44,7 @@ export const OPEN_MODELS = {
 export const SYNTH_DEFAULTS: Record<IdeateMode, string> = {
   cooperative: CLOSED_MODELS.opus,
   adversarial: CLOSED_MODELS.opus,
-  full: 'google/gemini-2.5-pro',
+  full: 'google/gemini-pro-latest',
 };
 
 /**

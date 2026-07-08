@@ -23,12 +23,6 @@ export default [
     },
   },
   {
-    ignores: [
-      "**/dist/**",
-      "**/node_modules/**",
-      "**/*.js",
-      "src-tauri/target/**",
-      "src-tauri/gen/**",
-    ],
+    ignores: ["**/dist/**", "**/node_modules/**", "**/*.js", "src-tauri/**", "**/target/**"],
   },
 ];
