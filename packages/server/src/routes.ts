@@ -30,6 +30,7 @@ import type {
   Agent,
   AgentRuntimeOptions,
   DeliberationResult,
+  ParliamentTomlConfig,
   DeliberationSource,
   DeliberationStatus,
   ModelAdapter,
@@ -66,7 +67,13 @@ import { registerBrainstormRoutes } from './routes/brainstorm.js';
 import { inflightBroker, type InflightEvent } from './inflight.js';
 import { loadServerConfig, type ServerConfig } from './config.js';
 import { corsMiddleware } from './middleware/cors.js';
-import { loadSettings, saveSettings } from './settings.js';
+import {
+  MODEL_OVERRIDE_ROLES,
+  loadSettings,
+  saveModelOverrides,
+  saveSettings,
+  type ModelOverrideRole,
+} from './settings.js';
 import { bearerAuth, AUTH_CTX_ACCOUNT_ID } from './middleware/auth.js';
 import { idempotency } from './middleware/idempotency.js';
 import { rateLimit } from './middleware/rateLimit.js';
@@ -309,6 +316,87 @@ function resolveActiveTopology(
 }
 
 /**
+ * Overlay the user's persisted per-role model overrides (from
+ * `~/.parliament/settings.json`, saved via the desktop Settings panel) onto a
+ * freshly loaded TOML config. Returns a shallow clone — the input config is
+ * never mutated — with the `model` field of each overridden
+ * `[neurotypes.<role>]` entry replaced.
+ *
+ * Because every agent-construction path (`buildStructuralAgents`,
+ * `buildTopologyDeliberationConfig`'s resolver, the /health probe) calls
+ * `loadConfig()` per request and pipes it through here, a newly saved
+ * override takes effect on the NEXT deliberation without a server restart.
+ */
+function applyModelOverrides(config: ParliamentTomlConfig): ParliamentTomlConfig {
+  const overrides = loadSettings().model_overrides;
+  if (!overrides || Object.keys(overrides).length === 0) return config;
+
+  const neurotypes = { ...config.neurotypes };
+  for (const role of MODEL_OVERRIDE_ROLES) {
+    const model = overrides[role];
+    const entry = neurotypes[role];
+    if (model === undefined || entry === undefined) continue;
+    neurotypes[role] = { ...entry, model };
+  }
+  return { ...config, neurotypes };
+}
+
+/**
+ * Per-role model status the settings UI renders: the shipped TOML default,
+ * the model a deliberation would actually use right now (`effective`), and
+ * whether a user override is what makes them differ. `default`/`effective`
+ * are null when the config itself fails to load — the UI treats that as
+ * "unknown" rather than crashing the whole settings panel.
+ */
+export interface RoleModelStatus {
+  default: string | null;
+  effective: string | null;
+  override_active: boolean;
+}
+
+function buildRoleModelStatus(): Record<ModelOverrideRole, RoleModelStatus> {
+  const overrides = loadSettings().model_overrides ?? {};
+  let config: ParliamentTomlConfig | null = null;
+  try {
+    config = loadConfig();
+  } catch {
+    config = null;
+  }
+  const out = {} as Record<ModelOverrideRole, RoleModelStatus>;
+  for (const role of MODEL_OVERRIDE_ROLES) {
+    const configDefault = config?.neurotypes[role]?.model ?? null;
+    const override = overrides[role];
+    out[role] = {
+      default: configDefault,
+      effective: override ?? configDefault,
+      override_active: override !== undefined,
+    };
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// GET /models — in-memory cache for the proxied OpenRouter catalog. Module
+// scope (not per-router) so repeated router constructions in one process
+// share it; ~1h TTL keeps the picker snappy without going stale for days.
+// ---------------------------------------------------------------------------
+
+interface ModelCatalogEntry {
+  id: string;
+  name: string;
+}
+
+const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
+const MODELS_CATALOG_TTL_MS = 60 * 60 * 1000;
+
+let modelsCatalogCache: { at: number; models: ModelCatalogEntry[] } | null = null;
+
+/** Test hook — resets the in-memory catalog cache between cases. */
+export function clearModelsCatalogCache(): void {
+  modelsCatalogCache = null;
+}
+
+/**
  * Construct the structural-infrastructure trio (Synthesizer / RedAgent /
  * Sentry) the topology runtime needs as separate inputs. These are NOT part
  * of any preset's `steps` — they run unconditionally across every preset.
@@ -332,7 +420,7 @@ function buildStructuralAgents(
   redAgent: RedAgent;
   sentry: SentryAgent;
 } {
-  const config = loadConfig();
+  const config = applyModelOverrides(loadConfig());
   const defaults = config.parliament ?? DEFAULT_PARLIAMENT_DEFAULTS;
 
   const adapterFor = (role: 'synthesizer' | 'redAgent' | 'sentry') => {
@@ -391,7 +479,7 @@ function buildTopologyDeliberationConfig(
     memoryAgentIdOverride?: string;
   },
 ): TopologyDeliberationConfig {
-  const config = loadConfig();
+  const config = applyModelOverrides(loadConfig());
   const defaults = config.parliament ?? DEFAULT_PARLIAMENT_DEFAULTS;
 
   const decorate = overrides.adapterDecorator ?? ((a: ModelAdapter) => a);
@@ -932,6 +1020,8 @@ export function createRouter(
   // GET /settings — non-secret status the UI needs to render the settings
   // panel. Never returns the key itself; only whether one is configured and
   // (if so) a masked suffix so the user can confirm which key is saved.
+  // Also carries the per-role model picture (config default / effective /
+  // override-active) so the Models section renders from a single fetch.
   // -------------------------------------------------------------------------
   app.get('/settings', (c) => {
     const key = process.env['OPENROUTER_API_KEY'] ?? loadSettings().openrouter_api_key;
@@ -941,7 +1031,97 @@ export function createRouter(
       openrouter_key_configured: configured,
       openrouter_key_hint: configured ? `…${(key as string).slice(-4)}` : null,
       key_source: process.env['OPENROUTER_API_KEY'] ? 'env' : configured ? 'file' : null,
+      models: buildRoleModelStatus(),
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // PUT /settings/models — persist per-role model overrides to
+  // ~/.parliament/settings.json. Body: `{ model_overrides: { <role>: string
+  // | null } }`; a non-empty string sets the override, null / empty string
+  // clears it back to the TOML default, an absent role is left untouched.
+  // Overrides take effect on the next deliberation (agents are constructed
+  // per request) — no restart needed.
+  // -------------------------------------------------------------------------
+  const overrideValue = z.string().nullable().optional();
+  const ModelOverridesBodySchema = z.object({
+    model_overrides: z.object({
+      proposer: overrideValue,
+      skeptic: overrideValue,
+      synthesizer: overrideValue,
+      redAgent: overrideValue,
+      sentry: overrideValue,
+    }),
+  });
+  app.put('/settings/models', async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'invalid_json' }, 400);
+    }
+    const parsed = ModelOverridesBodySchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json(
+        {
+          error: 'invalid_body',
+          detail:
+            'model_overrides must map roles (proposer/skeptic/synthesizer/redAgent/sentry) to a model id string or null',
+        },
+        400,
+      );
+    }
+    saveModelOverrides(parsed.data.model_overrides);
+    return c.json({ ok: true, models: buildRoleModelStatus() });
+  });
+
+  // -------------------------------------------------------------------------
+  // GET /models — server-side proxy for OpenRouter's public model catalog.
+  // The desktop webview (origin tauri://localhost) cannot call openrouter.ai
+  // directly (CORS), so the sidecar fetches the list, trims it to `id` +
+  // `name`, and caches it in memory for an hour. No API key needed for the
+  // public list. On upstream failure a stale cache is served when present;
+  // otherwise 502 so the UI can fall back to a free-text input.
+  // -------------------------------------------------------------------------
+  app.get('/models', async (c) => {
+    const now = Date.now();
+    if (modelsCatalogCache && now - modelsCatalogCache.at < MODELS_CATALOG_TTL_MS) {
+      return c.json({ models: modelsCatalogCache.models, cached: true });
+    }
+    try {
+      const res = await fetch(OPENROUTER_MODELS_URL, {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) throw new Error(`upstream responded ${res.status}`);
+      const data = (await res.json()) as { data?: Array<Record<string, unknown>> };
+      const models = (data.data ?? [])
+        .filter((m): m is Record<string, unknown> & { id: string } =>
+          typeof m['id'] === 'string' && m['id'].length > 0,
+        )
+        .map((m) => ({
+          id: m['id'] as string,
+          name:
+            typeof m['name'] === 'string' && m['name'].length > 0
+              ? m['name']
+              : (m['id'] as string),
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+      modelsCatalogCache = { at: now, models };
+      return c.json({ models, cached: false });
+    } catch (err) {
+      if (modelsCatalogCache) {
+        // Serve stale rather than breaking the picker on a transient outage.
+        return c.json({ models: modelsCatalogCache.models, cached: true });
+      }
+      return c.json(
+        {
+          error: 'models_fetch_failed',
+          detail: err instanceof Error ? err.message : String(err),
+        },
+        502,
+      );
+    }
   });
 
   // -------------------------------------------------------------------------
@@ -982,7 +1162,9 @@ export function createRouter(
   // GET /health
   // -------------------------------------------------------------------------
   app.get('/health', async (c) => {
-    const config = loadConfig();
+    // Overlay user model overrides so the health bar probes the models a
+    // deliberation would actually run, not the shipped TOML defaults.
+    const config = applyModelOverrides(loadConfig());
     const roles = ['proposer', 'skeptic', 'synthesizer', 'redAgent', 'sentry'] as const;
 
     const modelStatuses: Record<string, 'connected' | 'unreachable'> = {};
