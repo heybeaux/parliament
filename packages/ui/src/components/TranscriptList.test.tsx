@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { TranscriptList } from './TranscriptList';
 
 /**
@@ -13,7 +14,10 @@ import { TranscriptList } from './TranscriptList';
  * neutral em-dash badge instead of crashing or logging a missing-prop
  * warning.
  */
-function stubFetchSequence(deliberations: unknown[]): ReturnType<typeof vi.fn> {
+function stubFetchSequence(
+  deliberations: unknown[],
+  transcripts: unknown[] = [],
+): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn(async (input: unknown) => {
     const url = typeof input === 'string' ? input : (input as { url: string }).url;
     if (url.endsWith('/deliberations')) {
@@ -23,7 +27,7 @@ function stubFetchSequence(deliberations: unknown[]): ReturnType<typeof vi.fn> {
       });
     }
     if (url.endsWith('/transcripts')) {
-      return new Response(JSON.stringify({ transcripts: [] }), {
+      return new Response(JSON.stringify({ transcripts }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       });
@@ -32,6 +36,27 @@ function stubFetchSequence(deliberations: unknown[]): ReturnType<typeof vi.fn> {
   });
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
+}
+
+/** Newest-first summaries the way the server returns them. */
+function makeDeliberations(count: number): unknown[] {
+  return Array.from({ length: count }, (_, i) => ({
+    id: `d-${i}`,
+    topic: `Deliberation topic ${i}`,
+    created_at: new Date(Date.now() - i * 60_000).toISOString(),
+    resolved: 1,
+    total_rounds: 2,
+    termination_reason: 'consensus',
+    preset: 'debate',
+  }));
+}
+
+function makeTranscripts(count: number): unknown[] {
+  return Array.from({ length: count }, (_, i) => ({
+    file: `transcript-${i}.json`,
+    topic: `Transcript topic ${i}`,
+    created_at: new Date(Date.now() - i * 60_000).toISOString(),
+  }));
 }
 
 describe('TranscriptList — preset badges', () => {
@@ -155,5 +180,132 @@ describe('TranscriptList — preset badges', () => {
     expect(errorSpy).not.toHaveBeenCalled();
 
     errorSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pagination — a 230-item history must not render all at once. The newest 15
+// show per tab, "Show more" reveals 15 more, and a "Showing X of Y" hint
+// keeps the total visible. The visible count resets on tab switch and on
+// refreshKey change.
+// ---------------------------------------------------------------------------
+
+describe('TranscriptList — pagination', () => {
+  beforeEach(() => {
+    vi.useRealTimers();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('shows only the newest 15 of 40 with a "Showing 15 of 40" hint', async () => {
+    stubFetchSequence(makeDeliberations(40));
+    render(
+      <TranscriptList refreshKey={0} onLoadDeliberation={() => {}} onLoadTranscript={() => {}} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('preset-badge')).toHaveLength(15);
+    });
+    // Newest first: item 0 visible, item 15 not.
+    expect(screen.getByText('Deliberation topic 0')).toBeInTheDocument();
+    expect(screen.queryByText('Deliberation topic 15')).not.toBeInTheDocument();
+    expect(screen.getByText('Showing 15 of 40')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show more' })).toBeInTheDocument();
+  });
+
+  it('reveals 15 more per "Show more" click and hides the button at the end', async () => {
+    const user = userEvent.setup();
+    stubFetchSequence(makeDeliberations(40));
+    render(
+      <TranscriptList refreshKey={0} onLoadDeliberation={() => {}} onLoadTranscript={() => {}} />,
+    );
+    await waitFor(() => {
+      expect(screen.getAllByTestId('preset-badge')).toHaveLength(15);
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Show more' }));
+    await waitFor(() => {
+      expect(screen.getAllByTestId('preset-badge')).toHaveLength(30);
+    });
+    expect(screen.getByText('Showing 30 of 40')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Show more' }));
+    await waitFor(() => {
+      expect(screen.getAllByTestId('preset-badge')).toHaveLength(40);
+    });
+    expect(screen.getByText('Showing 40 of 40')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show more' })).not.toBeInTheDocument();
+  });
+
+  it('does not paginate short lists (no hint, no button)', async () => {
+    stubFetchSequence(makeDeliberations(3));
+    render(
+      <TranscriptList refreshKey={0} onLoadDeliberation={() => {}} onLoadTranscript={() => {}} />,
+    );
+    await waitFor(() => {
+      expect(screen.getAllByTestId('preset-badge')).toHaveLength(3);
+    });
+    expect(screen.queryByText(/Showing \d+ of \d+/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show more' })).not.toBeInTheDocument();
+  });
+
+  it('paginates the Transcripts tab and resets the count on tab switch', async () => {
+    const user = userEvent.setup();
+    stubFetchSequence(makeDeliberations(40), makeTranscripts(20));
+    render(
+      <TranscriptList refreshKey={0} onLoadDeliberation={() => {}} onLoadTranscript={() => {}} />,
+    );
+    await waitFor(() => {
+      expect(screen.getAllByTestId('preset-badge')).toHaveLength(15);
+    });
+
+    // Expand the deliberations tab past one page…
+    await user.click(screen.getByRole('button', { name: 'Show more' }));
+    await waitFor(() => {
+      expect(screen.getAllByTestId('preset-badge')).toHaveLength(30);
+    });
+
+    // …switch to Transcripts: back to one page (of transcripts).
+    await user.click(screen.getByRole('button', { name: /Transcripts \(20\)/ }));
+    await waitFor(() => {
+      expect(screen.getByText('Showing 15 of 20')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Transcript topic 0')).toBeInTheDocument();
+    expect(screen.queryByText('Transcript topic 15')).not.toBeInTheDocument();
+
+    // Switching back to Stored resets its count to one page too.
+    await user.click(screen.getByRole('button', { name: /Stored \(40\)/ }));
+    await waitFor(() => {
+      expect(screen.getAllByTestId('preset-badge')).toHaveLength(15);
+    });
+    expect(screen.getByText('Showing 15 of 40')).toBeInTheDocument();
+  });
+
+  it('resets the visible count when refreshKey changes', async () => {
+    const user = userEvent.setup();
+    stubFetchSequence(makeDeliberations(40));
+    const { rerender } = render(
+      <TranscriptList refreshKey={0} onLoadDeliberation={() => {}} onLoadTranscript={() => {}} />,
+    );
+    await waitFor(() => {
+      expect(screen.getAllByTestId('preset-badge')).toHaveLength(15);
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Show more' }));
+    await waitFor(() => {
+      expect(screen.getAllByTestId('preset-badge')).toHaveLength(30);
+    });
+
+    rerender(
+      <TranscriptList refreshKey={1} onLoadDeliberation={() => {}} onLoadTranscript={() => {}} />,
+    );
+    await waitFor(() => {
+      expect(screen.getAllByTestId('preset-badge')).toHaveLength(15);
+    });
+    expect(screen.getByText('Showing 15 of 40')).toBeInTheDocument();
   });
 });

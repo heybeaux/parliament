@@ -10,6 +10,45 @@ interface Props {
   onLoadTranscript: (file: string) => void;
 }
 
+/** Items revealed per "Show more" click (and shown initially per tab). */
+const PAGE_SIZE = 15;
+
+/**
+ * Entry-animation stagger for a list item. Clamped to the item's position
+ * within its reveal batch (and hard-capped at 0.3s) so item #120 of a long
+ * history doesn't wait multiple seconds to fade in when a new page is shown.
+ */
+function staggerDelay(index: number): number {
+  return Math.min((index % PAGE_SIZE) * 0.03, 0.3);
+}
+
+interface ShowMoreProps {
+  shown: number;
+  total: number;
+  onShowMore: () => void;
+}
+
+/** "Showing X of Y" hint + reveal-next-batch button, shared by both tabs. */
+function ShowMore({ shown, total, onShowMore }: ShowMoreProps) {
+  if (total <= PAGE_SIZE) return null;
+  return (
+    <div className="mt-3 flex flex-col items-center gap-2">
+      <p className="text-2xs tabular-nums text-zinc-500">
+        Showing {Math.min(shown, total)} of {total}
+      </p>
+      {shown < total && (
+        <button
+          type="button"
+          onClick={onShowMore}
+          className="w-full rounded-lg bg-white/[0.03] px-3 py-1.5 text-2xs font-semibold text-zinc-400 ring-1 ring-white/[0.06] transition-colors hover:bg-white/[0.06] hover:text-zinc-200"
+        >
+          Show more
+        </button>
+      )}
+    </div>
+  );
+}
+
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60000);
@@ -26,6 +65,14 @@ export function TranscriptList({ refreshKey, onLoadDeliberation, onLoadTranscrip
   const [transcripts, setTranscripts] = useState<TranscriptFile[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'deliberations' | 'transcripts'>('deliberations');
+  // Client-side pagination: how many rows are revealed on the current tab.
+  // Reset to one page on tab switch and whenever the data refreshes so a
+  // 200+ item history never renders (or animates) all at once.
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [activeTab, refreshKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -45,6 +92,10 @@ export function TranscriptList({ refreshKey, onLoadDeliberation, onLoadTranscrip
   }, [refreshKey]);
 
   const totalCount = deliberations.length + transcripts.length;
+  // The server returns rows newest-first (ORDER BY created_at DESC), so the
+  // first page is always the newest PAGE_SIZE entries.
+  const visibleDeliberations = deliberations.slice(0, visibleCount);
+  const visibleTranscripts = transcripts.slice(0, visibleCount);
 
   return (
     <aside className="min-w-0 overflow-hidden">
@@ -112,12 +163,12 @@ export function TranscriptList({ refreshKey, onLoadDeliberation, onLoadTranscrip
               </div>
             ) : (
               <ul className="space-y-2">
-                {deliberations.map((d, i) => (
+                {visibleDeliberations.map((d, i) => (
                   <motion.li
                     key={d.id}
                     initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.03 }}
+                    transition={{ delay: staggerDelay(i) }}
                   >
                     <button
                       type="button"
@@ -156,6 +207,11 @@ export function TranscriptList({ refreshKey, onLoadDeliberation, onLoadTranscrip
                 ))}
               </ul>
             )}
+            <ShowMore
+              shown={visibleDeliberations.length}
+              total={deliberations.length}
+              onShowMore={() => setVisibleCount((n) => n + PAGE_SIZE)}
+            />
           </motion.div>
         )}
 
@@ -176,12 +232,12 @@ export function TranscriptList({ refreshKey, onLoadDeliberation, onLoadTranscrip
               </div>
             ) : (
               <ul className="space-y-2">
-                {transcripts.map((t, i) => (
+                {visibleTranscripts.map((t, i) => (
                   <motion.li
                     key={t.file}
                     initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.03 }}
+                    transition={{ delay: staggerDelay(i) }}
                   >
                     <button
                       type="button"
@@ -205,6 +261,11 @@ export function TranscriptList({ refreshKey, onLoadDeliberation, onLoadTranscrip
                 ))}
               </ul>
             )}
+            <ShowMore
+              shown={visibleTranscripts.length}
+              total={transcripts.length}
+              onShowMore={() => setVisibleCount((n) => n + PAGE_SIZE)}
+            />
           </motion.div>
         )}
       </AnimatePresence>
