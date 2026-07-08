@@ -230,14 +230,21 @@ PORT=19399 PARLIAMENT_SERVER_HOST=127.0.0.1 \
   PARLIAMENT_PROVIDER=openrouter \
   "$BUNDLED_NODE" "$SERVER_ENTRY" &
 SMOKE_PID=$!
-sleep 2
 
+# Server boot time varies (native module load, schema validation); retry for
+# up to 30s instead of a fixed sleep to avoid flaky failures.
 SMOKE_OK=0
-if curl -sf http://127.0.0.1:19399/health > /dev/null 2>&1; then
+for _ in $(seq 1 30); do
+  if curl -sf http://127.0.0.1:19399/health > /dev/null 2>&1; then
+    SMOKE_OK=1
+    break
+  fi
+  sleep 1
+done
+if [[ "$SMOKE_OK" == "1" ]]; then
   echo "  ✓ Server responded on http://127.0.0.1:19399/health"
-  SMOKE_OK=1
 else
-  echo "  ✗ Server did not respond — check output above" >&2
+  echo "  ✗ Server did not respond within 30s — check output above" >&2
 fi
 
 kill "$SMOKE_PID" 2>/dev/null || true
