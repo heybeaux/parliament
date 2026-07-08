@@ -6,6 +6,18 @@ import { initDb } from './db.js';
 import { ADMIN_KEY_ENV_VAR, createRouter } from './routes.js';
 import { loadServerConfig, isPubliclyBound, DEFAULT_DB_PATH } from './config.js';
 import { apiKeyCount } from './api-keys.js';
+import { applySettingsToEnv } from './settings.js';
+
+// Apply persisted user settings (e.g. the OpenRouter key saved via the desktop
+// settings panel) into process.env BEFORE any adapter is constructed, so the
+// core provider factory picks them up. Explicit env vars always win.
+const openRouterReady = applySettingsToEnv();
+if (!openRouterReady && (process.env['PARLIAMENT_PROVIDER'] ?? '') === 'openrouter') {
+  console.warn(
+    'Parliament: provider is "openrouter" but no OPENROUTER_API_KEY is set ' +
+      '(env or ~/.parliament/settings.json). Open the app settings and paste your key.',
+  );
+}
 
 function resolvePort(): number {
   if (process.env['PORT']) return parseInt(process.env['PORT'], 10);

@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react';
 import { getHealth, type HealthResponse } from '../lib/api';
 import { roleStyle } from '../lib/roles';
 
-export function HealthBar() {
+export function HealthBar({ refreshKey = 0 }: { refreshKey?: number }) {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    setHealth(null);
+    setError(null);
     getHealth()
       .then((h) => {
         if (!cancelled) setHealth(h);
@@ -18,7 +20,7 @@ export function HealthBar() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [refreshKey]);
 
   if (error) {
     return (

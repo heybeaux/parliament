@@ -308,7 +308,7 @@ export function useDeliberationStream({
       }
 
       try {
-        es = new ctor(`/api/deliberate/${encodeURIComponent(id)}/stream`);
+        es = new ctor(`${import.meta.env.VITE_PARLIAMENT_API ?? ''}/api/deliberate/${encodeURIComponent(id)}/stream`);
       } catch {
         startPolling();
         return;

@@ -24,3 +24,20 @@ node_modules/
 *.tsbuildinfo
 .history
 .DS_Store
+# Tauri / Rust build artifacts
+src-tauri/target/
+src-tauri/gen/
+
+# Agent workspace contamination (do not commit)
+.openclaw/
+agentdb.rvf
+agentdb.rvf.lock
+SOUL.md
+IDENTITY.md
+USER.md
+HEARTBEAT.md
+TOOLS.md
+
+# Tauri sidecar bundles (generated at build time by scripts/bundle-sidecar.sh)
+src-tauri/binaries/
+src-tauri/resources/server/

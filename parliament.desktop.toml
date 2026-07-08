@@ -1,12 +1,15 @@
-# Parliament — OpenRouter multi-family smoke test config.
+# Parliament — DESKTOP DEFAULT config (bundled into the .dmg).
 #
-# Routes each canonical role to a different model family via OpenRouter
-# to exercise the cross-provider deliberation path end-to-end. All cheap,
-# all fast — a 5-round Debate run should clear well under $0.05.
+# This is the config the desktop app ships with. Every role runs on
+# OpenRouter so a non-technical user only needs to paste ONE OpenRouter API
+# key (via the in-app Settings panel) to get a fully working install — no
+# local models, no env editing, no TOML editing.
 #
-# Run with:
-#   parliament deliberate "<topic>" --config parliament.openrouter.toml
-# (Requires OPENROUTER_API_KEY in env or .env)
+# The key itself is NOT stored here. It lives in ~/.parliament/settings.json
+# (written by the Settings panel) or the OPENROUTER_API_KEY env var.
+#
+# Models below are cheap, fast, multi-family — a 3-round Debate clears well
+# under $0.05.
 
 [parliament]
 max_rounds = 3
@@ -14,7 +17,7 @@ confidence_threshold = 0.7
 red_agent_interval = 2
 osi_enabled = true
 osi_threshold = 0.85
-server_port = 3030
+server_port = 3000
 
 [neurotypes.proposer]
 # Alibaba Qwen — structured reasoning
@@ -30,7 +33,8 @@ system_prompt = "You are a rigorous critic. Identify logical leaps, unsupported 
 
 [neurotypes.synthesizer]
 # Google Gemini Flash Lite — reconciliation, cheap + reliable JSON output.
-# (Replaced nvidia/nemotron-nano-9b-v2, delisted from OpenRouter.)
+# (Replaced nvidia/nemotron-nano-9b-v2, delisted from OpenRouter — 404 "No
+# endpoints found" made the synthesizer unreachable in shipped builds.)
 model = "google/gemini-2.5-flash-lite"
 provider = "openrouter"
 system_prompt = """You are a synthesizer. Attempt to reconcile conflicting positions into a more robust unified view, acknowledging what remains unresolved.

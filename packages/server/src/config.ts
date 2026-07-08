@@ -40,7 +40,15 @@ export const DEFAULT_DB_PATH = join(homedir(), '.parliament', 'parliament.db');
 
 export const DEFAULT_SERVER_CONFIG: ServerConfig = {
   host: '127.0.0.1',
-  cors_origins: ['http://localhost:*', 'http://127.0.0.1:*'],
+  // tauri://localhost (macOS/Linux) and https://tauri.localhost (Windows) are
+  // the origins of the packaged desktop webview; without them every fetch from
+  // the app is CORS-blocked and the UI reports "offline".
+  cors_origins: [
+    'http://localhost:*',
+    'http://127.0.0.1:*',
+    'tauri://localhost',
+    'https://tauri.localhost',
+  ],
   rate_limit_concurrent: 1,
   rate_limit_per_hour: 10,
   db_path: DEFAULT_DB_PATH,

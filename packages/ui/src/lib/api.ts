@@ -7,7 +7,7 @@ import type {
   TranscriptFile,
 } from './types';
 
-const BASE = '/api';
+const BASE = (import.meta.env.VITE_PARLIAMENT_API ?? '') + '/api';
 
 async function jsonOrThrow<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -137,4 +137,78 @@ export interface HealthResponse {
 export async function getHealth(): Promise<HealthResponse> {
   const res = await fetch(`${BASE}/health`);
   return jsonOrThrow<HealthResponse>(res);
+}
+
+/** The five roles whose models can be overridden from Settings. */
+export type ModelRole = 'proposer' | 'skeptic' | 'synthesizer' | 'redAgent' | 'sentry';
+
+export const MODEL_ROLES: ModelRole[] = [
+  'proposer',
+  'skeptic',
+  'synthesizer',
+  'redAgent',
+  'sentry',
+];
+
+/** Per-role model status: TOML default, effective model, override flag. */
+export interface RoleModelStatus {
+  default: string | null;
+  effective: string | null;
+  override_active: boolean;
+}
+
+export interface SettingsStatus {
+  provider: string;
+  openrouter_key_configured: boolean;
+  openrouter_key_hint: string | null;
+  key_source: 'env' | 'file' | null;
+  /** Absent on pre-model-picker servers — treat as "section unavailable". */
+  models?: Record<ModelRole, RoleModelStatus>;
+}
+
+export async function getSettings(): Promise<SettingsStatus> {
+  const res = await fetch(`${BASE}/settings`);
+  return jsonOrThrow<SettingsStatus>(res);
+}
+
+export async function saveOpenRouterKey(key: string): Promise<SettingsStatus> {
+  const res = await fetch(`${BASE}/settings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ openrouter_api_key: key }),
+  });
+  return jsonOrThrow<SettingsStatus>(res);
+}
+
+export interface ModelCatalogEntry {
+  id: string;
+  name: string;
+}
+
+/**
+ * Server-side proxy of OpenRouter's public model catalog. The webview must
+ * not call openrouter.ai directly (its origin is tauri://localhost and the
+ * catalog endpoint won't grant it CORS), so the sidecar fetches and caches it.
+ */
+export async function getModelCatalog(): Promise<ModelCatalogEntry[]> {
+  const res = await fetch(`${BASE}/models`);
+  const body = await jsonOrThrow<{ models: ModelCatalogEntry[] }>(res);
+  return body.models;
+}
+
+/**
+ * Persist per-role model overrides. A string sets the override, `null`
+ * clears it back to the config default, an absent role is left untouched.
+ * Returns the updated per-role status map.
+ */
+export async function saveModelOverrides(
+  overrides: Partial<Record<ModelRole, string | null>>,
+): Promise<Record<ModelRole, RoleModelStatus>> {
+  const res = await fetch(`${BASE}/settings/models`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model_overrides: overrides }),
+  });
+  const body = await jsonOrThrow<{ ok: boolean; models: Record<ModelRole, RoleModelStatus> }>(res);
+  return body.models;
 }
