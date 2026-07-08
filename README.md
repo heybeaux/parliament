@@ -1,35 +1,105 @@
 # Parliament
 
-Parliament is a multi-agent deliberation system. A configurable cast of AI agents — chosen from thirteen built-in **neurotypes** (Proposer, Skeptic, Empiricist, Steelmanner, Devil's Advocate, Translator, Lateralist, Historian, Forecaster, Pragmatist, plus the Synthesizer / RedAgent / Sentry infrastructure roles) — debate a topic on a shared blackboard until they either reach consensus, surface an irreconcilable split, or hit a configured round limit. The shape of each debate is set by a **topology preset** (seven built in, plus user-defined). The engine tracks Opinion Shift Index (OSI) per agent to detect echo loops, weights unresolved conflicts to compute a residue score, and persists every transcript via a REST API.
+[![CI](https://github.com/heybeaux/parliament/actions/workflows/ci.yml/badge.svg)](https://github.com/heybeaux/parliament/actions/workflows/ci.yml)
+[![Desktop release](https://img.shields.io/badge/desktop-v0.2.2-blue)](https://github.com/heybeaux/parliament/releases/tag/v0.2.2-desktop)
 
-## Quick start
+Parliament is a multi-model **synthetic discourse engine**. Instead of asking one model for one answer, it convenes a panel of AI agents — each running on a different model via [OpenRouter](https://openrouter.ai) (or a local provider) — that deliberate a topic on a shared blackboard until they reach consensus, surface an irreconcilable split, or hit a round limit. The engine injects adversarial critique on a schedule, monitors for echo loops, scores unresolved conflict, and persists every transcript.
+
+![Parliament deliberation view](docs/screenshots/deliberation.png)
+
+## The agents
+
+A default deliberation seats five agents:
+
+| Agent           | Role                                                                    |
+| --------------- | ----------------------------------------------------------------------- |
+| **Proposer**    | Opens with a clear, well-reasoned initial position                      |
+| **Skeptic**     | Challenges assumptions, identifies logical gaps                         |
+| **Synthesizer** | Reconciles conflicts into a unified view — or marks the split as irreconcilable |
+| **Red Agent**   | Adversarial injection every N rounds to disrupt premature consensus     |
+| **Sentry**      | Echo-loop and convergence monitor; can terminate a collapsing debate    |
+
+Each agent runs on its own model, so a debate is genuinely multi-model — e.g. Qwen proposing, DeepSeek critiquing, Gemini synthesizing, Grok disrupting. Beyond the default cast, thirteen built-in **neurotypes** (Empiricist, Steelmanner, Devil's Advocate, Historian, Forecaster, Lateralist, Translator, …) can be composed into different debate shapes via **topology presets** — see [Presets](#presets), [docs/neurotypes.md](docs/neurotypes.md), and [docs/topology.md](docs/topology.md).
+
+The engine tracks an Opinion Shift Index (OSI) per agent to detect echo loops, weights unresolved conflicts into a residue score, and stores every deliberation in SQLite behind a REST API.
+
+## Desktop app (macOS)
+
+Parliament ships as a signed and notarized macOS desktop app — a Tauri shell that bundles the UI and a sidecar server on `localhost:3000`. No Node, pnpm, or TOML editing required.
+
+1. Download the DMG from the [v0.2.2-desktop release](https://github.com/heybeaux/parliament/releases/tag/v0.2.2-desktop).
+2. Drag Parliament to Applications and launch it.
+3. Open **Settings**, paste an OpenRouter API key ([get one here](https://openrouter.ai/keys)), and deliberate.
+
+The bundled default models are cheap and fast — a 3-round debate clears well under $0.05:
+
+| Role        | Default model                  |
+| ----------- | ------------------------------ |
+| Proposer    | `qwen/qwen3.6-flash`           |
+| Skeptic     | `deepseek/deepseek-v4-flash`   |
+| Synthesizer | `google/gemini-2.5-flash-lite` |
+| Red Agent   | `x-ai/grok-4.20`               |
+| Sentry      | `mistralai/mistral-nemo`       |
+
+### Per-agent model picker
+
+Every role's model can be swapped from **Settings → Models**, backed by the live OpenRouter catalog (proxied through `GET /models`). Changes persist to `~/.parliament/settings.json` and apply to the next deliberation — no environment variables or config-file edits needed.
+
+![Settings with per-agent model picker](docs/screenshots/settings-model-picker.png)
+
+### Deliberation history
+
+The history panel lists every stored deliberation with its preset and outcome, paginated 15 at a time.
+
+<img src="docs/screenshots/history-pagination.png" alt="Paginated deliberation history" width="340">
+
+## Quickstart (development)
+
+Requires Node 20+ and pnpm 10 (pinned via the `packageManager` field — `corepack enable` picks it up automatically).
 
 ```bash
+git clone https://github.com/heybeaux/parliament.git
+cd parliament
 pnpm install
-pnpm build
+pnpm build          # tsc project references: core, server, cli
+```
 
-# Run a deliberation locally (requires oMLX running at http://localhost:8080/v1)
+Run the server (REST API on port 3000 by default):
+
+```bash
+node packages/server/dist/index.js
+```
+
+Run the web UI (Vite dev server on port 5173, proxies `/api` to the server — override the target with `PARLIAMENT_SERVER`):
+
+```bash
+pnpm --filter @parliament/ui dev
+```
+
+Run a deliberation from the CLI:
+
+```bash
 node packages/cli/dist/index.js deliberate "Should we adopt a four-day work week?"
 
-# Pick a different deliberation shape (a "preset") for this run:
+# Pick a different debate shape for this run:
 node packages/cli/dist/index.js deliberate --preset jury "Should we adopt a four-day work week?"
 ```
 
 The CLI is exposed as `parliament` once published; until then invoke the built entry directly.
 
-### Choosing a deliberation type
-
-Every run uses one **topology preset** — the shape of the debate (which neurotypes speak, in what order, and which run in parallel). Three places to set it:
-
-- **Web UI** — start the React dev server with `pnpm --filter @parliament/ui dev` and use the **preset picker** at the top of the New Deliberation form. Pick a preset from the dropdown (or click a color chip), enter a topic, optionally expand "Add context" to paste a brief, and submit. Live turns stream in over SSE as each agent fires; when the Synthesizer terminates the run, the completed deliberation renders in place. The picker reads `GET /presets` from the server, so any user-defined presets in `parliament.toml` show up alongside the seven built-ins.
-- **CLI** — pass `--preset <id>` to `parliament deliberate`. Example: `parliament deliberate --preset chain-of-verifiers "Is this load-shedding plan sound?"`. Unknown values exit `1` with a "did you mean …?" suggestion.
-- **`parliament.toml`** — set `[topology] active = "<id>"` to make a preset the default for every run. The CLI flag and the `POST /deliberate` `preset` field both override this per-run.
-
-Skip to the [Presets table](#presets) for the seven built-in shapes, or read **[docs/topology.md](docs/topology.md)** for the parallel-step semantics and order-bias rationale. The thirteen built-in neurotypes are catalogued in **[docs/neurotypes.md](docs/neurotypes.md)**.
-
 ## Configuration
 
-All configuration lives in `parliament.toml` at the repository root. The loader reads from `process.cwd()`; override the path with `PARLIAMENT_CONFIG=/path/to/config.toml` or `--config <path>` on the CLI.
+### OpenRouter API key
+
+The easiest path is the **Settings panel** in the UI — paste your key once and it's stored in `~/.parliament/settings.json`. The `OPENROUTER_API_KEY` environment variable also works and takes precedence for power users. A missing key throws a clear startup error naming the variable, not a 401 mid-deliberation.
+
+### Models
+
+Pick per-agent models in **Settings → Models** (see above). For headless setups, per-neurotype `model` / `provider` overrides live in `parliament.toml`.
+
+### `parliament.toml`
+
+Engine-level configuration lives in `parliament.toml` at the repository root. The loader reads from `process.cwd()`; override the path with `PARLIAMENT_CONFIG=/path/to/config.toml` or `--config <path>` on the CLI. The desktop app ships with `parliament.desktop.toml`, which runs every role on OpenRouter.
 
 ```toml
 [parliament]
@@ -39,86 +109,55 @@ red_agent_interval    = 2      # inject the disruptor every N rounds
 osi_enabled           = true   # echo-loop detection on per-role transcripts
 server_port           = 3000   # REST server port
 
-# Pick the default deliberation shape. Built-in presets:
-#   debate, star-chamber, chain-of-verifiers, socratic, long-view, reframe, jury
-# Override per-run via the CLI `--preset` flag or the POST /deliberate body.
+# Default deliberation shape (override per-run via --preset or the request body)
 [topology]
-active = "jury"
+active = "debate"
 
-# Customize a built-in neurotype — here, give the Proposer a different model
-# and prompt without touching the topology. The three infrastructure roles
-# (synthesizer, redAgent, sentry) are wired by the engine and configured the
-# same way.
-[neurotypes.proposer]
-model    = "gemma-4-31b-it-8bit"
-provider = "omlx"
-system_prompt = "You are a structured reasoner. ..."
-
-# ...other neurotype overrides follow the same shape
-```
-
-A `[neurotypes.<id>]` block declares which model and prompt to use for that neurotype. The infrastructure roles (`synthesizer`, `redAgent`, `sentry`) are always wired by the engine. Steppable neurotypes only need a block when the active preset references them — see [the preset table below](#presets) and **[docs/neurotypes.md](docs/neurotypes.md)** for the full roster. Multiple neurotypes may share a model; the scheduler groups same-model agents into batches to minimise model swaps.
-
-Switch the LLM provider via `PARLIAMENT_PROVIDER` or per-neurotype `provider` field: `ollama`, `lm_studio`, `omlx` (default for this config), or `openrouter`. Set `OMLX_BASE_URL` to point at your oMLX instance (default: `http://localhost:8080/v1`).
-
-#### OpenRouter
-
-[OpenRouter](https://openrouter.ai) is an OpenAI-API-compatible router for hosted models — opt in per-neurotype to mix paid hosted models with local ones in the same deliberation. Browse the catalog at [openrouter.ai/models](https://openrouter.ai/models).
-
-```toml
+# Per-neurotype model / provider / prompt overrides
 [neurotypes.skeptic]
 provider = "openrouter"
-model    = "anthropic/claude-3.5-sonnet"
+model    = "deepseek/deepseek-v4-flash"
 ```
 
-Required env: `OPENROUTER_API_KEY`. Optional: `OPENROUTER_BASE_URL` (default `https://openrouter.ai/api/v1`), and the attribution headers `OPENROUTER_HTTP_REFERER` / `OPENROUTER_X_TITLE` (sent only when set). Missing the API key throws a clear startup error naming the env var, not a 401 mid-deliberation. See `.env.example` for the full list.
+### Providers
+
+OpenRouter is the primary provider, but the adapter layer also supports local backends — set `provider` per neurotype (or `PARLIAMENT_PROVIDER` globally) to `openrouter`, `ollama`, `lm_studio`, or `omlx`.
+
+## Presets
+
+Topology presets compose neurotypes into reusable deliberation shapes. Pick one with `--preset <id>` (CLI), `preset` in the `POST /deliberate` body, the preset picker in the UI, or `[topology].active` in `parliament.toml`. Rationale and parallel-step semantics live in [docs/topology.md](docs/topology.md).
+
+| Preset               | Shape                                                              | Pick when                                                                              |
+| -------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| `debate`             | Proposer → Skeptic                                                 | Quick directional reads on a focused question. The default.                             |
+| `star-chamber`       | Proposer → Skeptic → Devil's Advocate → Empiricist                 | Sequential interrogation — each critic builds on the prior one's framing.               |
+| `chain-of-verifiers` | Proposer → Empiricist → Steelmanner → Skeptic                      | Claim-checking pipelines where each step verifies the prior turn.                       |
+| `socratic`           | Translator → Empiricist → Skeptic                                  | Surfacing hidden assumptions before stress-testing them.                                |
+| `long-view`          | Historian → Proposer → Forecaster → Pragmatist                     | Decisions whose consequences play out over years.                                       |
+| `reframe`            | Lateralist → Translator → Steelmanner                              | Stuck framings — forces a structural shift before anyone defends a position.            |
+| `jury`               | Proposer, then four critics **in parallel**                        | Avoiding first-speaker order bias — critics fire concurrently against one snapshot.     |
+| `adversarial`        | Proposer → Adversary → Empiricist → Pragmatist                     | Failure-mode-first review of a feature or decision — assumes it ships, asks what breaks. |
+
+User-defined presets are authored under `[topology.presets.<id>]` in `parliament.toml` and show up in the UI picker alongside the built-ins.
 
 ## REST API
 
-```bash
-node packages/server/dist/index.js
-```
+The server binds to `[parliament].server_port` (default 3000, `PORT` env override) on loopback by default. All routes are mounted at both `/` and `/api` (the UI and desktop webview use the `/api` prefix).
 
-The server binds to `parliament.server_port` (3000 by default) or the `PORT` env var if set, on the host configured under `[server].host` (default `127.0.0.1` — loopback only).
+| Endpoint                    | Description                                                        |
+| --------------------------- | ------------------------------------------------------------------ |
+| `POST /deliberate`          | Run a deliberation. Body: `{ topic, preset?, config? }`.           |
+| `GET  /deliberate/:id`      | Fetch a stored deliberation.                                       |
+| `GET  /deliberate/:id/stream` | SSE stream of live turns.                                        |
+| `GET  /deliberations`       | Paginated list of stored deliberations.                            |
+| `GET  /presets`             | Topology preset registry plus the active default.                  |
+| `GET  /models`              | Proxied OpenRouter model catalog (feeds the Settings picker).      |
+| `GET  /settings` · `PUT /settings/models` | Read settings / persist per-role model overrides.   |
+| `POST /ideate` · `GET /ideate/:id`         | Multi-model ideation workflow.                      |
+| `POST /brainstorm` · `GET /brainstorm/:id` | Divergent generation + adversarial ranking.         |
+| `GET  /health`              | Probe each role's model adapter for connectivity.                  |
 
-| Endpoint                | Description                                            |
-| ----------------------- | ------------------------------------------------------ |
-| `POST /deliberate`      | Run a new deliberation. Body: `{ topic, preset?, config? }`. |
-| `GET  /deliberate/:id`  | Fetch a stored deliberation by UUID.                   |
-| `POST /ideate`          | Run an ideation on an idea. Body: `{ idea, mode?, style?, confirm? }`. See [Ideate](#ideate). |
-| `GET  /ideate/:id`      | Fetch a stored ideation by UUID.                       |
-| `GET  /presets`         | List the topology preset registry plus the active default. |
-| `GET  /health`          | Probe each model's adapter for connectivity.           |
-
-#### Preset precedence
-
-`POST /deliberate` resolves the preset to use in this order:
-
-1. `request.preset` — wins when supplied. Unknown values return `400` with a list of available preset IDs.
-2. `[topology].active` from `parliament.toml` — used when the request omits `preset`.
-3. `debate` — falls back here when `[topology]` is absent or `active` is unset (matches the loader's default-fallback rule).
-
-`GET /presets` returns `{ presets, defaultPreset }`. Each entry carries the full required metadata (`id`, `name`, `description`, `best_for`) plus its step list, so clients can render a picker without a second round-trip.
-
-### Hardening
-
-The server is locked down to a localhost-only profile by default. Override via `[server]` in `parliament.toml` or the matching env vars:
-
-```toml
-[server]
-host                 = "127.0.0.1"                                  # PARLIAMENT_SERVER_HOST
-cors_origins         = ["http://localhost:*", "http://127.0.0.1:*"] # PARLIAMENT_CORS_ORIGINS (comma-separated)
-rate_limit_concurrent = 1                                           # PARLIAMENT_RATE_LIMIT_CONCURRENT
-rate_limit_per_hour   = 10                                          # PARLIAMENT_RATE_LIMIT_PER_HOUR
-```
-
-To expose the API beyond loopback set `host = "0.0.0.0"` **and** explicitly set `cors_origins` to your real allowlist; the localhost defaults are not auto-expanded.
-
-Set `PARLIAMENT_API_KEY=<secret>` to require `Authorization: Bearer <secret>` on every route (timing-safe compare). When unset, the server logs a warning at startup and accepts unauthenticated requests so localhost dev works out of the box. `POST /deliberate` is rate-limited per client IP using the values above.
-
-`config` accepts `maxRounds`, `redAgentInterval`, and `confidenceThreshold` overrides; anything omitted falls back to the values in `parliament.toml`. `preset` accepts any registered preset id (built-in or user-defined). Results are persisted to a SQLite file (`parliament.db`) in the working directory.
-
-Example:
+The server is hardened by default: loopback-only host, localhost CORS allowlist (plus Tauri webview origins), per-IP rate limits on `POST /deliberate`, and optional bearer auth via `PARLIAMENT_API_KEY`. Override under `[server]` in `parliament.toml`. Results persist to a SQLite file (`parliament.db`).
 
 ```bash
 curl -s -X POST http://localhost:3000/deliberate \
@@ -129,307 +168,27 @@ curl -s -X POST http://localhost:3000/deliberate \
 ## CLI
 
 ```
-parliament deliberate <topic> [options]
-  --preset <name>           Override [topology].active for this run
-  --max-rounds <n>          Override [parliament].max_rounds
-  --model-proposer <id>     Override the Proposer's model
-  --model-skeptic <id>      Override the Skeptic's model
-  --config <path>           Use a specific parliament.toml
-
-parliament get <id>
-  Fetch a previously-saved deliberation from the server.
-  Server URL is read from PARLIAMENT_SERVER_URL (default http://localhost:3030).
-
-parliament ideate <idea>
-  Run a multi-model ideation. See the Ideate section below for sub-modes,
-  styles, lineup, and TOML overrides.
+parliament deliberate <topic> [--preset <id>] [--max-rounds <n>] [--config <path>]
+parliament get <id>                # fetch a stored deliberation from the server
+parliament ideate <idea>           # multi-model ideation (cooperative / adversarial / full)
+parliament brainstorm <prompt>     # divergent generation + adversarial ranking [--forge]
 ```
 
-`--preset` accepts any registered preset id (built-in or user-defined). Unknown values exit `1` with a `did you mean "X"?` suggestion plus the alphabetized list of available presets — the same format the loader emits when `[topology].active` points at a non-existent preset. When omitted, the CLI uses `[topology].active` from `parliament.toml`, falling back to `debate`. The default `debate` path is byte-identical to legacy runs; any non-default preset routes through the topology runtime.
+`deliberate` streams a colored transcript turn-by-turn, then prints either a SYNTHESIS section (consensus) or an UNRESOLVED SPLIT section, followed by the residue score and termination reason. Unknown `--preset` values exit `1` with a "did you mean …?" suggestion.
 
-The deliberate command streams a colored transcript turn-by-turn, then prints either a SYNTHESIS section (consensus) or an UNRESOLVED SPLIT section (irreconcilable positions), followed by the residue score and termination reason.
-
-## Presets
-
-Topology presets compose neurotypes into reusable deliberation shapes. Pick one with `--preset <id>` (CLI), `preset` in the `POST /deliberate` body, or by setting `[topology].active` in `parliament.toml`. The full topology rationale, parallel-step semantics, and order-bias notes live in **[docs/topology.md](docs/topology.md)**.
-
-| Preset               | Shape                                                              | Pick when                                                                                                              |
-| -------------------- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| `debate`             | Proposer → Skeptic                                                 | You want the original, byte-identical Parliament debate. The default when `[topology]` is absent.                      |
-| `star-chamber`       | Proposer → Skeptic → Devil's Advocate → Empiricist                 | Sequential interrogation. Each critic builds on the prior one's framing.                                               |
-| `chain-of-verifiers` | Proposer → Empiricist → Steelmanner → Skeptic                      | Claim-checking pipelines where each step verifies the prior turn before advancing.                                     |
-| `socratic`           | Translator → Empiricist → Skeptic                                  | Surfacing hidden assumptions before stress-testing them.                                                               |
-| `long-view`          | Historian → Proposer → Forecaster → Pragmatist                     | Decisions whose consequences play out over years — precedent in, constraint out.                                       |
-| `reframe`            | Lateralist → Translator → Steelmanner                              | Stuck framings. Forces a structural shift before anyone defends a position.                                            |
-| `jury`               | Proposer, then **{Skeptic, Empiricist, Steelmanner, Devil's Advocate}** in parallel | Use Jury when you don't want the first speaker's framing to dominate the room — four critics fire concurrently against one snapshot. |
-
-Built-in presets always include their full metadata (`name`, `description`, `best_for`, step list, plus `requires_neurotypes` / `missing_neurotypes`) under `GET /presets`, so a UI picker can render them without a second round-trip. User-defined presets author the same fields under `[topology.presets.<id>]`.
-
-## Brainstorm
-
-Parliament's `/brainstorm` mode is a **divergent-generation + adversarial-ranking workflow** for open-ended idea generation. Where `/ideate` refines a single candidate idea through cooperative build and adversarial critique, **brainstorm** generates a fan of distinct ideas, deduplicates them, clusters them, and scores them across multiple criteria with author-aware judge skipping — so no judge scores an idea it authored.
-
-### Pipeline
-
-```
-divergent-generation → idea-dedupe → idea-cluster → idea-rank → [forge-elaboration]
-```
-
-Each phase records a `BrainstormPhaseRecord` (`phase`, `timestamp`, phase-specific payload) that persists in real time.
-
-### Modes
-
-| Mode              | Description                                                                          |
-| ----------------- | ------------------------------------------------------------------------------------ |
-| `brainstorm`      | Runs divergent generation through ranking; returns phases + rankings.                |
-| `brainstorm/forge`| Same pipeline plus a parallel forge-elaboration pass over the top-K ranked ideas.   |
-
-### Response shape
-
-`POST /brainstorm` and `POST /brainstorm/forge` both return `202 { id, status: 'running' }` immediately. Poll `GET /brainstorm/:id` for the completed record:
-
-```jsonc
-{
-  "id": "<uuid>",
-  "status": "complete",
-  "phases": [
-    { "phase": "divergent-generation", "timestamp": "...", "ideas": [...] },
-    { "phase": "idea-dedupe",          "timestamp": "...", "survivors": [...] },
-    { "phase": "idea-cluster",         "timestamp": "...", "clusters": {...} },
-    { "phase": "idea-rank",            "timestamp": "...", "scores": [...] }
-  ],
-  "rankings": [
-    { "idea_id": "...", "rank": 1, "score": 0.87, "scores_by_criterion": {...} }
-  ],
-  "elaborations": null   // present (array) only for brainstorm/forge runs
-}
-```
-
-> **Breaking change vs. the old alias:** Prior to `add-brainstorm-mode`, `POST /brainstorm` and `POST /brainstorm/forge` were aliases for `runIdeation()` and returned the ideate response shape. They now return the brainstorm shape above. See [CHANGELOG.md](CHANGELOG.md).
-
-### CLI
-
-```
-parliament brainstorm "<prompt>" [options]
-  --forge                   Run the forge-elaboration phase on top-K ideas
-  --k <n>                   Number of ideas to elaborate in forge mode (default 3)
-  --ideas-per-author <k>    Divergent fan-out per author (default 5)
-  --print-lineup            Print the resolved lineup (authors, judges, elaborator) and exit
-  --config <path>           Path to parliament.toml
-```
-
-```bash
-# Basic brainstorm
-parliament brainstorm "Ways to reduce meeting fatigue in remote teams"
-
-# With forge elaboration on the top 3 ideas
-parliament brainstorm "Ways to reduce meeting fatigue" --forge --k 3
-
-# Inspect the lineup before running
-parliament brainstorm "..." --print-lineup
-```
-
-### REST API
-
-| Endpoint                  | Description                                                                                         |
-| ------------------------- | --------------------------------------------------------------------------------------------------- |
-| `POST /brainstorm`        | Start a brainstorm run. Body: `{ prompt, ideasPerAuthor? }`. Returns `202 { id, status }`.          |
-| `POST /brainstorm/forge`  | Start a brainstorm + forge run. Body: `{ prompt, ideasPerAuthor?, k? }`. Returns `202 { id, status }`. |
-| `GET  /brainstorm/:id`    | Fetch a stored brainstorm by UUID. Returns phases, rankings, and (for forge) elaborations.          |
-
-### TOML overrides
-
-```toml
-[brainstorm]
-ideas_per_author = 5    # divergent fan-out per author; range [1, 20]
-
-[brainstorm.lineup]
-# Override authors, judges, and forge elaborator by model ID
-# (same partial-replace semantics as ideate.lineup)
-
-[brainstorm.rank.weights]
-# Partial-replace on default equal weights; auto-normalized to sum=1.0
-novelty     = 0.4
-feasibility = 0.3
-fit         = 0.2
-evidence    = 0.1
-
-[brainstorm.forge]
-k = 3   # number of top-ranked ideas to elaborate; range [1, 10]
-```
-
-Criteria: `novelty`, `feasibility`, `fit`, `evidence` (equal weights by default, auto-normalized if partially overridden).
-
-## Ideate
-
-Parliament's `/ideate` mode is a **second top-level workflow** parallel to deliberation. Where deliberation pits agents against a topic until they reach consensus, **ideate** runs a frontier-model lineup over a single product idea, gathers structured critique, and produces one synthesized ideation document. It bypasses the deliberation engine entirely (no rounds, no OSI, no Sentry) — the orchestrator drives a fixed phase pipeline instead.
-
-### Sub-modes
-
-| Sub-mode      | Phases run                                                                                  | Pick when                                                                              |
-| ------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `cooperative` | cooperative-build → synth                                                                   | You want pure expansion of an idea — no critique, no rebuttal. The default.            |
-| `adversarial` | cooperative-build → adversarial-critique → rebuttal-1 → rebuttal-2 → synth                  | You want structured critique with proposed fixes plus two rebuttal passes.             |
-| `full`        | Same as `adversarial`, but with all 8 frontier models on the lineup. **Requires confirm.**  | High-stakes ideas where the breadth of an 8-model lineup justifies the cost.           |
-
-### Styles
-
-| Style        | Behaviour in `cooperative-build`                                  | Pick when                                                                              |
-| ------------ | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `collective` | Each cooperative agent sees the prior contributions in order      | You want each agent to build on what came before. The default.                         |
-| `individual` | All cooperative agents fire in parallel against the bare idea     | You want unbiased independent takes — first-speaker framing doesn't dominate.          |
-
-### Default lineup
-
-The cooperative team is fixed at four roles (`proposer`, `expander`, `pragmatist`, `lateralist`); the adversarial team is `skeptic` + `devils-advocate`. Default models (override per-role via `[ideate.lineup]` in `parliament.toml`):
-
-| Sub-mode      | Cooperative team                                                                              | Adversarial team                                          | Synthesizer                  |
-| ------------- | --------------------------------------------------------------------------------------------- | --------------------------------------------------------- | ---------------------------- |
-| `cooperative` | Opus 4.6 / GPT-5 / Gemini 2.5 Pro / Grok 4                                                    | _none_                                                    | Opus 4.6                     |
-| `adversarial` | Same as cooperative                                                                           | Opus 4.6 + GPT-5                                          | Opus 4.6                     |
-| `full`        | All 8: Opus 4.6, GPT-5, Gemini 2.5 Pro, Grok 4, DeepSeek V3, Qwen3-Max, Llama-4-Maverick, Mistral-Large-2 | Opus 4.6 + GPT-5                                          | Gemini 2.5 Pro               |
-
-Inspect the resolved lineup before running with `parliament ideate "<idea>" --print-lineup`. It dumps the team and synth without making any model call.
-
-### CLI
-
-```
-parliament ideate <idea> [options]
-  --mode <name>             cooperative (default) | adversarial | full
-  --style <name>            collective (default) | individual
-  -y, --yes                 Skip the interactive cost prompt for --mode=full (required for scripted runs)
-  --print-lineup            Print the resolved lineup and exit without running
-  --config <path>           Path to parliament.toml
-  --poll-interval-ms <n>    Polling cadence (default 2000)
-  --poll-timeout-ms <n>     Hard timeout for the polling loop (default 600000)
-  --lattice                 Wrap each model call with @heybeaux/lattice-adapter-parliament
-                            for State Contract validation, Circuit Breaker enforcement, and
-                            ConsensusReducer-based agreement tracking. Off by default.
-  --audit-log <path>        JSONL audit log target when --lattice is set.
-                            Default: ./parliament-audit.jsonl
-```
-
-`--mode=full` is gated: the CLI prompts `[y/N]` interactively, or you can pass `--yes` for scripted runs. The HTTP surface enforces the same gate via `confirm: true` on the request body.
-
-### REST API
-
-| Endpoint           | Description                                                                                          |
-| ------------------ | ---------------------------------------------------------------------------------------------------- |
-| `POST /ideate`     | Start a new ideation. Body: `{ idea, mode?, style?, confirm? }`. Returns `202 { id, status }`.       |
-| `GET  /ideate/:id` | Fetch a stored ideation by UUID. Returns the full record including phases, lineup, synthesis, error. |
-
-`mode=full` requires `confirm: true` — without it the route returns `400 { error: { code: "confirm_required" } }`.
-
-```bash
-# cooperative is the default
-curl -s -X POST http://localhost:3030/ideate \
-  -H 'Content-Type: application/json' \
-  -d '{"idea": "browser extension that summarises long PRs"}' | jq .
-
-# full mode requires confirm:true
-curl -s -X POST http://localhost:3030/ideate \
-  -H 'Content-Type: application/json' \
-  -d '{"idea": "...", "mode": "full", "confirm": true}' | jq .
-```
-
-The route mints a UUID, persists a `running` row to the `ideations` table, and runs the orchestrator in the background. Concurrent duplicate submissions (same account + mode + style + idea, normalised) collapse to the same id within a 30s window.
-
-### TOML overrides
-
-Every model in the lineup is overridable via `parliament.toml`. Each role override **replaces** the default for that role — there is no field-level merging. Set only what you want to change:
-
-```toml
-[ideate.lineup.cooperative]
-proposer   = "anthropic/claude-opus-4-6"      # override one role; the other three keep their defaults
-lateralist = "x-ai/grok-4"
-
-[ideate.lineup.adversarial]
-skeptic         = "anthropic/claude-opus-4-6"
-devils-advocate = "openai/gpt-5"
-
-[ideate.lineup.full]
-# Full mode runs all 8 by default; override only the slots you want different.
-proposer = "anthropic/claude-opus-4-7"
-
-[ideate.synth]
-cooperative = "anthropic/claude-opus-4-6"
-adversarial = "anthropic/claude-opus-4-6"
-full        = "google/gemini-2.5-pro"
-```
-
-Run `parliament ideate "<idea>" --print-lineup --mode=<mode>` to verify the resolved lineup before spending the model call.
-
-### Cost guidance
-
-`cooperative` is the cheap default — four models for one cooperative-build pass plus a synth pass (~$0.05–$0.20 per run depending on idea size). `adversarial` adds two rebuttal rounds and an adversarial team (~$0.15–$0.40). `full` runs all 8 frontier models plus the adversarial team and two rebuttals — expect **$0.30–$1.00 per run**, which is why the confirm gate exists. Use `--print-lineup` to dry-run before committing.
-
-### Lattice integration
-
-When you pass `--lattice=true`, every model call (cooperative + adversarial + rebuttal) is routed through [`@heybeaux/lattice-adapter-parliament`](https://www.npmjs.com/package/@heybeaux/lattice-adapter-parliament). Each response is wrapped in a typed **State Contract**, validated through a tiered **Circuit Breaker** (`L1+L2` for cooperative roles, `L1` only for adversarial — they're contrarian by design), and the cooperative team's contracts are reduced through `ParliamentReducer` to surface an agreement ratio + structured conflicts.
-
-```bash
-# Cooperative ideation with full Lattice coordination
-pnpm parliament ideate "browser extension that summarises long PRs" --lattice
-
-# Custom audit log path
-pnpm parliament ideate "..." --lattice --audit-log ./logs/run-001.jsonl
-
-# Combine with other modes
-pnpm parliament ideate "..." --mode full --yes --lattice
-```
-
-Lattice is **opt-in** (default `false`) so existing users see no behavior change. When enabled, the synthesis output gains a "Lattice Coordination Report" block:
-
-```
-## Lattice Coordination Report
-- Trace ID: `01KR5HTC8179F69Y1JZJCX7S5M`
-- Agreement Ratio: 0.67
-- Consensus: Partial
-- Conflicts: 1 (mainPoint)
-- Model Pass Rates: anthropic/claude-opus-4-6 passed, openai/gpt-5 passed, google/gemini-2.5-pro failed (L1+L2)
-- Audit Log: `./parliament-audit.jsonl`
-```
-
-The audit log is plain **JSONL**, one record per wrapped model call:
-
-```json
-{"traceId":"01KR5...","agentId":"anthropic/claude-opus-4-6","role":"proposer","isAdversarial":false,"passed":true,"timestamp":"2026-05-08T17:32:01.123Z","contractId":"01KR5..."}
-```
-
-Defaults match the spec: `shadowMode: true` (Circuit Breaker failures never block a run), `minAgreementRatio: 0.6`, `consensusFields: ['mainPoint', 'supportingArguments', 'conclusion']`. The audit log lives at `./parliament-audit.jsonl` unless overridden via `--audit-log`. Compliance teams can ingest the file directly — every record is independently parseable and self-contained.
+`ideate` and `brainstorm` are separate top-level workflows that bypass the deliberation engine: ideate refines a single idea through a frontier-model lineup with structured critique and rebuttals; brainstorm fans out distinct ideas, deduplicates, clusters, and ranks them with author-aware judge skipping. Both support `--print-lineup` to inspect the resolved model lineup before spending a run, and both are configurable under `[ideate]` / `[brainstorm]` in `parliament.toml`.
 
 ## Architecture
 
-- **`@parliament/core`** — pure TypeScript engine. Contains `DeliberationEngine`, the thirteen built-in neurotype agent classes, the topology loader (presets, parallel-step support), model adapters (Ollama, LM Studio, OMLX, OpenRouter, OpenAI-compatible), the OSI calibration module, the model-aware scheduler, and the TOML config loader.
-- **`@parliament/server`** — Hono REST server backed by SQLite (better-sqlite3). Wires the engine to HTTP, exposes `GET /presets` for UI pickers, and persists every result.
-- **`@parliament/cli`** — Commander-based CLI that runs deliberations locally and fetches stored ones from the server.
-- **`@parliament/ui`** — React + Vite web client. Includes the preset picker, live SSE turn stream, and observability panel.
+pnpm workspace monorepo:
 
-`DeliberationEngine` exposes two paths. The default `debate` preset uses the legacy round-shape (Proposer round 1 only → Skeptic → Sentry → Synthesizer → Sentry → optional RedAgent) for byte-identical back-compat with pre-topology runs. Every other preset routes through `runTopology`, which executes the preset's `steps` (or `parallel_steps`) per round and threads Sentry + Synthesizer through the same termination logic. In both paths Sentry returns `COLLAPSE_DETECTED` to terminate on echo, and the Synthesizer's parsed confidence terminates on consensus.
+- **`packages/core`** (`@parliament/core`) — pure TypeScript engine: `DeliberationEngine`, the neurotype agent classes, topology loader, model adapters (OpenRouter, Ollama, LM Studio, oMLX), OSI calibration, model-aware scheduler, and TOML config loader.
+- **`packages/server`** (`@parliament/server`) — Hono REST server backed by SQLite (better-sqlite3). Wires the engine to HTTP, streams turns over SSE, proxies the OpenRouter catalog, and persists every result.
+- **`packages/cli`** (`@parliament/cli`) — Commander-based CLI.
+- **`packages/ui`** (`@parliament/ui`) — React + Vite client: preset picker, live SSE turn stream, observability panel, paginated history, and the Settings panel with the per-agent model picker.
+- **`src-tauri/`** — the macOS desktop shell. Bundles the UI and a sidecar build of the server (see `scripts/bundle-sidecar.sh`); the packaged app talks to the sidecar on `localhost:3000`.
 
-## Agents
-
-Parliament ships with thirteen built-in **neurotypes** — deliberation postures that topology presets compose from — plus three pieces of structural infrastructure (Synthesizer, Sentry, RedAgent). The full roster, their posture axes, and the non-obvious behaviors of each are documented in **[docs/neurotypes.md](docs/neurotypes.md)**.
-
-| Agent             | Posture                                                                            |
-|-------------------|------------------------------------------------------------------------------------|
-| Proposer          | Opens with a clear, well-reasoned initial position                                 |
-| Skeptic           | Challenges assumptions, identifies logical gaps                                    |
-| Historian         | Precedent-first — reasons from "what has happened"                                 |
-| Forecaster        | Forward-projection — likely consequences across time horizons                      |
-| Pragmatist        | Constraint-first — what is actually doable                                         |
-| Empiricist        | Evidence-first — distinguishes empirical claims from value judgments               |
-| Steelmanner       | Charity — constructs the strongest opposing case                                   |
-| Devil's Advocate  | Contrarian-to-consensus — anti-groupthink                                          |
-| Lateralist        | Structural analogy — cross-domain reframing                                        |
-| Translator        | Assumption-surfacing + plain-language gloss                                        |
-| Synthesizer       | _infrastructure_ — reconciles conflicts or marks irreconcilable splits             |
-| Red Agent         | _infrastructure_ — adversarial injection to disrupt premature consensus            |
-| Sentry            | _infrastructure_ — echo-loop + convergence monitor                                 |
-
-All agents run locally via [oMLX](https://github.com/openclaw/omlx). Set `OMLX_BASE_URL` if your instance isn't at the default `http://localhost:8080/v1`.
-
-Models and system prompts are configured in `parliament.toml` and can be swapped per-neurotype without touching code.
+In every preset, the Sentry can terminate on echo collapse and the Synthesizer's parsed confidence terminates on consensus. The default `debate` preset preserves the legacy round shape byte-for-byte; all other presets route through the topology runtime.
 
 ## Development
 
@@ -439,4 +198,4 @@ pnpm build        # tsc project references
 pnpm lint         # eslint
 ```
 
-Integration tests stub only the LLM call, exercising the real engine, real router, and a real in-memory SQLite database, so they run offline.
+Integration tests stub only the LLM call, exercising the real engine, real router, and a real in-memory SQLite database, so they run offline. CI runs lint · test · build on every push and PR to `main` via [GitHub Actions](.github/workflows/ci.yml).
