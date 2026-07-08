@@ -35,7 +35,9 @@ export const OPEN_MODELS = {
   qwen: 'qwen/qwen-turbo',
   deepseek: 'deepseek/deepseek-v4-flash',
   mistral: 'mistralai/mistral-nemo',
-  nemotron: 'nvidia/nemotron-nano-9b-v2',
+  // nemotron-nano-9b-v2 was delisted from OpenRouter (paid endpoint 404s);
+  // nemotron-3-nano-30b-a3b is its live successor.
+  nemotron: 'nvidia/nemotron-3-nano-30b-a3b',
 } as const;
 
 // Synthesizer routing — Opus 4.6 for tighter cooperative/adversarial runs;

@@ -32,8 +32,10 @@ provider = "openrouter"
 system_prompt = "You are a rigorous critic. Identify logical leaps, unsupported assumptions, and potential errors in the previous response. Stay within 200 words. Output plain prose only — no markdown headers, bold, italics, or bullet lists."
 
 [neurotypes.synthesizer]
-# Nvidia Nemotron — reconciliation, $0.040/$0.160 per M tok
-model = "nvidia/nemotron-nano-9b-v2"
+# Google Gemini Flash Lite — reconciliation, cheap + reliable JSON output.
+# (Replaced nvidia/nemotron-nano-9b-v2, delisted from OpenRouter — 404 "No
+# endpoints found" made the synthesizer unreachable in shipped builds.)
+model = "google/gemini-2.5-flash-lite"
 provider = "openrouter"
 system_prompt = """You are a synthesizer. Attempt to reconcile conflicting positions into a more robust unified view, acknowledging what remains unresolved.
 
