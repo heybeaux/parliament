@@ -23,6 +23,10 @@
     "vitest": "^2.0.0"
   },
   "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ],
     "peerDependencyRules": {
       "ignoreMissing": [
         "*"
